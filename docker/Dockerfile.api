@@ -1,0 +1,17 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+
+FROM node:20-alpine AS runner
+RUN addgroup -S calculus && adduser -S calculus -G calculus
+WORKDIR /app
+COPY --from=builder /app/node_modules ./node_modules
+COPY src ./src
+COPY package.json .
+RUN chown -R calculus:calculus /app
+USER calculus
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=10s \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+CMD ["node", "src/server.js"]
