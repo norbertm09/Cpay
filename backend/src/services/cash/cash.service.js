@@ -207,26 +207,11 @@ const collectRail = (gateway) => {
   } catch (e) { return { available: false, gateway }; }
 };
 
-// Passerelle carte configurée pour le pays du marchand (country_payment_defaults.default_card_gateway
-// active dans api_configurations, ou variables d'environnement de la passerelle).
+// Passerelle carte pour le pays du marchand : uniquement si un checkout HÉBERGÉ est réellement
+// utilisable (services/cash/card-link.service : migs / mpgs configurés par env) — sinon null → 410.
 async function cardGatewayFor(country) {
-  if (!country) return null;
-  let gw = null;
-  try {
-    const { getCountryDefaults } = require('../config/country-defaults');
-    const d = await getCountryDefaults(country);
-    gw = d && d.default_card_gateway ? String(d.default_card_gateway) : null;
-  } catch (e) { logger.warn('cash: country defaults unavailable', { err: e.message }); }
-  if (!gw) return null;
-  let active = false;
-  try {
-    const r = await query(`SELECT status FROM api_configurations WHERE provider_key=$1 AND provider_type='card_gateway'`, [gw]);
-    active = r.rows[0]?.status === 'active';
-  } catch (e) { /* table absente */ }
-  if (!active) {
-    try { active = !!require('../gateways/card.router').isConfigured(gw); } catch (e) { active = false; }
-  }
-  return active ? gw : null;
+  try { return await require('./card-link.service').hostedCardGatewayFor(country); }
+  catch (e) { logger.warn('cash: card gateway lookup failed', { err: e.message }); return null; }
 }
 
 // ─── Confirmation forte (step-up, §6) ─────────────────────────────

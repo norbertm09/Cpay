@@ -38,6 +38,9 @@ Formule du solde disponible : encaissements `authorized` non réglés + approvis
 - `card` : crée un lien de paiement hébergé (page `pay.c-pay.global`) qui accepte la carte si une passerelle
   carte est configurée pour le pays du marchand ; réponse `201 { "txnId": null, "status": "pending",
   "payLink": { "shortId", "shortUrl", "expiresAt" } }`. Sans passerelle : `410 FEATURE_DISABLED`.
+  Sur la page hébergée, le client est redirigé vers le checkout de la passerelle (MIGS ou MPGS, aucun PAN sur
+  C-Pay) : `POST /pay/:shortId/card → { redirectUrl }`, retour sur `/pay/:shortId/return`, statut public
+  `GET /pay/:shortId/status → { status: paid|pending|failed|expired|cancelled }`.
   Tap-to-Phone reste `410` tant que la certification n'est pas obtenue.
 - `429` limites, `422 VALIDATION_ERROR`, `403 MERCHANT_INACTIVE`.
 

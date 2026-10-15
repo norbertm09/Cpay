@@ -453,7 +453,7 @@ const handleAirtelWebhook = async (req, res) => {
 
 const findMerchantTxn = async (orderId) => {
   const r = await query(
-    `SELECT transaction_id, merchant_id, amount, currency, status
+    `SELECT transaction_id, merchant_id, amount, currency, status, pay_link_id
        FROM transactions
       WHERE gateway_payment_id=$1 OR gateway_order_id=$1 OR transaction_id::text=$1
       ORDER BY initiated_at DESC LIMIT 1`,
@@ -503,8 +503,8 @@ const applyMerchantPspResult = async ({ provider, orderId, isAuthorized, authCod
   if (isAuthorized) {
     await query(
       `UPDATE pay_links SET status='paid', paid_at=NOW(), paid_amount=$1
-       WHERE (short_id=$2 OR pay_link_id::text=$2) AND status='pending'`,
-      [Number(amount) > 0 ? Number(amount) : Number(txn.amount), String(orderId)]
+       WHERE (short_id=$2 OR pay_link_id::text=$2 OR pay_link_id::text=$3) AND status='pending'`,
+      [Number(amount) > 0 ? Number(amount) : Number(txn.amount), String(orderId), txn.pay_link_id ? String(txn.pay_link_id) : '']
     ).catch(() => {});
   }
   return { code: 200, applied: true, isAuthorized, body: { received: true, applied: true, status: newStatus } };
@@ -685,6 +685,8 @@ module.exports = {
   handleCyberSourceWebhook,
   handleMigsWebhook,
   triggerMerchantWebhook,
+  // WAVE-4 : retour navigateur du checkout carte hébergé (services/cash/card-link.service)
+  applyMerchantPspResult, findMerchantTxn, minorToMajor,
   // Helpers partagés (routes momo / card2momo / tests)
   applyCardTxnProviderStatus,
   findCardTxnByReference,

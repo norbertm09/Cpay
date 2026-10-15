@@ -62,7 +62,37 @@ aucune ligne `failed`), et `/balance` renvoie la devise du marchand.
 `CASH_TRANSFER_EXECUTED`, `CASH_TRANSFER_REJECT`, `CASH_PLATFORM_ACCOUNT_*`) + événement JSONB + e-mail marchand.
 Les anciennes routes `/admin/settlements/*` (rôle `finance_admin`) continuent de traiter `pending_settlement`.
 
-### 1.4 Autres
+### 1.4 Paiement par carte sur la page hébergée (`pay.c-pay.global`) — checkout redirigé
+Aucun PAN ne transite par C-Pay. `services/cash/card-link.service.js` + `server.js` :
+- `POST /api/v1/pay/:shortId/card` (limiteur public) : lien `pending` non expiré → transaction `pending`
+  (`type=collect`, `payment_method=pay_link`, `pay_link_id`, `gateway_name`, `gateway_order_id=<shortId>-<ts>`
+  unique par tentative) via `orchestrator.createTransactionRecord`, puis session de checkout hébergé →
+  `{ success, txnId, gateway, redirectUrl }`. `410 CARD_PAYMENT_DISABLED` sans passerelle hébergée configurée
+  (ou si un PAN/CVV est envoyé), `409 LINK_NOT_PAYABLE`, `502 GATEWAY_ERROR` (transaction marquée `failed`).
+- `GET /pay/:shortId/return` (alias `/:shortId/return`) : page de retour/annulation. **MIGS** : les `vpc_*` signés
+  (`vpc_SecureHash`, `MIGS_SECURE_HASH`, `MIGS_HASH_TYPE`) sont vérifiés puis appliqués par
+  `webhook-handlers.applyMerchantPspResult` (même machine d'état que `handleMigsWebhook` : claim `pending`,
+  contrôle montant/devise, `pay_links.paid`, `transaction_events MIGS_CALLBACK`). **MPGS** : `resultIndicator`
+  comparé au `successIndicator` journalisé (`transaction_events CARD_CHECKOUT_CREATED`) **et** `getOrder(orderId)`
+  côté serveur ; seul `result=SUCCESS` + indicateur valide autorise. Preuve invérifiable → reste `pending`
+  (le webhook MIGS / une réconciliation finalisent) ; la page interroge `GET /api/v1/pay/:shortId/status`
+  toutes les 3 s (30 essais).
+- `GET /api/v1/pay/:shortId/status` → `{ status: paid|pending|failed|expired|cancelled, txnId, txnStatus, gateway }`.
+- Page de paiement : plus aucun champ carte ; bouton « Payer par carte » → `/card` → redirection. L'ancien
+  `POST /api/v1/pay/:shortId` continue de refuser toute donnée carte (410).
+- Gateways : `migs.gateway.createHostedCheckout/parseHostedReturn/hostedConfigured` (VPC 3-Party, `vpc_ReturnURL`,
+  montant sans décimales pour XOF/XAF/CDF comme `minorToMajor`), `mpgs.gateway.createHostedCheckout/hostedConfigured`
+  (`INITIATE_CHECKOUT`, redirection `/checkout/pay/{session}`). `webhook-handlers.applyMerchantPspResult` marque
+  aussi `pay_links` par `transactions.pay_link_id`.
+- **Ce qui est réellement payable par carte** : un lien dont le marchand est dans un pays dont
+  `country_payment_defaults.default_card_gateway` vaut `migs` (défaut de tous les pays) avec
+  `MIGS_MERCHANT_ID`, `MIGS_ACCESS_CODE`, `MIGS_SECURE_HASH` (+ `MIGS_HOST/PATH/HASH_TYPE` selon la banque)
+  renseignés ; ou `mpgs` avec `MPGS_MERCHANT_ID`, `MPGS_API_PASSWORD` (+ `MPGS_HOST`). CyberSource, Stripe,
+  GIMAC, Interswitch : pas de checkout hébergé branché → `410` (collect caisse et page). Le statut `active`
+  d'`api_configurations` ne suffit pas (les modules carte lisent l'environnement) ; `cardAcceptance` et
+  `POST /cash/collect {method:'card'}` suivent exactement cette règle.
+
+### 1.5 Autres
 - `orchestrator.processTransaction` accepte `operatorOverride` (Wave, Express Union) transmis à `detectFromPhone`.
 - `server.js` : routeurs montés avant `/api/v1/admin` et `/api/v1/merchant` ; log de démarrage et `/health`
   lisent la version de `package.json` ; `config/database.js` `application_name` = `cpay-api` ; e-mail de bienvenue
@@ -113,7 +143,8 @@ re-interrogation (`GET /cash/collect/:id` → `reconcileOne` ; `GET /cash/transf
 | Vodacom M-Pesa CD | oui | routeur MM si config | **non** | **non** |
 | Interswitch wallet CD | oui | **410** (collecte seule) | non | — |
 | PaymentHub CD | oui | routeur MM si config | partiel | partiel |
-| Carte | lien hébergé si passerelle active pour le pays (`migs` par défaut) — **la page publique `/api/v1/pay/:shortId` refuse encore la carte (410)** | — | — | — |
+| Carte (MIGS / MPGS) | lien hébergé → checkout redirigé si `MIGS_*` ou `MPGS_*` configurés pour la passerelle du pays (§1.4) | — | retour signé / `getOrder` + webhook MIGS | — |
+| Carte (CyberSource, Stripe, GIMAC, Interswitch) | **410** — pas de checkout hébergé | — | — | — |
 
 Reste **manuel** : virements `wallet_to_bank` (`pending_manual`, exécutés par les opérations, `mark-executed`),
 réception des approvisionnements (`confirm-funds`), retraits dont l'opérateur n'a pas d'endpoint de statut
@@ -127,8 +158,10 @@ branché aujourd'hui, voir §5).
 - `calc_fee()` et `merchant_fees` sont référencés par `merchant.routes.js` (statut MTN/Airtel) mais n'existent
   dans aucune migration ; la caisse n'en dépend pas (barème interne de repli).
 - Compteur step-up en mémoire (par processus) — comme les rate limiters (WAVE-3 §1.5).
-- Carte : le lien est créé mais la page publique ne prend pas encore la carte (`CARD_PAYMENT_DISABLED`) ;
-  `cardAcceptance` reflète seulement la configuration de la passerelle.
+- Carte : MPGS n'a pas de webhook branché (finalisation au retour navigateur via `getOrder`) ; une transaction
+  MPGS dont le client ferme la page avant le retour reste `pending` (à couvrir par une réconciliation `getOrder`).
+  Les paramètres MIGS/MPGS n'ont pas pu être testés contre une banque réelle : valider `MIGS_HOST/PATH`,
+  `MIGS_HASH_TYPE` et la version d'API MPGS (`MPGS_API_VERSION` ≥ 57 pour `INITIATE_CHECKOUT`) en recette.
 - `POST /merchant/transfer/payout` (apps 2.7.0) continue de produire `pending_settlement` pour une banque ;
   l'admin caisse le traite comme `pending_manual`. À aligner quand les apps passeront sur `/cash/transfers`.
 - Liste admin / stats : pas d'index sur `merchant_transfers(direction, dest_type)` — ajouter si les volumes grimpent.

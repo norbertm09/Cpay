@@ -477,6 +477,9 @@ module.exports = {
   processTransaction,
   generateQRPayload,
   generatePayLink,
+  // WAVE-4 : checkout carte hébergé (même enregistrement de transaction que l'orchestrateur)
+  createTransactionRecord,
+  addTransactionEvent,
   TRANSACTION_TYPES,
   PAYMENT_METHODS,
 };

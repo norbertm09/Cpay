@@ -285,6 +285,42 @@ const ping = async () => {
   } catch (err) { return { ok: false, reason: err.message }; }
 };
 
+// ─── HOSTED CHECKOUT — MIGS Server-Hosted / VPC 3-Party (WAVE-4 caisse) ──
+// Le client est redirigé vers la page de paiement hébergée par la banque (aucun PAN côté C-Pay).
+// Retour navigateur sur vpc_ReturnURL avec les mêmes vpc_* signés (verifyResponseHash) ;
+// la finalisation serveur passe par routes/webhook-handlers.handleMigsWebhook / applyMerchantPspResult.
+const hostedConfigured = () => { const c = cfg(); return !!(c.merchantId && c.accessCode && c.secureHash); };
+
+const createHostedCheckout = ({ orderRef, amount, currency, description, returnUrl, locale }) => {
+  const c = cfg();
+  if (!hostedConfigured()) return { ok: false, reason: 'not_configured' };
+  const params = {
+    ...baseParams(orderRef),
+    vpc_Command:   'pay',
+    // XOF/XAF/CDF : pas de décimales (ISO 4217 exposant 0) — même convention que webhook-handlers.minorToMajor
+    vpc_Amount:    (['XOF', 'XAF', 'CDF'].includes(String(currency).toUpperCase()) ? Math.round(amount) : Math.round(amount * 100)).toString(),
+    vpc_Currency:  currency,
+    vpc_OrderInfo: String(description || orderRef).slice(0, 34),
+    vpc_ReturnURL: returnUrl,
+    ...(locale ? { vpc_Locale: locale } : {}),
+  };
+  const hash = computeSecureHash(params, c.secureHash);
+  const qs = new URLSearchParams({ ...params, vpc_SecureHash: hash, vpc_SecureHashType: c.hashType === 'SHA256' ? 'SHA256' : 'MD5' });
+  return { ok: true, redirectUrl: `https://${c.host}${c.path}?${qs.toString()}`, orderRef };
+};
+
+/** Retour navigateur (vpc_ReturnURL) : vérifie le hash et mappe la réponse. */
+const parseHostedReturn = (query) => {
+  const c = cfg();
+  const q = Object.fromEntries(Object.entries(query || {}).filter(([k]) => k.startsWith('vpc_')).map(([k, v]) => [k, String(v)]));
+  if (!c.secureHash || !q.vpc_SecureHash) return { valid: false, reason: 'missing_hash' };
+  let valid = false;
+  try { valid = verifyResponseHash(q, c.secureHash); } catch (e) { valid = false; }
+  if (!valid) return { valid: false, reason: 'bad_hash' };
+  return { valid: true, orderRef: q.vpc_MerchTxnRef, ...mapResponse(q, q.vpc_MerchTxnRef), rawCode: q.vpc_TxnResponseCode,
+    amountMinor: q.vpc_Amount, currency: q.vpc_Currency, authCode: q.vpc_AuthorisationCode || q.vpc_AuthorizeId || null };
+};
+
 // ─── Alias card.router ────────────────────────────────────────────
 const processPayment = async ({ txnId, amount, currency, emvPayload, network, type, deviceId }) =>
   purchase({ txnId, amount, currency, cardData: { encryptedData: emvPayload } });
@@ -360,4 +396,5 @@ const networkError = () => ({
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-module.exports = { processPayment, purchase, authorizeOnly, capture, refund, voidAuth, queryStatus, ping };
+module.exports = { processPayment, purchase, authorizeOnly, capture, refund, voidAuth, queryStatus, ping,
+  createHostedCheckout, parseHostedReturn, hostedConfigured, computeSecureHash, verifyResponseHash };

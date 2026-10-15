@@ -194,6 +194,42 @@ const getOrder = async (mpgsOrderId) => {
   } catch (err) { return { found: false }; }
 };
 
+// ─── HOSTED CHECKOUT — MPGS Hosted Checkout, mode redirection (WAVE-4 caisse) ──
+// INITIATE_CHECKOUT crée une session ; le client est redirigé vers la page de paiement
+// hébergée par Mastercard (/checkout/pay/{session.id}). Au retour, resultIndicator ===
+// successIndicator indique un succès, confirmé côté serveur par getOrder(orderId).
+const hostedConfigured = () => !!(process.env.MPGS_MERCHANT_ID && process.env.MPGS_API_PASSWORD);
+
+const createHostedCheckout = async ({ orderId, amount, currency, description, returnUrl, cancelUrl, merchantName }) => {
+  if (!hostedConfigured()) return { ok: false, reason: 'not_configured' };
+  const c = cfg();
+  try {
+    const { status, body } = await mpgsRequest('POST', 'session', {
+      apiOperation: 'INITIATE_CHECKOUT',
+      checkoutMode: 'PAYMENT_LINK',
+      interaction: {
+        operation: 'PURCHASE',
+        returnUrl, cancelUrl: cancelUrl || returnUrl,
+        merchant: { name: String(merchantName || 'C-Pay').slice(0, 40) },
+        displayControl: { billingAddress: 'HIDE' },
+      },
+      order: { id: orderId, amount: String(amount), currency, description: String(description || orderId).slice(0, 127) },
+    });
+    const sessionId = body?.session?.id;
+    if (status >= 300 || !sessionId || body?.result !== 'SUCCESS') {
+      logger.warn('MPGS INITIATE_CHECKOUT failed', { orderId, status, result: body?.result, error: body?.error });
+      return { ok: false, reason: body?.error?.explanation || body?.error?.cause || `HTTP ${status}` };
+    }
+    return {
+      ok: true, sessionId, successIndicator: body.successIndicator || null,
+      redirectUrl: `https://${c.host}/checkout/pay/${encodeURIComponent(sessionId)}?checkoutVersion=1.0.0`, orderId,
+    };
+  } catch (err) {
+    logger.error('MPGS INITIATE_CHECKOUT error', { orderId, err: err.message });
+    return { ok: false, reason: err.message };
+  }
+};
+
 // ─── PING ─────────────────────────────────────────────────────────
 const ping = async () => {
   if (!cfg().merchantId) return { ok: false, reason: 'not_configured' };
@@ -244,4 +280,4 @@ const networkError = () => ({
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-module.exports = { processPayment, authorizeCard, capture, refund, voidAuth, getOrder, ping };
+module.exports = { processPayment, authorizeCard, capture, refund, voidAuth, getOrder, ping, createHostedCheckout, hostedConfigured };

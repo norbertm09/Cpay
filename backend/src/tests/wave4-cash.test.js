@@ -106,8 +106,14 @@ const txHandlers = ({ collected = 100000, pending = 0, withdrawn = 0, reserved =
   [/INSERT INTO merchant_transfers/, [{ transfer_id: TRANSFER_ID, created_at: new Date('2026-10-15T10:00:00Z') }]],
 ];
 
+const withMigsEnv = (on) => {
+  if (on) { process.env.MIGS_MERCHANT_ID = 'MER1'; process.env.MIGS_ACCESS_CODE = 'ACC1'; process.env.MIGS_SECURE_HASH = 'a'.repeat(64); }
+  else { delete process.env.MIGS_MERCHANT_ID; delete process.env.MIGS_ACCESS_CODE; delete process.env.MIGS_SECURE_HASH; }
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
+  withMigsEnv(false);
   mockDbQuery.mockReset(); mockDbQuery.mockImplementation(async () => rows([]));
   mockTxQuery.mockReset(); mockTxQuery.mockImplementation(async () => rows([]));
   mockGetProvider.mockReturnValue({ collectPayment: jest.fn(), sendPayout: jest.fn(), getStatus: jest.fn() });
@@ -191,15 +197,19 @@ describe('2. GET /merchant/cash/summary et /merchant/balance (solde avec approvi
     expect(res.body.profile).toMatchObject({ kybLevel: 1, wallet: { operator: 'mtn_momo', phone: '+237670000001', verifiedAt: null }, bankAccounts: 1, cardAcceptance: 'unavailable' });
   });
 
-  test('summary : cardAcceptance=link quand la passerelle carte du pays est active', async () => {
+  test('summary : cardAcceptance=link seulement si la passerelle carte hébergée du pays est configurée (env MIGS)', async () => {
     mockDbQuery.mockImplementation(dbRouter([
       [/FROM country_payment_defaults/, [{ country: 'CM', currency: 'XAF', default_card_gateway: 'migs' }]],
       [/FROM api_configurations WHERE provider_key/, [{ status: 'active' }]],
       ...summaryHandlers(),
     ]));
-    const res = await request(app).get('/merchant/cash/summary').set(bearer(merchantToken()));
+    let res = await request(app).get('/merchant/cash/summary').set(bearer(merchantToken()));
     expect(res.status).toBe(200);
+    expect(res.body.profile.cardAcceptance).toBe('unavailable'); // "active" en base ne suffit pas : module non configuré
+    withMigsEnv(true);
+    res = await request(app).get('/merchant/cash/summary').set(bearer(merchantToken()));
     expect(res.body.profile.cardAcceptance).toBe('link');
+    withMigsEnv(false);
   });
 
   test('GET /merchant/balance (route historique) utilise la même formule, avec les approvisionnements', async () => {
@@ -280,18 +290,23 @@ describe('3. POST /merchant/cash/collect', () => {
     expect(res.status).toBe(403); expect(res.body.code).toBe('MERCHANT_INACTIVE');
   });
 
-  test('card : 410 sans passerelle ; lien de paiement carte (payment_method=card) avec passerelle active', async () => {
+  test('card : 410 sans passerelle hébergée ; lien de paiement carte (payment_method=card) avec MIGS configuré', async () => {
+    mockDbQuery.mockImplementation(dbRouter([
+      [/FROM country_payment_defaults/, [{ country: 'CM', currency: 'XAF', default_card_gateway: 'migs' }]],
+      ...baseHandlers(),
+    ]));
     let res = await request(app).post('/merchant/cash/collect').set(bearer(merchantToken())).send({ amount: 5000, method: 'card' });
     expect(res.status).toBe(410); expect(res.body.code).toBe('FEATURE_DISABLED');
     expect(calls(mockDbQuery, /INSERT INTO pay_links/)).toHaveLength(0);
 
+    withMigsEnv(true);
     mockDbQuery.mockImplementation(dbRouter([
       [/FROM country_payment_defaults/, [{ country: 'CM', currency: 'XAF', default_card_gateway: 'migs' }]],
-      [/FROM api_configurations WHERE provider_key/, [{ status: 'active' }]],
       [/INSERT INTO pay_links/, (sql, p) => rows([{ pay_link_id: p[0], short_id: p[2], short_url: p[6], expires_at: p[7] }])],
       ...baseHandlers(),
     ]));
     res = await request(app).post('/merchant/cash/collect').set(bearer(merchantToken())).send({ amount: 5000, method: 'card', description: 'Table 4' });
+    withMigsEnv(false);
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ txnId: null, status: 'pending', method: 'card', gateway: 'migs', currency: 'XAF' });
     expect(res.body.payLink.shortId).toMatch(/^[A-Z2-9]{8}$/);
