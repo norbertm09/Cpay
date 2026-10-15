@@ -1,7 +1,7 @@
 // C-Pay 2.7.0 — Merchant Portal
 import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { api, setAccessToken, getAccessToken, authListeners, refreshAccessToken, decodeJwt, userFromClaims, cashApi, detectApi, newIdempotencyKey, isFeatureUnavailable } from './services/api';
 import toast, { Toaster } from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
 import { useT } from './i18n';
@@ -14,108 +14,6 @@ try {
   localStorage.removeItem('merchant_refresh');
 } catch (e) { /* navigation privee */ }
 
-const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '';
-
-// ─── Stockage de l'access token EN MEMOIRE ────────────────────────
-//
-// Volontairement hors de localStorage. Une XSS peut encore lire cette
-// variable, mais le token expire en 15 minutes et ne permet aucun
-// renouvellement : le refresh vit desormais dans un cookie HttpOnly
-// (cp_rt_merchant), inaccessible au JavaScript.
-//
-// Contrepartie : un rechargement de page perd le token. C'est le role du
-// refresh silencieux au demarrage (voir AuthProvider).
-let accessToken = null;
-const authListeners = new Set();
-
-// Decodage local du JWT (base64url, expiration verifiee). Ne sert plus qu'a
-// deux choses : savoir si le jeton en memoire est encore valide, et fournir
-// un profil de repli si /auth/me est injoignable (coupure reseau). Le profil
-// de reference vient de GET /auth/me (role, merchantId, mfaEnabled, nom...).
-const decodeJwt = (t) => {
-  try {
-    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const p = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
-    if (!p.exp || p.exp * 1000 <= Date.now()) return null;
-    return p;
-  } catch { return null; }
-};
-
-// Profil de repli construit a partir des claims du jeton : memes cles que
-// merchantProfile() cote backend pour que les composants n'aient pas a
-// distinguer les deux sources.
-const userFromClaims = (c) => c ? ({
-  userId: c.sub, merchantId: c.merchantId, role: c.role,
-  businessName: c.businessName, country: c.country, currency: c.currency,
-  _source: 'token',
-}) : null;
-
-// Routes d'authentification non protegees : un 401 sur celles-ci est une
-// reponse metier (identifiants faux, refresh revoque...), pas un jeton
-// expire. Tout le reste (/auth/me, /auth/change-password, /auth/2fa/*...)
-// passe par le refresh comme n'importe quelle route protegee.
-const NO_REFRESH_RE = /\/auth\/(login|refresh|register|2fa\/validate|forgot-password|reset-password)(\?|$)/;
-
-const setAccessToken = (t) => {
-  accessToken = t || null;
-  authListeners.forEach(fn => fn(accessToken));
-};
-
-const getAccessToken = () => accessToken;
-
-// withCredentials : indispensable pour que le navigateur joigne le cookie
-// cp_rt_merchant aux appels vers /auth/refresh et /auth/logout.
-const api = axios.create({
-  baseURL: `${apiBaseUrl}/api/v1/merchant`,
-  withCredentials: true,
-});
-
-api.interceptors.request.use(cfg => {
-  if (accessToken) cfg.headers.Authorization = `Bearer ${accessToken}`;
-  return cfg;
-});
-
-// Appel de refresh nu : pas d'instance api, pour eviter toute recursion
-// d'intercepteur si le refresh lui-meme repond 401.
-const callRefresh = () =>
-  axios.post(`${apiBaseUrl}/api/v1/merchant/auth/refresh`, {}, { withCredentials: true });
-
-// Une seule requete de refresh a la fois. Les appels concurrents qui se
-// prennent un 401 attendent la meme promesse plutot que d'en declencher
-// chacun un : la rotation cote serveur revoquerait les suivants.
-let refreshPromise = null;
-
-const refreshAccessToken = () => {
-  if (!refreshPromise) {
-    refreshPromise = callRefresh()
-      .then(({ data }) => {
-        if (!data.access_token) throw new Error('no access_token');
-        setAccessToken(data.access_token);
-        return data.access_token;
-      })
-      .finally(() => { refreshPromise = null; });
-  }
-  return refreshPromise;
-};
-
-api.interceptors.response.use(r => r, async err => {
-  const original = err.config;
-  const isAuthRoute = NO_REFRESH_RE.test(original?.url || '');
-  // 403 : droits insuffisants -> simple toast, aucune redirection (la session reste valide)
-  if (err.response?.status === 403 && !isAuthRoute) toast.error('Accès refusé');
-  if (err.response?.status === 401 && original && !original._retry && !isAuthRoute) {
-    original._retry = true;
-    try {
-      const t = await refreshAccessToken();
-      original.headers.Authorization = `Bearer ${t}`;
-      return api(original);
-    } catch (e) {
-      setAccessToken(null);
-      window.location.href = '/login';
-    }
-  }
-  return Promise.reject(err);
-});
 
 // ─── Contexte d'authentification ──────────────────────────────────
 //
@@ -149,7 +47,7 @@ const fetchProfile = async (t) => {
 };
 
 const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(accessToken);
+  const [token, setToken] = useState(getAccessToken());
   const [user, setUser] = useState(null);
   const [refreshing, setRefreshing] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -164,7 +62,7 @@ const AuthProvider = ({ children }) => {
     // Refresh silencieux au demarrage : le cookie HttpOnly survit au
     // rechargement, l'access token en memoire non.
     let cancelled = false;
-    if (accessToken) { setRefreshing(false); return; }
+    if (getAccessToken()) { setRefreshing(false); return; }
     refreshAccessToken()
       .catch(() => { if (!cancelled) setAccessToken(null); })
       .finally(() => { if (!cancelled) setRefreshing(false); });
@@ -207,7 +105,7 @@ const useAuth = () => {
   // Repli defensif : si un composant appelle useAuth hors du Provider,
   // on lit l'etat module plutot que de planter.
   if (!ctx) {
-    const claims = accessToken ? decodeJwt(accessToken) : null;
+    const tk = getAccessToken(); const claims = tk ? decodeJwt(tk) : null;
     return { isAuth: !!claims, user: userFromClaims(claims), loading: false, setAccessToken, reloadUser: async () => null };
   }
   return ctx;
@@ -879,6 +777,7 @@ const Operations = ({ lang }) => {
   return (
     <div>
       {receipt && <Receipt txn={receipt} lang={lang} onClose={() => setReceipt(null)} />}
+      <CaisseBanner />
 
       {/* Onglets centrés */}
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 28, borderBottom: `2px solid ${BORDER}` }}>
@@ -1288,8 +1187,16 @@ const Layout = ({ children, lang, toggleLang }) => {
     });
   };
 
+  const fr = lang === 'fr';
   const nav = [
-    { path: '/', label: t('dashboard') },
+    { header: fr ? 'Caisse' : 'Cash register' },
+    { path: '/caisse', label: '🏪 ' + (fr ? 'Accueil caisse' : 'Cash home') },
+    { path: '/caisse/encaisser', label: '⬇️ ' + (fr ? 'Encaisser' : 'Collect') },
+    { path: '/caisse/retirer', label: '💸 ' + (fr ? 'Retirer' : 'Withdraw') },
+    { path: '/caisse/transferer', label: '🔁 ' + (fr ? 'Transférer' : 'Transfer') },
+    { path: '/caisse/journal', label: '📒 ' + (fr ? 'Journal' : 'Ledger') },
+    { header: fr ? 'Mon espace' : 'My space' },
+    { path: '/dashboard', label: t('dashboard') },
     { path: '/operations', label: '⚡ ' + (lang === 'fr' ? 'Mes Opérations' : 'My Operations') },
     { path: '/transactions', label: lang === 'fr' ? '💳 Mes Transactions' : '💳 My Transactions' },
     { path: '/settlements', label: lang === 'fr' ? '🏦 Mes Règlements' : '🏦 My Settlements' },
@@ -1331,7 +1238,9 @@ const Layout = ({ children, lang, toggleLang }) => {
       {/* Sidebar */}
       <aside style={{ width: 230, background: CARD, borderRight: `1px solid ${BORDER}`, display: 'flex', flexDirection: 'column', position: 'fixed', top: 52, bottom: 0, left: (menuOpen || isDesktop) ? 0 : -230, transition: 'left .25s ease', zIndex: 200, overflowY: 'auto' }}>
         <nav style={{ flex: 1, padding: '10px 0' }}>
-          {nav.map(n => (
+          {nav.map(n => n.header ? (
+            <div key={'h-' + n.header} style={{ padding: '12px 18px 4px', fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: MUTED, fontFamily: FONT }}>{n.header}</div>
+          ) : (
             <Link key={n.path} to={n.path} onClick={(e) => {
               if (txnActive && n.path !== pathname) { e.preventDefault(); setPendingNav(n.path); }
               else setMenuOpen(false);
@@ -1855,7 +1764,7 @@ const Dashboard = ({ lang }) => {
         <Card>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, fontFamily: FONT }}>{t('quickActions') || 'Actions rapides'}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {[[lang === 'fr' ? 'Encaisser' : 'Collect', '/operations'], [lang === 'fr' ? 'Pay Links' : 'Pay Links', '/pay-links'], [lang === 'fr' ? 'Transactions' : 'Transactions', '/transactions'], [lang === 'fr' ? 'Mon compte' : 'My account', '/account']].map(([l, p]) => (
+            {[[lang === 'fr' ? 'Encaisser' : 'Collect', '/caisse/encaisser'], [lang === 'fr' ? 'Pay Links' : 'Pay Links', '/pay-links'], [lang === 'fr' ? 'Transactions' : 'Transactions', '/transactions'], [lang === 'fr' ? 'Mon compte' : 'My account', '/account']].map(([l, p]) => (
               <Link key={l} to={p} style={{ display: 'block', background: BG, border: `1px solid ${BORDER}`, borderRadius: 10, padding: '14px 10px', textAlign: 'center', textDecoration: 'none', color: TEXT, fontSize: 13, fontWeight: 600, fontFamily: FONT }}>{l}</Link>
             ))}
           </div>
@@ -3466,10 +3375,1149 @@ const FeatureDisabled = ({ lang, title }) => (
 );
 const isFeatureDisabled = err => err?.response?.status === 410 || err?.response?.data?.code === 'FEATURE_DISABLED';
 
-const Withdraw = ({ lang }) => (
-  <div>
-    <BackBtn lang={lang} />
-    <FeatureDisabled lang={lang} title={lang === 'fr' ? 'Retrait Mobile Money' : 'Mobile Money withdrawal'} />
+// Le retrait vit desormais dans la caisse (vague 4).
+const Withdraw = () => <Navigate to="/caisse/retirer" replace />;
+
+// ═══════════════════════════════════════════════════════════════════
+// ─── CAISSE MARCHANDE (vague 4) — contrat docs/CAISSE-API.md ──────
+// ═══════════════════════════════════════════════════════════════════
+//
+// Cinq ecrans : accueil (/caisse), Encaisser, Retirer, Transferer, Journal.
+// Tous les appels passent par cashApi / detectApi (src/services/api.js).
+// Les ecrans sont concus pour un telephone : grandes zones tactiles,
+// clavier numerique, montants formates avec separateur de milliers.
+// Les champs optionnels du contrat sont tolerés absents (backend en cours).
+
+const INT_CURRENCIES = ['XOF', 'XAF', 'CDF'];
+const fmtMoney = (n, cur) => {
+  const v = Number(n);
+  const num = Number.isFinite(v) ? v : 0;
+  return `${num.toLocaleString('fr-FR', { maximumFractionDigits: INT_CURRENCIES.includes(cur) ? 0 : 2 })}${cur ? ' ' + cur : ''}`;
+};
+const flagEmoji = (iso) => (iso && /^[A-Za-z]{2}$/.test(iso))
+  ? String.fromCodePoint(...iso.toUpperCase().split('').map(c => 0x1F1E6 + c.charCodeAt(0) - 65))
+  : '';
+const OPERATOR_LABELS = {
+  mtn_momo: 'MTN MoMo', orange_money: 'Orange Money', airtel_money: 'Airtel Money', wave: 'Wave',
+  moov_money: 'Moov Money', free_money: 'Free Money', vodacom_mpesa: 'M-Pesa', africell_money: 'Africell Money',
+  express_union: 'Express Union Mobile',
+};
+const WALLET_OPERATORS = Object.keys(OPERATOR_LABELS);
+const opLabel = (op, explicit) => explicit || OPERATOR_LABELS[String(op || '').toLowerCase()] || op || '—';
+const CASH_ST = {
+  pending: 'En attente', processing: 'En cours', pending_manual: 'En attente d’exécution',
+  awaiting_funds: 'En attente de votre virement', completed: 'Terminé', failed: 'Échoué',
+  cancelled: 'Annulé', rejected: 'Rejeté', authorized: 'Confirmé', expired: 'Expiré',
+};
+const cashSt = s => CASH_ST[s] || sl(s, 'fr');
+const cashSc = s => ({ pending_manual: O, awaiting_funds: BLUE, rejected: R, expired: R, authorized: G })[s] || sc(s);
+const CASH_TYPES = { collect: 'Encaissement', withdraw: 'Retrait', transfer_out: 'Transfert vers banque', transfer_in: 'Approvisionnement' };
+const CASH_IN_TYPES = ['collect', 'transfer_in'];
+const CARD_ACCEPTANCE = {
+  link: { color: G, icon: '💳', text: 'Paiement par carte disponible via lien de paiement (page sécurisée pay.c-pay.global).' },
+  tap_to_phone_pending: { color: O, icon: '📡', text: 'Tap-to-Phone : bientôt, après certification. En attendant, la carte est acceptée via lien de paiement.' },
+  unavailable: { color: MUTED, icon: '🚫', text: 'Paiement par carte non disponible dans votre pays pour le moment. Encaissez par Mobile Money.' },
+};
+const TRANSFER_STATUS_HELP = {
+  processing: 'Virement en cours d’exécution par le rail bancaire.',
+  pending_manual: 'Exécuté par nos opérations sous 1 jour ouvré.',
+  awaiting_funds: 'Effectuez le virement avec la référence indiquée ; votre solde sera crédité à réception.',
+  pending: 'Transfert enregistré, traitement imminent.',
+  completed: 'Transfert terminé.',
+  failed: 'Le transfert a échoué, les fonds ont été libérés.',
+  rejected: 'Transfert rejeté par nos opérations, les fonds ont été libérés.',
+  cancelled: 'Transfert annulé.',
+};
+
+// Message lisible pour une erreur de caisse (codes du contrat §2, §4, §5, §6).
+const cashErrorMessage = (err, ctx = {}) => {
+  const d = err?.response?.data || {};
+  const st = err?.response?.status;
+  if (isFeatureUnavailable(err)) return 'Fonctionnalité en cours d’intégration';
+  const available = d.available ?? d.details?.available;
+  switch (d.code) {
+    case 'INSUFFICIENT_BALANCE': return `Solde insuffisant${available != null ? ` (disponible : ${fmtMoney(available, ctx.currency)})` : ''}`;
+    case 'DAILY_LIMIT_EXCEEDED': return 'Limite journalière de retrait atteinte. Réessayez demain ou augmentez votre niveau KYB.';
+    case 'WALLET_MISSING': return 'Aucun wallet enregistré : enregistrez d’abord votre numéro Mobile Money.';
+    case 'STEP_UP_REQUIRED': return 'Confirmation requise';
+    case 'CURRENCY_MISMATCH': return 'La devise de ce numéro ne correspond pas à celle de votre compte.';
+    case 'MERCHANT_INACTIVE': return 'Compte marchand inactif : contactez le support.';
+    case 'FUNDING_UNAVAILABLE': return 'Approvisionnement par virement indisponible pour votre devise pour le moment.';
+    case 'VALIDATION_ERROR': return d.error || 'Données invalides';
+    default: break;
+  }
+  if (st === 429) return 'Trop de tentatives, réessayez dans quelques minutes.';
+  if (!err?.response) return 'Réseau indisponible, vérifiez votre connexion.';
+  return d.error || 'Erreur';
+};
+const isStepUp = err => err?.response?.status === 428 || err?.response?.data?.code === 'STEP_UP_REQUIRED';
+
+const copyText = (v, label) => {
+  try { navigator.clipboard.writeText(String(v || '')).then(() => toast.success(label || 'Copié !')); }
+  catch (e) { toast.error('Copie indisponible'); }
+};
+const shareOrCopy = async ({ title, text, url }) => {
+  if (navigator.share) { try { await navigator.share({ title, text, url }); return; } catch (e) { /* annule */ } }
+  copyText(url, 'Lien copié');
+};
+const escHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Impression d'un ticket / bordereau : fenetre dediee, texte seul.
+const printCashDoc = (title, rows, footer) => {
+  const w = window.open('', '_blank', 'width=360,height=600');
+  if (!w) return toast.error('Autorisez les fenêtres pop-up pour imprimer');
+  const body = rows.map(([l, v]) => `<div class="r"><span>${escHtml(l)}</span><strong>${escHtml(v)}</strong></div>`).join('');
+  w.document.write(`<html><head><title>${escHtml(title)}</title><style>body{font-family:monospace;font-size:12px;padding:20px;max-width:320px}.r{display:flex;justify-content:space-between;gap:12px;margin:5px 0}.r strong{text-align:right;word-break:break-all}.sep{border-top:1px dashed #999;margin:10px 0}.c{text-align:center;font-weight:bold}</style></head><body><div class="c">C-PAY — ${escHtml(title.toUpperCase())}</div><div class="sep"></div>${body}<div class="sep"></div>${footer ? `<div>${escHtml(footer)}</div><div class="sep"></div>` : ''}<div class="c">www.c-pay.global</div></body></html>`);
+  w.document.close();
+  w.print();
+};
+
+// ─── Petits composants caisse ────────────────────────────────────
+const CaisseHeader = ({ title, subtitle, icon }) => (
+  <div style={{ marginBottom: 18 }}>
+    <Link to="/caisse" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: MUTED, textDecoration: 'none', fontSize: 13, fontFamily: FONT, fontWeight: 600, padding: '8px 0', minHeight: 44 }}>← Accueil caisse</Link>
+    <div style={{ fontSize: 22, fontWeight: 800, fontFamily: FONT_TITRE, color: TEXT, lineHeight: 1.2 }}>{icon} {title}</div>
+    {subtitle && <div style={{ fontSize: 13, color: MUTED, marginTop: 4, fontFamily: FONT }}>{subtitle}</div>}
+  </div>
+);
+const Notice = ({ color = BLUE, icon, children, style }) => (
+  <div style={{ background: `${color}10`, border: `1px solid ${color}40`, borderRadius: 10, padding: '12px 14px', fontSize: 13, fontFamily: FONT, color: TEXT, display: 'flex', gap: 10, alignItems: 'flex-start', lineHeight: 1.5, ...style }}>
+    {icon && <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>}
+    <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+  </div>
+);
+const Row = ({ label, value, strong, mono, color }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: `1px solid ${BORDER}`, fontSize: 13, fontFamily: FONT }}>
+    <span style={{ color: MUTED, flexShrink: 0 }}>{label}</span>
+    <span style={{ fontWeight: strong ? 800 : 600, fontFamily: mono ? 'monospace' : FONT, textAlign: 'right', wordBreak: 'break-all', color: color || TEXT }}>{value ?? '—'}</span>
+  </div>
+);
+const CopyRow = ({ label, value, highlight }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: `1px solid ${BORDER}`, fontSize: 13, fontFamily: FONT }}>
+    <div style={{ minWidth: 0, flex: 1 }}>
+      <div style={{ color: MUTED, fontSize: 11 }}>{label}</div>
+      <div style={{ fontWeight: highlight ? 800 : 600, fontFamily: 'monospace', fontSize: highlight ? 16 : 13, color: highlight ? BLUE : TEXT, wordBreak: 'break-all' }}>{value || '—'}</div>
+    </div>
+    {value && <button type="button" onClick={() => copyText(value, `${label} copié`)} aria-label={`Copier ${label}`}
+      style={{ background: BG, border: `1px solid ${BORDER}`, borderRadius: 8, minWidth: 44, minHeight: 40, cursor: 'pointer', fontSize: 15 }}>📋</button>}
+  </div>
+);
+// Bascule a deux (ou n) choix, grands boutons tactiles.
+const Segmented = ({ options, value, onChange, color = P }) => (
+  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${options.length}, 1fr)`, gap: 8, marginBottom: 16 }}>
+    {options.map(o => (
+      <button key={o.v} type="button" onClick={() => !o.disabled && onChange(o.v)} disabled={o.disabled}
+        style={{ border: `2px solid ${value === o.v ? color : BORDER}`, background: value === o.v ? `${color}12` : CARD, color: value === o.v ? color : MUTED, borderRadius: 12, padding: '12px 8px', minHeight: 56, cursor: o.disabled ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 14, fontFamily: FONT, opacity: o.disabled ? 0.5 : 1 }}>
+        {o.icon && <span style={{ fontSize: 20, display: 'block', marginBottom: 2 }}>{o.icon}</span>}
+        {o.label}
+        {o.sub && <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2 }}>{o.sub}</div>}
+      </button>
+    ))}
+  </div>
+);
+// Saisie de montant : clavier numerique, devise en lecture seule, apercu formate.
+const AmountInput = ({ value, onChange, currency, label = 'Montant', hint, autoFocus }) => {
+  const integer = INT_CURRENCIES.includes(currency);
+  const clean = (v) => {
+    let s = String(v || '').replace(/\s/g, '').replace(',', '.');
+    s = integer ? s.replace(/[^0-9]/g, '') : s.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+    return s.replace(/^0+(?=\d)/, '');
+  };
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label htmlFor="caisse-amount" style={{ display: 'block', fontSize: 12, color: MUTED, marginBottom: 4, fontFamily: FONT }}>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'stretch', border: `1px solid ${BORDER}`, borderRadius: 12, background: BG, overflow: 'hidden' }}>
+        <input id="caisse-amount" name="amount" type="text" inputMode={integer ? 'numeric' : 'decimal'} autoComplete="off" autoFocus={autoFocus}
+          value={value || ''} onChange={e => onChange(clean(e.target.value))} placeholder="0"
+          style={{ flex: 1, minWidth: 0, border: 'none', background: 'transparent', padding: '14px 14px', fontSize: 28, fontWeight: 800, color: TEXT, fontFamily: FONT, outline: 'none' }} />
+        <div aria-label="Devise" style={{ display: 'flex', alignItems: 'center', padding: '0 16px', background: `${BLUE}10`, color: BLUE, fontWeight: 800, fontSize: 16, fontFamily: FONT, borderLeft: `1px solid ${BORDER}` }}>{currency || '—'}</div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: MUTED, marginTop: 4, fontFamily: FONT, gap: 8, flexWrap: 'wrap' }}>
+        <span>{value ? fmtMoney(value, currency) : ''}</span>
+        {hint && <span>{hint}</span>}
+      </div>
+    </div>
+  );
+};
+const Field = ({ label, children }) => (
+  <div style={{ marginBottom: 14 }}>
+    <label style={{ display: 'block', fontSize: 12, color: MUTED, marginBottom: 4, fontFamily: FONT }}>{label}</label>
+    {children}
+  </div>
+);
+const selStyle = { width: '100%', background: BG, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '12px', color: TEXT, fontSize: 14, fontFamily: FONT, boxSizing: 'border-box', minHeight: 46 };
+const BigBtn = ({ children, onClick, color = P, disabled, type = 'button', outline }) => (
+  <Btn type={type} onClick={onClick} color={color} disabled={disabled} outline={outline} style={{ width: '100%', minHeight: 52, fontSize: 16, display: 'block' }}>{children}</Btn>
+);
+const CaisseUnavailable = ({ title }) => (
+  <FeatureDisabled lang="fr" title={title} />
+);
+
+// ─── Confirmation forte (step-up, §6) ────────────────────────────
+//
+// Les operations sensibles (retrait, transfert, enregistrement du wallet)
+// exigent un objet `confirm` : { code } si le 2FA est actif, sinon
+// { password }. En cas de 428 STEP_UP_REQUIRED la liste `methods` de la
+// reponse fait foi et la fenetre reste ouverte pour une nouvelle saisie.
+//
+// useStepUp(user) renvoie { state, request(run, methods?), close, confirm } :
+//   request(run) ouvre la fenetre ; run(confirm) est la fonction metier.
+//   Elle doit gerer elle-meme ses erreurs (toast) SAUF le 428 qu'elle
+//   laisse remonter pour que la fenetre redemande la confirmation.
+const useStepUp = (user) => {
+  const [state, setState] = useState(null);
+  const runRef = React.useRef(null);
+  const mfa = !!user?.mfaEnabled;
+  const request = useCallback((run, methods) => {
+    runRef.current = run;
+    setState({ methods: methods?.length ? methods : (mfa ? ['totp'] : ['password']), error: null, busy: false });
+  }, [mfa]);
+  const close = useCallback(() => { runRef.current = null; setState(null); }, []);
+  const confirm = useCallback(async (confirmObj) => {
+    const run = runRef.current;
+    if (!run) return;
+    setState(s => s && ({ ...s, busy: true, error: null }));
+    try {
+      await run(confirmObj);
+      runRef.current = null; setState(null);
+    } catch (err) {
+      if (isStepUp(err)) {
+        const methods = err.response?.data?.methods;
+        const msg = err.response?.data?.error;
+        setState(s => s && ({ ...s, busy: false, methods: methods?.length ? methods : s.methods, error: msg && msg !== 'STEP_UP_REQUIRED' ? msg : 'Code ou mot de passe invalide, réessayez.' }));
+        return;
+      }
+      runRef.current = null; setState(null);
+      toast.error(cashErrorMessage(err));
+    }
+  }, []);
+  return { state, request, close, confirm };
+};
+
+const StepUpModal = ({ title, summary, methods, error, busy, onConfirm, onClose }) => {
+  const totp = (methods || []).includes('totp');
+  const [val, setVal] = useState('');
+  const canSubmit = totp ? val.length === 6 : val.length > 0;
+  const submit = (e) => { e?.preventDefault(); if (!canSubmit || busy) return; onConfirm(totp ? { code: val } : { password: val }); };
+  return (
+    <Modal title={title || 'Confirmer l’opération'} onClose={busy ? () => {} : onClose}>
+      <form onSubmit={submit}>
+        {summary && <div style={{ background: BG, borderRadius: 10, padding: 12, marginBottom: 14 }}>{summary}</div>}
+        <div style={{ fontSize: 13, color: MUTED, marginBottom: 12, fontFamily: FONT }}>
+          {totp ? 'Saisissez le code à 6 chiffres de votre application d’authentification.' : 'Saisissez votre mot de passe pour confirmer.'}
+        </div>
+        {totp
+          ? <Inp id="stepup-code" name="stepup-code" label="Code à 6 chiffres" value={val} onChange={v => setVal(String(v).replace(/[^0-9]/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" autoComplete="one-time-code" required />
+          : <Inp id="stepup-password" name="stepup-password" label="Mot de passe" value={val} onChange={setVal} type="password" autoComplete="current-password" required />}
+        {error && <div style={{ color: R, fontSize: 13, marginBottom: 12, fontFamily: FONT }}>{error}</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Btn outline color={MUTED} onClick={onClose} disabled={busy} style={{ minHeight: 48 }}>Annuler</Btn>
+          <Btn type="submit" color={G} disabled={!canSubmit || busy} style={{ minHeight: 48 }}>{busy ? 'Vérification…' : 'Confirmer'}</Btn>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
+// Chargement du resume de caisse, partage par les ecrans.
+const useCashSummary = () => {
+  const [summary, setSummary] = useState(null);
+  const [state, setState] = useState('loading'); // loading | ok | unavailable | error
+  const load = useCallback(() => {
+    setState('loading');
+    return cashApi.summary()
+      .then(r => { setSummary(r.data || {}); setState('ok'); })
+      .catch(err => { setState(isFeatureUnavailable(err) ? 'unavailable' : 'error'); });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  return { summary, state, reload: load };
+};
+
+// ─── 1. Accueil caisse ───────────────────────────────────────────
+const CaisseHome = () => {
+  const { user } = useAuth();
+  const { summary, state, reload } = useCashSummary();
+  const cur = summary?.currency || user?.currency || '';
+  const tiles = [
+    { to: '/caisse/encaisser', icon: '⬇️', label: 'Encaisser', sub: 'Mobile Money · Carte', color: G },
+    { to: '/caisse/retirer', icon: '💸', label: 'Retirer', sub: 'Vers mon wallet', color: O },
+    { to: '/caisse/transferer', icon: '🔁', label: 'Transférer', sub: 'Wallet ↔ Banque', color: BLUE },
+    { to: '/caisse/journal', icon: '📒', label: 'Journal', sub: 'Historique & export', color: P },
+  ];
+  const profile = summary?.profile || {};
+  const wallet = profile.wallet;
+  const checklist = summary ? [
+    { ok: !!wallet?.phone, label: wallet?.phone ? `Wallet de retrait : ${opLabel(wallet.operator)} ${wallet.phone}${wallet.verifiedAt ? ' (vérifié)' : ' (vérification au premier retrait)'}` : 'Enregistrer mon wallet Mobile Money pour les retraits', to: '/caisse/retirer' },
+    { ok: (profile.bankAccounts || 0) > 0, label: (profile.bankAccounts || 0) > 0 ? `${profile.bankAccounts} compte(s) bancaire(s) enregistré(s)` : 'Ajouter un compte bancaire pour les transferts', to: '/caisse/transferer' },
+    { ok: (profile.kybLevel || 0) >= 2, label: `Niveau KYB ${profile.kybLevel ?? 1}${(profile.kybLevel || 0) >= 2 ? '' : ' — complétez vos documents pour relever vos limites'}`, to: '/account' },
+  ] : [];
+  const ca = CARD_ACCEPTANCE[profile.cardAcceptance];
+  const today = summary?.today || {};
+  const bal = summary?.balance || {};
+  const limits = summary?.limits || {};
+
+  return (
+    <div style={{ maxWidth: 820, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, fontFamily: FONT_TITRE }}>🏪 Ma caisse</div>
+        <span style={{ fontSize: 12, color: MUTED }}>{user?.businessName}</span>
+      </div>
+
+      {state === 'unavailable' && <div style={{ marginBottom: 16 }}><CaisseUnavailable title="Caisse marchande" /></div>}
+      {state === 'error' && <Notice color={R} icon="⚠️" style={{ marginBottom: 16 }}>Impossible de charger le résumé de caisse. <button type="button" onClick={reload} style={{ background: 'none', border: 'none', color: BLUE, cursor: 'pointer', fontWeight: 700, fontFamily: FONT }}>Réessayer</button></Notice>}
+
+      {state === 'loading' && <Spin />}
+      {state === 'ok' && (
+        <>
+          <Card style={{ background: `linear-gradient(135deg, ${BLUE}, ${P})`, color: '#fff', border: 'none', marginBottom: 14 }}>
+            <div style={{ fontSize: 12, opacity: 0.85 }}>Solde disponible</div>
+            <div style={{ fontSize: 34, fontWeight: 800, fontFamily: FONT_TITRE, lineHeight: 1.1, margin: '4px 0 10px' }}>{fmtMoney(bal.available, cur)}</div>
+            <div style={{ display: 'flex', gap: 18, fontSize: 12, flexWrap: 'wrap', opacity: 0.9 }}>
+              <span>En attente : <strong>{fmtMoney(bal.pending, cur)}</strong></span>
+              {bal.reserved > 0 && <span>Réservé : <strong>{fmtMoney(bal.reserved, cur)}</strong></span>}
+              {limits.withdrawDailyRemaining != null && <span>Retrait restant aujourd’hui : <strong>{fmtMoney(limits.withdrawDailyRemaining, cur)}</strong></span>}
+            </div>
+          </Card>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
+            {tiles.map(tl0 => (
+              <Link key={tl0.to} to={tl0.to} style={{ display: 'block', background: CARD, border: `1px solid ${BORDER}`, borderTop: `4px solid ${tl0.color}`, borderRadius: 14, padding: '18px 12px', textDecoration: 'none', color: TEXT, textAlign: 'center', minHeight: 110, boxSizing: 'border-box' }}>
+                <div style={{ fontSize: 30, marginBottom: 6 }}>{tl0.icon}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: FONT }}>{tl0.label}</div>
+                <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>{tl0.sub}</div>
+              </Link>
+            ))}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 14 }}>
+            <Card>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, fontFamily: FONT }}>Aujourd’hui</div>
+              <Row label={`Encaissé (${today.collectedCount || 0} opération${(today.collectedCount || 0) > 1 ? 's' : ''})`} value={fmtMoney(today.collected, cur)} strong color={G} />
+              <Row label="· Mobile Money" value={fmtMoney(today.byMethod?.mobile_money, cur)} />
+              <Row label="· Carte" value={fmtMoney(today.byMethod?.card, cur)} />
+              <Row label="Retiré" value={fmtMoney(today.withdrawn, cur)} color={O} />
+              <Row label="Transferts sortants" value={fmtMoney(today.transfersOut, cur)} />
+              <Row label="Approvisionnements" value={fmtMoney(today.transfersIn, cur)} />
+              {limits.withdrawDailyMax != null && <Row label="Plafond retrait / jour" value={fmtMoney(limits.withdrawDailyMax, cur)} />}
+              {limits.transferMin != null && <Row label="Transfert minimum" value={fmtMoney(limits.transferMin, cur)} />}
+            </Card>
+            <Card>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, fontFamily: FONT }}>Mise en route</div>
+              {checklist.map((c, i) => (
+                <Link key={i} to={c.to} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 0', borderBottom: `1px solid ${BORDER}`, textDecoration: 'none', color: TEXT, fontSize: 13, fontFamily: FONT, minHeight: 44 }}>
+                  <span style={{ color: c.ok ? G : O, fontWeight: 800, fontSize: 16, lineHeight: 1.2 }}>{c.ok ? '✓' : '○'}</span>
+                  <span style={{ flex: 1 }}>{c.label}</span>
+                  <span style={{ color: MUTED }}>›</span>
+                </Link>
+              ))}
+              {ca && <Notice color={ca.color} icon={ca.icon} style={{ marginTop: 12 }}>{ca.text}</Notice>}
+            </Card>
+          </div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: MUTED }}>
+            <Link to="/dashboard" style={{ color: MUTED }}>Voir l’ancien tableau de bord</Link>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// ─── 2. Encaisser ────────────────────────────────────────────────
+const POLL_EVERY_MS = 3000, POLL_MAX_MS = 90000;
+const CaisseEncaisser = () => {
+  const { user } = useAuth();
+  const { summary, state: sumState } = useCashSummary();
+  const currency = summary?.currency || user?.currency || 'XAF';
+  const cardAcceptance = summary?.profile?.cardAcceptance;
+  const [method, setMethod] = useState('mobile_money');
+  const [amount, setAmount] = useState('');
+  const [phone, setPhone] = useState('');
+  const [description, setDescription] = useState('');
+  const [reference, setReference] = useState('');
+  const [detect, setDetect] = useState(null);     // reponse de /detect/phone
+  const [detecting, setDetecting] = useState(false);
+  const [operator, setOperator] = useState('');   // '' = operateur detecte, sinon alternative forcee
+  const [phase, setPhase] = useState('form');     // form | pending | success | failed | timeout | card | card_unavailable
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(POLL_MAX_MS / 1000);
+  const pollRef = React.useRef(null);
+
+  // Detection en direct (debounce 400 ms, annulation des appels precedents).
+  useEffect(() => {
+    if (method !== 'mobile_money') return undefined;
+    const digits = phone.replace(/[^0-9]/g, '');
+    if (digits.length < 8) { setDetect(null); setDetecting(false); return undefined; }
+    const ctrl = new AbortController();
+    const h = setTimeout(() => {
+      setDetecting(true);
+      detectApi.phone(phone.trim(), ctrl.signal)
+        .then(r => { setDetect(r.data); setOperator(''); })
+        .catch(err => { if (!ctrl.signal.aborted) setDetect(err.response?.data || { success: false, error: 'Détection indisponible' }); })
+        .finally(() => { if (!ctrl.signal.aborted) setDetecting(false); });
+    }, 400);
+    return () => { clearTimeout(h); ctrl.abort(); };
+  }, [phone, method]);
+
+  // Garde de navigation pendant une attente de paiement (Layout).
+  useEffect(() => {
+    const active = phase === 'pending';
+    window.__cpayTxnActive = active;
+    window.__cpayTxnDetail = active ? { amount: result?.amount, phone: result?.customerPhone || phone, ref: result?.txnId, countdown } : null;
+    window.dispatchEvent(new Event('cpay-txn-change'));
+    const bu = (e) => { if (window.__cpayTxnActive) { e.preventDefault(); e.returnValue = ''; return ''; } };
+    window.addEventListener('beforeunload', bu);
+    return () => { window.removeEventListener('beforeunload', bu); };
+  }, [phase, countdown, result, phone]);
+  useEffect(() => () => { window.__cpayTxnActive = false; window.dispatchEvent(new Event('cpay-txn-change')); clearInterval(pollRef.current); }, []);
+
+  // Interrogation du statut : toutes les 3 s pendant 90 s.
+  useEffect(() => {
+    if (phase !== 'pending' || !result?.txnId) return undefined;
+    const started = Date.now();
+    setCountdown(POLL_MAX_MS / 1000);
+    let stopped = false;
+    const stop = (next, data) => { if (stopped) return; stopped = true; clearInterval(pollRef.current); setResult(r => ({ ...r, ...(data || {}) })); setPhase(next); };
+    pollRef.current = setInterval(async () => {
+      const elapsed = Date.now() - started;
+      setCountdown(Math.max(0, Math.round((POLL_MAX_MS - elapsed) / 1000)));
+      try {
+        const { data } = await cashApi.collectStatus(result.txnId);
+        if (data.status === 'authorized' || data.status === 'completed') { stop('success', data); toast.success('Paiement confirmé'); return; }
+        if (data.status === 'failed' || data.status === 'expired') { stop('failed', data); toast.error(data.status === 'expired' ? 'Paiement expiré' : 'Paiement refusé'); return; }
+      } catch (e) { /* on continue jusqu'au delai */ }
+      if (Date.now() - started >= POLL_MAX_MS) stop('timeout');
+    }, POLL_EVERY_MS);
+    return () => clearInterval(pollRef.current);
+  }, [phase, result?.txnId]);
+
+  const amt = Number(amount);
+  const detectedOk = detect?.success;
+  const altList = detect?.alternatives || [];
+  const currencyMismatch = detectedOk && detect.currency && detect.currency !== currency;
+  const canSubmit = amt > 0 && !loading && (method === 'card' || (phone.replace(/[^0-9]/g, '').length >= 8 && !currencyMismatch));
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setLoading(true);
+    const body = { amount: amt, currency, method, description: description || undefined, reference: reference || undefined };
+    if (method === 'mobile_money') { body.customerPhone = (detect?.phone || phone).trim(); if (operator) body.operator = operator; }
+    try {
+      const { data } = await cashApi.collect(body, newIdempotencyKey());
+      if (method === 'card') { setResult(data); setPhase('card'); }
+      else { setResult({ ...data, customerPhone: body.customerPhone }); setPhase('pending'); }
+    } catch (err) {
+      if (method === 'card' && isFeatureUnavailable(err)) { setPhase('card_unavailable'); }
+      else toast.error(cashErrorMessage(err, { currency }));
+    } finally { setLoading(false); }
+  };
+  const reset = () => { setPhase('form'); setResult(null); setAmount(''); setPhone(''); setDetect(null); setOperator(''); setDescription(''); setReference(''); };
+  const receiptRows = (r) => [
+    ['Référence', r.reference || r.txnId || '—'], ['Date', fmtDate(r.finalizedAt || r.createdAt || new Date().toISOString(), 'fr')],
+    ['Montant', fmtMoney(r.amount, r.currency || currency)], ['Frais', fmtMoney(r.fee, r.currency || currency)], ['Net', fmtMoney(r.net, r.currency || currency)],
+    ['Opérateur', opLabel(r.operator, r.operatorLabel)], ['Client', r.customerPhone || '—'], ['Statut', cashSt(r.status)],
+  ];
+
+  const detectBox = () => {
+    if (method !== 'mobile_money' || phone.replace(/[^0-9]/g, '').length < 8) return null;
+    if (detecting && !detect) return <div style={{ fontSize: 12, color: MUTED, marginBottom: 12 }}>Détection de l’opérateur…</div>;
+    if (!detect) return null;
+    if (!detect.success) return <Notice color={O} icon="❓" style={{ marginBottom: 12 }}>{detect.error || 'Numéro non reconnu'}{detect.countryName ? ` — ${flagEmoji(detect.country)} ${detect.countryName}` : ''}</Notice>;
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <Notice color={currencyMismatch ? R : G} icon={flagEmoji(detect.country) || '📱'}>
+          <div><strong>{detect.countryName || detect.country}</strong> · {opLabel(detect.operator, detect.brand || detect.operatorLabel)} · {detect.currency}</div>
+          {currencyMismatch && <div style={{ color: R, marginTop: 4 }}>Ce numéro est en {detect.currency}, votre caisse est en {currency}. Encaissement impossible.</div>}
+        </Notice>
+        {altList.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 12, color: MUTED, marginBottom: 6 }}>Service choisi par le client :</div>
+            <Segmented value={operator} onChange={setOperator} color={G} options={[
+              { v: '', label: opLabel(detect.operator, detect.brand || detect.operatorLabel), sub: 'détecté' },
+              ...altList.map(a => ({ v: String(a.operator || '').toLowerCase(), label: a.brand || opLabel(a.operator) })),
+            ]} />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ maxWidth: 560, margin: '0 auto' }}>
+      <CaisseHeader icon="⬇️" title="Encaisser" subtitle="Encaissez une vente par Mobile Money ou par carte." />
+      {sumState === 'unavailable' && <div style={{ marginBottom: 14 }}><Notice color={O} icon="🛠️">Résumé de caisse indisponible (en cours d’intégration). L’encaissement reste possible.</Notice></div>}
+
+      {phase === 'form' && (
+        <Card>
+          <AmountInput value={amount} onChange={setAmount} currency={currency} label="Montant à encaisser" autoFocus />
+          <Segmented value={method} onChange={setMethod} color={G} options={[
+            { v: 'mobile_money', icon: '📱', label: 'Mobile Money' },
+            { v: 'card', icon: '💳', label: 'Carte', sub: cardAcceptance === 'unavailable' ? 'indisponible' : (cardAcceptance === 'tap_to_phone_pending' ? 'lien de paiement' : undefined) },
+          ]} />
+          {method === 'mobile_money' && (
+            <>
+              <Inp id="customer-phone" name="customer-phone" label="Numéro Mobile Money du client" value={phone} onChange={setPhone} type="tel" inputMode="tel" placeholder="+237 6XX XXX XXX" autoComplete="off" />
+              {detectBox()}
+            </>
+          )}
+          {method === 'card' && (
+            <Notice color={CARD_ACCEPTANCE[cardAcceptance]?.color || BLUE} icon={CARD_ACCEPTANCE[cardAcceptance]?.icon || '💳'} style={{ marginBottom: 14 }}>
+              {CARD_ACCEPTANCE[cardAcceptance]?.text || 'Un lien de paiement sécurisé sera généré : le client paie par carte depuis son téléphone (QR ou lien).'}
+            </Notice>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Inp id="collect-reference" label="Référence (facultatif)" value={reference} onChange={setReference} placeholder="FACT-001" />
+            <Inp id="collect-description" label="Description (facultatif)" value={description} onChange={setDescription} placeholder="Vente comptoir" />
+          </div>
+          <BigBtn color={G} onClick={submit} disabled={!canSubmit}>{loading ? 'Envoi…' : (method === 'card' ? `Générer le lien carte${amt > 0 ? ' · ' + fmtMoney(amt, currency) : ''}` : `Demander le paiement${amt > 0 ? ' · ' + fmtMoney(amt, currency) : ''}`)}</BigBtn>
+        </Card>
+      )}
+
+      {phase === 'pending' && result && (
+        <Card style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 56, marginBottom: 8 }}>📲</div>
+          <div style={{ fontSize: 18, fontWeight: 800, fontFamily: FONT }}>En attente de validation du client</div>
+          <div style={{ fontSize: 13, color: MUTED, margin: '6px 0 14px', lineHeight: 1.5 }}>
+            Le client <strong>{result.customerPhone}</strong> doit confirmer le paiement de <strong>{fmtMoney(result.amount, result.currency || currency)}</strong> sur son téléphone ({opLabel(result.operator, result.operatorLabel)}).
+          </div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: O, fontFamily: FONT_TITRE }}>{countdown}s</div>
+          <div style={{ fontSize: 11, color: MUTED, marginTop: 4, fontFamily: 'monospace' }}>Réf. {result.txnId}</div>
+        </Card>
+      )}
+
+      {phase === 'success' && result && (
+        <Card>
+          <div style={{ textAlign: 'center', marginBottom: 12 }}>
+            <div style={{ fontSize: 56 }}>✅</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: G, fontFamily: FONT }}>Paiement confirmé</div>
+            <div style={{ fontSize: 32, fontWeight: 800, fontFamily: FONT_TITRE, marginTop: 4 }}>{fmtMoney(result.amount, result.currency || currency)}</div>
+          </div>
+          <div style={{ background: BG, borderRadius: 10, padding: '4px 14px', marginBottom: 14 }}>
+            <Row label="Frais" value={fmtMoney(result.fee, result.currency || currency)} />
+            <Row label="Net crédité" value={fmtMoney(result.net, result.currency || currency)} strong color={G} />
+            <Row label="Opérateur" value={opLabel(result.operator, result.operatorLabel)} />
+            <Row label="Client" value={result.customerPhone} />
+            <Row label="Référence" value={result.reference || result.txnId} mono />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Btn outline color={BLUE} onClick={() => printCashDoc('Reçu', receiptRows(result))} style={{ minHeight: 48 }}>🖨️ Imprimer</Btn>
+            <Btn color={G} onClick={reset} style={{ minHeight: 48 }}>+ Nouvel encaissement</Btn>
+          </div>
+          {result.receiptUrl && <div style={{ textAlign: 'center', marginTop: 10, fontSize: 12 }}><a href={result.receiptUrl} target="_blank" rel="noreferrer" style={{ color: BLUE }}>Reçu en ligne</a></div>}
+        </Card>
+      )}
+
+      {phase === 'failed' && result && (
+        <Card style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 56 }}>❌</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: R, fontFamily: FONT }}>{result.status === 'expired' ? 'Paiement expiré' : 'Paiement refusé'}</div>
+          <div style={{ fontSize: 13, color: MUTED, margin: '6px 0 14px' }}>{result.message || 'Le client n’a pas validé le paiement. Vous pouvez réessayer.'}</div>
+          <div style={{ fontSize: 11, color: MUTED, fontFamily: 'monospace', marginBottom: 14 }}>Réf. {result.txnId}</div>
+          <BigBtn color={G} onClick={() => { setPhase('form'); setResult(null); }}>Réessayer</BigBtn>
+        </Card>
+      )}
+
+      {phase === 'timeout' && result && (
+        <Card style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 56 }}>⏳</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: O, fontFamily: FONT }}>En attente de confirmation</div>
+          <div style={{ fontSize: 13, color: MUTED, margin: '6px 0 14px', lineHeight: 1.5 }}>
+            Le client n’a pas encore validé. Le paiement sera comptabilisé automatiquement dès confirmation de l’opérateur : suivez-le dans le journal.
+          </div>
+          <div style={{ fontSize: 11, color: MUTED, fontFamily: 'monospace', marginBottom: 14 }}>Réf. {result.txnId}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Link to="/caisse/journal" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 48, border: `2px solid ${BLUE}`, color: BLUE, borderRadius: 8, textDecoration: 'none', fontWeight: 700, fontFamily: FONT }}>📒 Journal</Link>
+            <Btn color={G} onClick={reset} style={{ minHeight: 48 }}>+ Nouvel encaissement</Btn>
+          </div>
+        </Card>
+      )}
+
+      {phase === 'card' && result && (
+        <Card style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, fontFamily: FONT, marginBottom: 4 }}>Lien de paiement par carte</div>
+          <div style={{ fontSize: 26, fontWeight: 800, fontFamily: FONT_TITRE, marginBottom: 10 }}>{fmtMoney(result.amount || amt, result.currency || currency)}</div>
+          {result.payLink?.shortUrl ? (
+            <>
+              <div style={{ display: 'inline-block', background: '#fff', padding: 12, border: `1px solid ${BORDER}`, borderRadius: 12, marginBottom: 10 }}>
+                <QRCodeSVG value={result.payLink.shortUrl} size={200} level="M" />
+              </div>
+              <div style={{ fontSize: 13, fontFamily: 'monospace', wordBreak: 'break-all', marginBottom: 12 }}>
+                <a href={result.payLink.shortUrl} target="_blank" rel="noreferrer" style={{ color: BLUE }}>{result.payLink.shortUrl}</a>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                <Btn outline color={BLUE} onClick={() => copyText(result.payLink.shortUrl, 'Lien copié')} style={{ minHeight: 48 }}>📋 Copier</Btn>
+                <Btn color={BLUE} onClick={() => shareOrCopy({ title: 'Paiement C-Pay', text: `Payer ${fmtMoney(result.amount || amt, currency)}`, url: result.payLink.shortUrl })} style={{ minHeight: 48 }}>📤 Partager</Btn>
+              </div>
+              {result.payLink.expiresAt && <div style={{ fontSize: 11, color: MUTED }}>Expire le {fmtDate(result.payLink.expiresAt, 'fr')}</div>}
+              <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>Le paiement apparaîtra dans le journal une fois le client passé en caisse.</div>
+            </>
+          ) : <Notice color={O} icon="⚠️">Lien créé mais URL absente de la réponse. Consultez vos liens de paiement.</Notice>}
+          <div style={{ marginTop: 14 }}><BigBtn color={G} onClick={reset}>+ Nouvel encaissement</BigBtn></div>
+        </Card>
+      )}
+
+      {phase === 'card_unavailable' && (
+        <Card>
+          <Notice color={MUTED} icon="🚫" style={{ marginBottom: 14 }}>
+            <strong>Paiement par carte non disponible dans votre pays pour le moment.</strong><br />
+            Aucune passerelle carte n’est encore configurée pour votre pays (Tap-to-Phone : bientôt, après certification). Encaissez par Mobile Money.
+          </Notice>
+          <BigBtn color={G} onClick={() => { setPhase('form'); setMethod('mobile_money'); }}>Encaisser par Mobile Money</BigBtn>
+        </Card>
+      )}
+    </div>
+  );
+};
+
+// ─── Wallet du marchand (formulaire inline, §3) ──────────────────
+const WalletForm = ({ user, initial, onSaved, onCancel }) => {
+  const stepUp = useStepUp(user);
+  const [operator, setOperator] = useState(initial?.operator || '');
+  const [phone, setPhone] = useState(initial?.phone || '');
+  const [hint, setHint] = useState(null);
+  useEffect(() => {
+    const digits = phone.replace(/[^0-9]/g, '');
+    if (digits.length < 8) { setHint(null); return undefined; }
+    const ctrl = new AbortController();
+    const h = setTimeout(() => detectApi.phone(phone.trim(), ctrl.signal).then(r => {
+      setHint(r.data);
+      const op = String(r.data?.operator || '').toLowerCase();
+      if (r.data?.success && WALLET_OPERATORS.includes(op)) setOperator(o => o || op);
+    }).catch(() => {}), 400);
+    return () => { clearTimeout(h); ctrl.abort(); };
+  }, [phone]);
+  const save = () => {
+    if (!operator || phone.replace(/[^0-9]/g, '').length < 8) return toast.error('Opérateur et numéro requis');
+    stepUp.request(async (confirm) => {
+      const { data } = await cashApi.putWallet({ operator, phone: (hint?.phone || phone).trim(), confirm });
+      toast.success('Wallet enregistré');
+      onSaved(data || { operator, phone });
+    });
+  };
+  return (
+    <Card>
+      <div style={{ fontSize: 15, fontWeight: 800, fontFamily: FONT, marginBottom: 4 }}>{initial ? 'Modifier mon wallet' : 'Enregistrer mon wallet Mobile Money'}</div>
+      <div style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>Vos retraits seront envoyés sur ce numéro. Il sera marqué vérifié après le premier retrait réussi.</div>
+      <Inp id="wallet-phone" name="wallet-phone" label="Numéro Mobile Money" value={phone} onChange={setPhone} type="tel" inputMode="tel" placeholder="+237 6XX XXX XXX" autoComplete="off" />
+      {hint?.success && <div style={{ fontSize: 12, color: G, marginTop: -8, marginBottom: 12 }}>{flagEmoji(hint.country)} {hint.countryName} · {opLabel(hint.operator, hint.brand)} détecté</div>}
+      <Field label="Opérateur">
+        <select value={operator} onChange={e => setOperator(e.target.value)} style={selStyle}>
+          <option value="">— Choisir —</option>
+          {WALLET_OPERATORS.map(o => <option key={o} value={o}>{OPERATOR_LABELS[o]}</option>)}
+        </select>
+      </Field>
+      <div style={{ display: 'grid', gridTemplateColumns: onCancel ? '1fr 1fr' : '1fr', gap: 10 }}>
+        {onCancel && <Btn outline color={MUTED} onClick={onCancel} style={{ minHeight: 48 }}>Annuler</Btn>}
+        <Btn color={G} onClick={save} style={{ minHeight: 48 }}>Enregistrer</Btn>
+      </div>
+      {stepUp.state && <StepUpModal {...stepUp.state} title="Confirmer le wallet" onConfirm={stepUp.confirm} onClose={stepUp.close} summary={<div style={{ fontSize: 13 }}>{OPERATOR_LABELS[operator] || operator} · <strong>{phone}</strong></div>} />}
+    </Card>
+  );
+};
+
+// ─── 3. Retirer ──────────────────────────────────────────────────
+// Apercu des frais : le contrat ne fixe pas de champ ; on tolere
+// limits.withdrawFeePercent / withdrawFeeFixed / withdrawFeeMin ou
+// fees.withdraw.{percent,fixed,min}. Sinon « frais affichés à la confirmation ».
+const previewFee = (summary, amount, kind = 'withdraw') => {
+  const l = summary?.limits || {}; const f = summary?.fees?.[kind] || {};
+  const pct = f.percent ?? l[`${kind}FeePercent`]; const fixed = f.fixed ?? l[`${kind}FeeFixed`]; const min = f.min ?? l[`${kind}FeeMin`];
+  if (pct == null && fixed == null) return null;
+  let fee = (amount * (Number(pct) || 0)) / 100 + (Number(fixed) || 0);
+  if (min != null) fee = Math.max(fee, Number(min));
+  return Math.round(fee);
+};
+const CaisseRetirer = () => {
+  const { user } = useAuth();
+  const { summary, state: sumState, reload } = useCashSummary();
+  const stepUp = useStepUp(user);
+  const currency = summary?.currency || user?.currency || 'XAF';
+  const [wallet, setWallet] = useState(undefined); // undefined = chargement, null = aucun
+  const [walletState, setWalletState] = useState('loading');
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [result, setResult] = useState(null);
+  const [blocked, setBlocked] = useState(null); // message bloquant (410…)
+
+  const loadWallet = useCallback(() => {
+    setWalletState('loading');
+    cashApi.getWallet()
+      .then(r => { setWallet(r.status === 204 || !r.data?.phone ? null : r.data); setWalletState('ok'); })
+      .catch(err => { if (isFeatureUnavailable(err)) setWalletState('unavailable'); else { setWallet(null); setWalletState('ok'); } });
+  }, []);
+  useEffect(() => { loadWallet(); }, [loadWallet]);
+
+  const amt = Number(amount);
+  const available = summary?.balance?.available;
+  const remaining = summary?.limits?.withdrawDailyRemaining;
+  const fee = amt > 0 ? previewFee(summary, amt) : null;
+  const tooMuch = (available != null && amt > Number(available)) || (remaining != null && amt > Number(remaining));
+  const canSubmit = amt > 0 && !!wallet && !tooMuch;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    setBlocked(null);
+    stepUp.request(async (confirm) => {
+      try {
+        const { data } = await cashApi.withdraw({ amount: amt, description: description || undefined, confirm }, newIdempotencyKey());
+        setResult(data); setAmount(''); setDescription(''); reload();
+        toast.success('Retrait lancé');
+      } catch (err) {
+        if (isStepUp(err)) throw err;
+        const code = err.response?.data?.code;
+        if (code === 'WALLET_MISSING') { setWallet(null); setEditing(true); }
+        if (isFeatureUnavailable(err)) setBlocked('Retrait indisponible : aucun rail de paiement sortant n’est encore configuré pour l’opérateur de votre wallet. Fonctionnalité en cours d’intégration.');
+        else if (code === 'DAILY_LIMIT_EXCEEDED' || code === 'INSUFFICIENT_BALANCE') reload();
+        toast.error(cashErrorMessage(err, { currency }));
+      }
+    });
+  };
+
+  if (walletState === 'unavailable' || sumState === 'unavailable') return (<div style={{ maxWidth: 560, margin: '0 auto' }}><CaisseHeader icon="💸" title="Retirer" /><CaisseUnavailable title="Retrait vers mon wallet" /></div>);
+
+  return (
+    <div style={{ maxWidth: 560, margin: '0 auto' }}>
+      <CaisseHeader icon="💸" title="Retirer" subtitle="Transférez votre solde disponible vers votre wallet Mobile Money." />
+      {result && (
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ textAlign: 'center', marginBottom: 10 }}>
+            <div style={{ fontSize: 48 }}>{result.status === 'completed' ? '✅' : '🚀'}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, fontFamily: FONT }}>Retrait {cashSt(result.status).toLowerCase()}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, fontFamily: FONT_TITRE }}>{fmtMoney(result.amount, currency)}</div>
+          </div>
+          <div style={{ background: BG, borderRadius: 10, padding: '4px 14px', marginBottom: 12 }}>
+            <Row label="Référence" value={result.reference} mono strong />
+            <Row label="Statut" value={<Badge label={cashSt(result.status)} color={cashSc(result.status)} />} />
+            <Row label="Frais" value={fmtMoney(result.fee, currency)} />
+            <Row label="Net envoyé" value={fmtMoney(result.net, currency)} strong color={G} />
+            <Row label="Wallet" value={`${opLabel(result.wallet?.operator)} ${result.wallet?.phone || ''}`} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Btn outline color={BLUE} onClick={() => printCashDoc('Retrait', [['Référence', result.reference], ['Date', fmtDate(new Date().toISOString(), 'fr')], ['Montant', fmtMoney(result.amount, currency)], ['Frais', fmtMoney(result.fee, currency)], ['Net', fmtMoney(result.net, currency)], ['Wallet', `${opLabel(result.wallet?.operator)} ${result.wallet?.phone || ''}`], ['Statut', cashSt(result.status)]])} style={{ minHeight: 48 }}>🖨️ Imprimer</Btn>
+            <Btn color={G} onClick={() => setResult(null)} style={{ minHeight: 48 }}>+ Nouveau retrait</Btn>
+          </div>
+        </Card>
+      )}
+
+      {walletState === 'loading' && <Spin />}
+      {walletState === 'ok' && (wallet === null || editing) && (
+        <div style={{ marginBottom: 14 }}>
+          {wallet === null && !editing && <Notice color={O} icon="📱" style={{ marginBottom: 12 }}>Aucun wallet enregistré. Indiquez le numéro Mobile Money qui recevra vos retraits.</Notice>}
+          <WalletForm user={user} initial={editing ? wallet : null} onSaved={(w) => { setWallet(w); setEditing(false); reload(); }} onCancel={editing ? () => setEditing(false) : null} />
+        </div>
+      )}
+
+      {walletState === 'ok' && wallet && !editing && !result && (
+        <Card>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: BG, borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: MUTED }}>Wallet de réception</div>
+              <div style={{ fontSize: 14, fontWeight: 700, fontFamily: FONT }}>{opLabel(wallet.operator)} · {wallet.phone}</div>
+              <div style={{ fontSize: 11, color: wallet.verifiedAt ? G : O }}>{wallet.verifiedAt ? '✓ Vérifié' : 'Vérification au premier retrait réussi'}</div>
+            </div>
+            <Btn small outline color={MUTED} onClick={() => setEditing(true)} style={{ minHeight: 40 }}>Modifier</Btn>
+          </div>
+          {sumState === 'ok' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+              <div style={{ background: `${G}10`, borderRadius: 10, padding: 10 }}><div style={{ fontSize: 11, color: MUTED }}>Disponible</div><div style={{ fontSize: 16, fontWeight: 800, color: G }}>{fmtMoney(available, currency)}</div></div>
+              <div style={{ background: `${O}10`, borderRadius: 10, padding: 10 }}><div style={{ fontSize: 11, color: MUTED }}>Reste aujourd’hui</div><div style={{ fontSize: 16, fontWeight: 800, color: O }}>{remaining != null ? fmtMoney(remaining, currency) : '—'}</div></div>
+            </div>
+          )}
+          <AmountInput value={amount} onChange={setAmount} currency={currency} label="Montant à retirer"
+            hint={amt > 0 ? (fee != null ? `Frais ≈ ${fmtMoney(fee, currency)} · net ≈ ${fmtMoney(amt - fee, currency)}` : 'Frais affichés à la confirmation') : undefined} />
+          {available != null && amt > 0 && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+              {[0.25, 0.5, 1].map(p => { const cap = Math.min(Number(available), remaining != null ? Number(remaining) : Infinity); const v = Math.floor(cap * p); return v > 0 && <Btn key={p} small outline color={MUTED} onClick={() => setAmount(String(v))} style={{ minHeight: 40 }}>{p === 1 ? 'Tout' : `${p * 100} %`} · {fmtMoney(v, currency)}</Btn>; })}
+            </div>
+          )}
+          {tooMuch && <div style={{ color: R, fontSize: 13, marginBottom: 12, fontFamily: FONT }}>{available != null && amt > Number(available) ? 'Montant supérieur au solde disponible.' : 'Montant supérieur à votre limite journalière restante.'}</div>}
+          <Inp id="withdraw-description" label="Libellé (facultatif)" value={description} onChange={setDescription} placeholder="Caisse du soir" />
+          {blocked && <Notice color={O} icon="🛠️" style={{ marginBottom: 14 }}>{blocked}</Notice>}
+          <BigBtn color={O} onClick={submit} disabled={!canSubmit}>{amt > 0 ? `Retirer ${fmtMoney(amt, currency)}` : 'Retirer'}</BigBtn>
+        </Card>
+      )}
+
+      {stepUp.state && <StepUpModal {...stepUp.state} title="Confirmer le retrait" onConfirm={stepUp.confirm} onClose={stepUp.close}
+        summary={<div style={{ fontSize: 13, fontFamily: FONT }}><div>Montant : <strong>{fmtMoney(amt, currency)}</strong></div><div>Vers : <strong>{opLabel(wallet?.operator)} {wallet?.phone}</strong></div>{fee != null && <div>Frais ≈ {fmtMoney(fee, currency)}</div>}</div>} />}
+    </div>
+  );
+};
+
+// ─── Compte bancaire (formulaire inline, POST /merchant/bank-accounts) ──
+const BankAccountForm = ({ user, onSaved, onCancel }) => {
+  const [institutions, setInstitutions] = useState([]);
+  const [form, setForm] = useState({ institutionId: '', accountNumber: '', accountName: '', iban: '' });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    cashApi.institutions(user?.country || 'CM')
+      .then(r => setInstitutions((r.data.institutions || []).filter(i => ['bank', 'microfinance', 'cooperative'].includes(i.type))))
+      .catch(() => setInstitutions([]));
+  }, [user?.country]);
+  const f = k => v => setForm(p => ({ ...p, [k]: v }));
+  const save = async () => {
+    if (!form.institutionId || !form.accountNumber || !form.accountName) return toast.error('Banque, numéro et titulaire requis');
+    setSaving(true);
+    try {
+      const { data } = await cashApi.addBankAccount({ institutionId: form.institutionId, accountNumber: form.accountNumber.trim(), accountName: form.accountName.trim(), iban: form.iban.trim() || undefined });
+      toast.success('Compte bancaire ajouté'); onSaved(data);
+    } catch (err) { toast.error(cashErrorMessage(err)); }
+    finally { setSaving(false); }
+  };
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 15, fontWeight: 800, fontFamily: FONT, marginBottom: 12 }}>Ajouter un compte bancaire</div>
+      <Field label="Banque">
+        <select value={form.institutionId} onChange={e => f('institutionId')(e.target.value)} style={selStyle}>
+          <option value="">— Choisir —</option>
+          {institutions.map(i => <option key={i.institution_id} value={i.institution_id}>{i.name}{i.type !== 'bank' ? ` (${i.type})` : ''}</option>)}
+        </select>
+        {institutions.length === 0 && <div style={{ fontSize: 11, color: MUTED, marginTop: 4 }}>Aucune institution référencée pour votre pays : contactez le support.</div>}
+      </Field>
+      <Inp id="bank-account-name" label="Titulaire du compte" value={form.accountName} onChange={f('accountName')} placeholder="NOM DE L’ENTREPRISE" />
+      <Inp id="bank-account-number" label="Numéro de compte" value={form.accountNumber} onChange={f('accountNumber')} inputMode="numeric" placeholder="00000 00000 00000000000 00" />
+      <Inp id="bank-iban" label="IBAN (facultatif)" value={form.iban} onChange={f('iban')} placeholder="CM21 ..." />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Btn outline color={MUTED} onClick={onCancel} style={{ minHeight: 48 }}>Annuler</Btn>
+        <Btn color={G} onClick={save} disabled={saving} style={{ minHeight: 48 }}>{saving ? 'Ajout…' : 'Ajouter'}</Btn>
+      </div>
+    </Card>
+  );
+};
+
+// Bordereau d'approvisionnement (bank_to_wallet, status awaiting_funds).
+const FundingInstructions = ({ transfer, currency }) => {
+  const ins = transfer?.instructions || {};
+  const ref = ins.reference || transfer?.reference;
+  const rows = [['Montant à virer', fmtMoney(transfer.amount, transfer.currency || currency)], ['Référence à indiquer', ref], ['Banque', ins.bankName], ['Titulaire', ins.accountName], ['Numéro de compte', ins.accountNumber], ['IBAN', ins.iban], ['SWIFT / BIC', ins.swift], ['Valable jusqu’au', ins.expiresAt ? fmtDate(ins.expiresAt, 'fr') : null]].filter(r => r[1]);
+  return (
+    <div>
+      <Notice color={BLUE} icon="🏦" style={{ marginBottom: 12 }}>
+        Effectuez un virement de <strong>{fmtMoney(transfer.amount, transfer.currency || currency)}</strong> sur le compte ci-dessous en indiquant <strong>impérativement la référence</strong> : votre solde sera crédité dès confirmation de la réception par nos opérations.
+      </Notice>
+      <div style={{ background: BG, borderRadius: 10, padding: '2px 14px', marginBottom: 12 }}>
+        <CopyRow label="Référence à indiquer dans le virement" value={ref} highlight />
+        <CopyRow label="Montant" value={String(transfer.amount ?? '')} />
+        <CopyRow label="Banque" value={ins.bankName} />
+        <CopyRow label="Titulaire du compte" value={ins.accountName} />
+        <CopyRow label="Numéro de compte" value={ins.accountNumber} />
+        {ins.iban && <CopyRow label="IBAN" value={ins.iban} />}
+        {ins.swift && <CopyRow label="SWIFT / BIC" value={ins.swift} />}
+        {ins.expiresAt && <Row label="Ordre valable jusqu’au" value={fmtDate(ins.expiresAt, 'fr')} />}
+      </div>
+      <Btn outline color={BLUE} onClick={() => printCashDoc('Ordre d’approvisionnement', rows, 'Indiquez la référence dans le libellé du virement.')} style={{ width: '100%', minHeight: 48 }}>🖨️ Imprimer le bordereau</Btn>
+    </div>
+  );
+};
+
+// ─── 4. Transférer ───────────────────────────────────────────────
+const CANCELLABLE = ['awaiting_funds', 'pending_manual'];
+const CaisseTransferer = () => {
+  const { user } = useAuth();
+  const { summary, state: sumState, reload } = useCashSummary();
+  const stepUp = useStepUp(user);
+  const currency = summary?.currency || user?.currency || 'XAF';
+  const [direction, setDirection] = useState('wallet_to_bank');
+  const [accounts, setAccounts] = useState(null);
+  const [accountId, setAccountId] = useState('');
+  const [addingAccount, setAddingAccount] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [fundingUnavailable, setFundingUnavailable] = useState(false);
+  const [transfers, setTransfers] = useState(null);
+  const [listState, setListState] = useState('loading');
+  const [detail, setDetail] = useState(null);
+
+  const loadAccounts = useCallback(() => {
+    cashApi.bankAccounts().then(r => {
+      const list = (r.data?.data || []);
+      setAccounts(list);
+      setAccountId(id => id || (list.find(a => a.status === 'verified' && a.isDefault) || list.find(a => a.status === 'verified') || {}).accountId || '');
+    }).catch(() => setAccounts([]));
+  }, []);
+  const loadTransfers = useCallback(() => {
+    setListState('loading');
+    cashApi.listTransfers({ limit: 20, offset: 0 })
+      .then(r => { setTransfers(r.data?.data || []); setListState('ok'); })
+      .catch(err => setListState(isFeatureUnavailable(err) ? 'unavailable' : 'error'));
+  }, []);
+  useEffect(() => { loadAccounts(); loadTransfers(); }, [loadAccounts, loadTransfers]);
+
+  const amt = Number(amount);
+  const minT = summary?.limits?.transferMin;
+  const available = summary?.balance?.available;
+  const verified = (accounts || []).filter(a => a.status === 'verified');
+  const account = verified.find(a => a.accountId === accountId);
+  const belowMin = minT != null && amt > 0 && amt < Number(minT);
+  const overBalance = direction === 'wallet_to_bank' && available != null && amt > Number(available);
+  const canSubmit = amt > 0 && !loading && !belowMin && !overBalance && (direction === 'bank_to_wallet' || !!account);
+  const fee = direction === 'wallet_to_bank' && amt > 0 ? previewFee(summary, amt, 'transfer') : null;
+
+  const doCreate = async (confirm) => {
+    const body = { direction, amount: amt, description: description || undefined };
+    if (direction === 'wallet_to_bank') body.accountId = accountId;
+    if (confirm) body.confirm = confirm;
+    const { data } = await cashApi.createTransfer(body, newIdempotencyKey());
+    setResult(data); setAmount(''); setDescription(''); setFundingUnavailable(false);
+    reload(); loadTransfers();
+    toast.success(direction === 'bank_to_wallet' ? 'Ordre d’approvisionnement créé' : 'Transfert lancé');
+  };
+  const submit = async () => {
+    if (!canSubmit) return;
+    setFundingUnavailable(false);
+    if (direction === 'wallet_to_bank') {
+      // Debit du solde : confirmation forte demandee d'emblee.
+      stepUp.request(async (confirm) => {
+        try { await doCreate(confirm); }
+        catch (err) { if (isStepUp(err)) throw err; toast.error(cashErrorMessage(err, { currency })); }
+      });
+      return;
+    }
+    // Approvisionnement : on tente sans confirmation ; 428 -> fenetre step-up
+    // avec les methodes renvoyees par le serveur.
+    setLoading(true);
+    try { await doCreate(null); }
+    catch (err) {
+      if (isStepUp(err)) {
+        stepUp.request(async (confirm) => {
+          try { await doCreate(confirm); }
+          catch (e2) { if (isStepUp(e2)) throw e2; if (e2.response?.data?.code === 'FUNDING_UNAVAILABLE') setFundingUnavailable(true); else toast.error(cashErrorMessage(e2, { currency })); }
+        }, err.response?.data?.methods);
+      } else if (err.response?.data?.code === 'FUNDING_UNAVAILABLE' || err.response?.status === 409) setFundingUnavailable(true);
+      else toast.error(cashErrorMessage(err, { currency }));
+    } finally { setLoading(false); }
+  };
+  const cancel = async (t) => {
+    if (!window.confirm(`Annuler le transfert ${t.reference || ''} ?`)) return;
+    try { await cashApi.cancelTransfer(t.transferId || t.id); toast.success('Transfert annulé'); setDetail(null); loadTransfers(); reload(); }
+    catch (err) { toast.error(cashErrorMessage(err)); }
+  };
+  const dirLabel = d => d === 'bank_to_wallet' || d === 'funding' ? 'Banque → Wallet' : 'Wallet → Banque';
+
+  if (sumState === 'unavailable' && listState === 'unavailable') return (<div style={{ maxWidth: 640, margin: '0 auto' }}><CaisseHeader icon="🔁" title="Transférer" /><CaisseUnavailable title="Transferts wallet ↔ banque" /></div>);
+
+  return (
+    <div style={{ maxWidth: 640, margin: '0 auto' }}>
+      <CaisseHeader icon="🔁" title="Transférer" subtitle="Entre votre solde C-Pay et vos comptes bancaires." />
+
+      {result && (
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 12, color: MUTED }}>{dirLabel(result.direction)}</div>
+              <div style={{ fontSize: 17, fontWeight: 800, fontFamily: FONT }}>Réf. <span style={{ fontFamily: 'monospace' }}>{result.reference}</span></div>
+            </div>
+            <Badge label={cashSt(result.status)} color={cashSc(result.status)} />
+          </div>
+          {TRANSFER_STATUS_HELP[result.status] && <div style={{ fontSize: 13, color: MUTED, marginBottom: 12 }}>{TRANSFER_STATUS_HELP[result.status]}</div>}
+          {result.status === 'awaiting_funds' ? <FundingInstructions transfer={result} currency={currency} /> : (
+            <div style={{ background: BG, borderRadius: 10, padding: '4px 14px' }}>
+              <Row label="Montant" value={fmtMoney(result.amount, currency)} strong />
+              {result.fee != null && <Row label="Frais" value={fmtMoney(result.fee, currency)} />}
+              {result.net != null && <Row label="Net viré" value={fmtMoney(result.net, currency)} strong color={G} />}
+              {result.bankAccount && <Row label="Compte" value={`${result.bankAccount.bankName || ''} ${result.bankAccount.accountMasked || ''}`} />}
+            </div>
+          )}
+          <div style={{ marginTop: 12 }}><BigBtn color={G} onClick={() => setResult(null)}>+ Nouveau transfert</BigBtn></div>
+        </Card>
+      )}
+
+      {!result && (
+        <Card style={{ marginBottom: 14 }}>
+          <Segmented value={direction} onChange={d => { setDirection(d); setFundingUnavailable(false); }} color={BLUE} options={[
+            { v: 'wallet_to_bank', icon: '🏦', label: 'Wallet → Banque', sub: 'virer mon solde' },
+            { v: 'bank_to_wallet', icon: '📥', label: 'Banque → Wallet', sub: 'approvisionner' },
+          ]} />
+          {direction === 'wallet_to_bank' && (
+            <>
+              {accounts === null ? <div style={{ fontSize: 12, color: MUTED, marginBottom: 12 }}>Chargement des comptes…</div> : (
+                <Field label="Compte bancaire de destination (vérifié)">
+                  {verified.length > 0 && (
+                    <select value={accountId} onChange={e => setAccountId(e.target.value)} style={selStyle}>
+                      {verified.map(a => <option key={a.accountId} value={a.accountId}>{a.institution?.name || 'Banque'} · {a.accountNumber} · {a.accountName}</option>)}
+                    </select>
+                  )}
+                  {verified.length === 0 && !addingAccount && <Notice color={O} icon="🏦">Aucun compte bancaire vérifié. Ajoutez-en un ci-dessous ou depuis <Link to="/account" style={{ color: BLUE }}>Mon compte</Link>.</Notice>}
+                  {!addingAccount && <button type="button" onClick={() => setAddingAccount(true)} style={{ background: 'none', border: 'none', color: BLUE, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: FONT, padding: '10px 0', minHeight: 44 }}>+ Ajouter un compte bancaire</button>}
+                </Field>
+              )}
+              {addingAccount && <BankAccountForm user={user} onSaved={(a) => { setAddingAccount(false); setAccountId(a?.accountId || ''); loadAccounts(); reload(); }} onCancel={() => setAddingAccount(false)} />}
+              {sumState === 'ok' && <div style={{ fontSize: 12, color: MUTED, marginBottom: 10 }}>Solde disponible : <strong style={{ color: G }}>{fmtMoney(available, currency)}</strong></div>}
+            </>
+          )}
+          {direction === 'bank_to_wallet' && (
+            <Notice color={BLUE} icon="ℹ️" style={{ marginBottom: 14 }}>
+              Vous recevrez les coordonnées du compte de collecte C-Pay et une <strong>référence</strong> à indiquer dans votre virement. Le solde est crédité à réception des fonds.
+            </Notice>
+          )}
+          <AmountInput value={amount} onChange={setAmount} currency={currency} label={direction === 'wallet_to_bank' ? 'Montant à virer vers la banque' : 'Montant à approvisionner'}
+            hint={minT != null ? `Minimum ${fmtMoney(minT, currency)}` : (direction === 'wallet_to_bank' && amt > 0 && fee == null ? 'Frais affichés à la confirmation' : undefined)} />
+          {belowMin && <div style={{ color: R, fontSize: 13, marginBottom: 12 }}>Montant inférieur au minimum de {fmtMoney(minT, currency)}.</div>}
+          {overBalance && <div style={{ color: R, fontSize: 13, marginBottom: 12 }}>Montant supérieur au solde disponible.</div>}
+          {fee != null && amt > 0 && <div style={{ fontSize: 12, color: MUTED, marginBottom: 12 }}>Frais ≈ {fmtMoney(fee, currency)} · net ≈ {fmtMoney(amt - fee, currency)}</div>}
+          <Inp id="transfer-description" label="Libellé (facultatif)" value={description} onChange={setDescription} placeholder={direction === 'wallet_to_bank' ? 'Virement hebdomadaire' : 'Approvisionnement caisse'} />
+          {fundingUnavailable && <Notice color={O} icon="🛠️" style={{ marginBottom: 14 }}>Approvisionnement par virement indisponible pour votre devise ({currency}) pour le moment : aucun compte de collecte n’est configuré. Contactez le support.</Notice>}
+          <BigBtn color={BLUE} onClick={submit} disabled={!canSubmit}>{loading ? 'Envoi…' : (direction === 'wallet_to_bank' ? `Virer${amt > 0 ? ' ' + fmtMoney(amt, currency) : ''} vers la banque` : `Créer l’ordre d’approvisionnement${amt > 0 ? ' · ' + fmtMoney(amt, currency) : ''}`)}</BigBtn>
+        </Card>
+      )}
+
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, fontFamily: FONT }}>Mes transferts</div>
+          <Btn small outline color={MUTED} onClick={loadTransfers} style={{ minHeight: 36 }}>↻</Btn>
+        </div>
+        {listState === 'loading' && <Spin />}
+        {listState === 'unavailable' && <div style={{ fontSize: 13, color: MUTED }}>Liste des transferts en cours d’intégration.</div>}
+        {listState === 'error' && <div style={{ fontSize: 13, color: R }}>Impossible de charger les transferts.</div>}
+        {listState === 'ok' && transfers.length === 0 && <div style={{ fontSize: 13, color: MUTED }}>Aucun transfert pour l’instant.</div>}
+        {listState === 'ok' && transfers.map(t => {
+          const id = t.transferId || t.id;
+          return (
+            <div key={id} style={{ borderBottom: `1px solid ${BORDER}`, padding: '10px 0' }}>
+              <div onClick={() => setDetail(detail?.transferId === id || detail?.id === id ? null : t)} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDetail(t)}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, cursor: 'pointer', minHeight: 44 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: FONT }}>{dirLabel(t.direction)} · {fmtMoney(t.amount, t.currency || currency)}</div>
+                  <div style={{ fontSize: 11, color: MUTED }}><span style={{ fontFamily: 'monospace' }}>{t.reference}</span> · {fmtDate(t.createdAt, 'fr')}</div>
+                </div>
+                <Badge label={cashSt(t.status)} color={cashSc(t.status)} />
+              </div>
+              {(detail?.transferId === id || detail?.id === id) && (
+                <div style={{ marginTop: 10, background: BG, borderRadius: 10, padding: 12 }}>
+                  {TRANSFER_STATUS_HELP[t.status] && <div style={{ fontSize: 12, color: MUTED, marginBottom: 8 }}>{TRANSFER_STATUS_HELP[t.status]}</div>}
+                  {t.status === 'awaiting_funds' && t.instructions ? <FundingInstructions transfer={t} currency={currency} /> : (
+                    <div>
+                      {t.fee != null && <Row label="Frais" value={fmtMoney(t.fee, currency)} />}
+                      {t.net != null && <Row label="Net" value={fmtMoney(t.net, currency)} />}
+                      {t.bankAccount && <Row label="Compte" value={`${t.bankAccount.bankName || ''} ${t.bankAccount.accountMasked || ''}`} />}
+                      {t.description && <Row label="Libellé" value={t.description} />}
+                      {t.bankReference && <Row label="Référence bancaire" value={t.bankReference} mono />}
+                    </div>
+                  )}
+                  {CANCELLABLE.includes(t.status) && <div style={{ marginTop: 10 }}><Btn outline color={R} onClick={() => cancel(t)} style={{ width: '100%', minHeight: 44 }}>Annuler ce transfert</Btn></div>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </Card>
+
+      {stepUp.state && <StepUpModal {...stepUp.state} title="Confirmer le transfert" onConfirm={stepUp.confirm} onClose={stepUp.close}
+        summary={<div style={{ fontSize: 13, fontFamily: FONT }}><div>{dirLabel(direction)} : <strong>{fmtMoney(amt, currency)}</strong></div>{direction === 'wallet_to_bank' && account && <div>Vers : <strong>{account.institution?.name || 'Banque'} {account.accountNumber}</strong></div>}</div>} />}
+    </div>
+  );
+};
+
+// ─── 5. Journal ──────────────────────────────────────────────────
+const PAGE = 25;
+const CaisseJournal = () => {
+  const { user } = useAuth();
+  const currency = user?.currency || 'XAF';
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const [from, setFrom] = useState(iso(monthStart));
+  const [to, setTo] = useState(iso(today));
+  const [type, setType] = useState('');
+  const [page, setPage] = useState(0);
+  const [data, setData] = useState(null);
+  const [state, setState] = useState('loading');
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    setState('loading');
+    const params = { limit: PAGE, offset: page * PAGE };
+    if (from) params.from = from; if (to) params.to = to; if (type) params.type = type;
+    cashApi.history(params)
+      .then(r => { setData(r.data || { data: [], total: 0, totals: {} }); setState('ok'); })
+      .catch(err => setState(isFeatureUnavailable(err) ? 'unavailable' : 'error'));
+  }, [from, to, type, page]);
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const params = {}; if (from) params.from = from; if (to) params.to = to; if (type) params.type = type;
+      const r = await cashApi.exportHistoryCsv(params);
+      const url = URL.createObjectURL(r.data instanceof Blob ? r.data : new Blob([r.data], { type: 'text/csv;charset=utf-8' }));
+      const a = document.createElement('a'); a.href = url; a.download = `journal-caisse-${from || 'debut'}-${to || 'fin'}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) { toast.error(cashErrorMessage(err)); }
+    finally { setExporting(false); }
+  };
+
+  const rows = data?.data || [];
+  const total = data?.total || 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE));
+  const totals = data?.totals || {};
+  const signed = (r) => { const inn = CASH_IN_TYPES.includes(r.type); return { sign: inn ? '+' : '−', color: inn ? G : O }; };
+
+  if (state === 'unavailable') return (<div style={{ maxWidth: 820, margin: '0 auto' }}><CaisseHeader icon="📒" title="Journal" /><CaisseUnavailable title="Journal de caisse" /></div>);
+
+  return (
+    <div style={{ maxWidth: 820, margin: '0 auto' }}>
+      <CaisseHeader icon="📒" title="Journal de caisse" subtitle="Encaissements, retraits et transferts, en un seul endroit." />
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: MUTED }}>Du</span>
+          <DateFR value={from} onChange={v => { setFrom(v); setPage(0); }} ariaLabel="Date de début" max={to || undefined} />
+          <span style={{ fontSize: 12, color: MUTED }}>au</span>
+          <DateFR value={to} onChange={v => { setTo(v); setPage(0); }} ariaLabel="Date de fin" min={from || undefined} />
+          <select value={type} onChange={e => { setType(e.target.value); setPage(0); }} aria-label="Type d’opération" style={{ ...selStyle, width: 'auto', minHeight: 38, padding: '7px 10px', fontSize: 12 }}>
+            <option value="">Tous les types</option>
+            {Object.entries(CASH_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <Btn small outline color={BLUE} onClick={exportCsv} disabled={exporting} style={{ minHeight: 38, marginLeft: 'auto' }}>{exporting ? 'Export…' : '⬇️ Export CSV'}</Btn>
+        </div>
+      </Card>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+        <Card style={{ borderTop: `3px solid ${G}`, padding: 14 }}><div style={{ fontSize: 11, color: MUTED }}>Entrées</div><div style={{ fontSize: 18, fontWeight: 800, color: G }}>{fmtMoney(totals.in, currency)}</div></Card>
+        <Card style={{ borderTop: `3px solid ${O}`, padding: 14 }}><div style={{ fontSize: 11, color: MUTED }}>Sorties</div><div style={{ fontSize: 18, fontWeight: 800, color: O }}>{fmtMoney(totals.out, currency)}</div></Card>
+        <Card style={{ borderTop: `3px solid ${BLUE}`, padding: 14 }}><div style={{ fontSize: 11, color: MUTED }}>Solde de la période</div><div style={{ fontSize: 18, fontWeight: 800, color: BLUE }}>{fmtMoney((Number(totals.in) || 0) - (Number(totals.out) || 0), currency)}</div></Card>
+      </div>
+
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
+        {state === 'loading' && <Spin />}
+        {state === 'error' && <div style={{ padding: 20, color: R, fontSize: 13 }}>Impossible de charger le journal.</div>}
+        {state === 'ok' && rows.length === 0 && <div style={{ padding: 24, color: MUTED, fontSize: 13, textAlign: 'center' }}>Aucune opération sur la période.</div>}
+        {state === 'ok' && rows.map(r => {
+          const s = signed(r);
+          return (
+            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `1px solid ${BORDER}`, minHeight: 56 }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: `${s.color}15`, color: s.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18, flexShrink: 0 }}>{s.sign}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, fontFamily: FONT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{CASH_TYPES[r.type] || tl(r.type, 'fr')}{r.counterparty ? ` · ${r.counterparty}` : ''}</div>
+                <div style={{ fontSize: 11, color: MUTED, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {fmtDate(r.createdAt, 'fr')}{r.reference ? ` · ${r.reference}` : ''}{r.method ? ` · ${r.method === 'mobile_money' ? 'Mobile Money' : r.method === 'card' ? 'Carte' : r.method}` : ''}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: s.color, fontFamily: FONT }}>{s.sign} {fmtMoney(r.amount, currency)}</div>
+                {r.fee != null && Number(r.fee) > 0 && <div style={{ fontSize: 10, color: MUTED }}>frais {fmtMoney(r.fee, currency)} · net {fmtMoney(r.net, currency)}</div>}
+                <Badge label={cashSt(r.status)} color={cashSc(r.status)} />
+              </div>
+            </div>
+          );
+        })}
+        {state === 'ok' && total > PAGE && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', fontSize: 12, color: MUTED }}>
+            <Btn small outline color={MUTED} disabled={page === 0} onClick={() => setPage(p => p - 1)} style={{ minHeight: 40 }}>← Préc.</Btn>
+            <span>Page {page + 1} / {pages} · {total} opération{total > 1 ? 's' : ''}</span>
+            <Btn small outline color={MUTED} disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)} style={{ minHeight: 40 }}>Suiv. →</Btn>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// Bandeau sur l'ancienne page Operations : la caisse est le nouveau parcours.
+const CaisseBanner = () => (
+  <div style={{ background: `${G}12`, border: `1px solid ${G}50`, borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontFamily: FONT }}>
+    <div style={{ fontSize: 13 }}><strong>🏪 Nouvelle caisse</strong> — encaissez, retirez et transférez depuis un seul écran, pensé pour le téléphone.</div>
+    <Link to="/caisse" style={{ background: G, color: '#fff', padding: '8px 14px', borderRadius: 8, textDecoration: 'none', fontSize: 13, fontWeight: 700, minHeight: 36, display: 'inline-flex', alignItems: 'center' }}>Ouvrir la caisse →</Link>
   </div>
 );
 
@@ -4095,7 +5143,13 @@ export default function App() {
           <Guard>
             <Layout lang={lang} toggleLang={toggle}>
               <Routes>
-                <Route path="" element={<Dashboard lang={lang} />} />
+                <Route path="" element={<Navigate to="/caisse" replace />} />
+                <Route path="dashboard" element={<Dashboard lang={lang} />} />
+                <Route path="caisse" element={<CaisseHome />} />
+                <Route path="caisse/encaisser" element={<CaisseEncaisser />} />
+                <Route path="caisse/retirer" element={<CaisseRetirer />} />
+                <Route path="caisse/transferer" element={<CaisseTransferer />} />
+                <Route path="caisse/journal" element={<CaisseJournal />} />
                 <Route path="operations" element={<Operations lang={lang} />} />
                 <Route path="pay-links" element={<PayLinks lang={lang} />} />
                 <Route path="accept" element={<AcceptPayment lang={lang} />} />
