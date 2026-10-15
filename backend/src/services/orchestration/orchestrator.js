@@ -63,12 +63,13 @@ const SETTLEABLE_TYPES = new Set([
  * @param {string}  [params.aidDetected]     AID NFC détecté par l'app
  * @param {string}  [params.description]     Description optionnelle
  * @param {string}  [params.deviceId]        ID terminal
+ * @param {string}  [params.operatorOverride] WAVE-4 : wallet au choix du client (WAVE, EXPRESS_UNION) — caisse
  *
  * @returns {OrchestratorResult}
  */
 const processTransaction = async (params) => {
   const txnId    = uuidv4();
-  const { merchantId, type, amount, customerPhone, emvPayload, aidDetected, description, deviceId, payLinkId } = params;
+  const { merchantId, type, amount, customerPhone, emvPayload, aidDetected, description, deviceId, payLinkId, operatorOverride } = params;
 
   logger.info('Orchestrator: new transaction', { txnId, merchantId, type, amount });
 
@@ -109,7 +110,9 @@ const processTransaction = async (params) => {
   // ── 2. Détection automatique ────────────────────────────────────
   let detection;
   if (customerPhone) {
-    detection = detectionEngine.detectFromPhone(customerPhone);
+    detection = operatorOverride
+      ? detectionEngine.detectFromPhone(customerPhone, { operatorOverride })
+      : detectionEngine.detectFromPhone(customerPhone);
   } else if (aidDetected) {
     detection = detectionEngine.detectFromAid(aidDetected);
   } else if (emvPayload) {

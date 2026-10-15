@@ -18,7 +18,7 @@ const pool = new Pool({
   idleTimeoutMillis: intFromEnv('DB_IDLE_TIMEOUT_MS', 30000),
   connectionTimeoutMillis: intFromEnv('DB_CONNECT_TIMEOUT_MS', 5000),
   statement_timeout: intFromEnv('DB_STATEMENT_TIMEOUT_MS', 30000),
-  application_name: process.env.DB_APPLICATION_NAME || 'cplus-2.6.0-api',
+  application_name: process.env.DB_APPLICATION_NAME || 'cpay-api',
 });
 
 pool.on('error', (err) => {

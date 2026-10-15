@@ -95,7 +95,7 @@ app.get('/health', asyncHandler(async (_req, res) => {
   res.status(dbOk ? 200 : 503).json({
     status: dbOk ? 'ok' : 'degraded',
     db: dbOk ? 'connected' : 'unreachable',
-    version: '2.6.0',
+    version: require('../package.json').version,
     uptime: process.uptime(),
     env: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
@@ -221,6 +221,9 @@ app.post('/api/v1/consent/accept', verifyToken, asyncHandler(async (req, res) =>
   res.json({ success: true });
 }));
 
+// WAVE-4 : caisse marchande (docs/CAISSE-API.md) — montée AVANT les routeurs admin / marchand
+app.use('/api/v1/admin/cash',    wrapRouterAsync(require('./routes/cash-admin.routes')));
+app.use('/api/v1/merchant/cash', wrapRouterAsync(require('./routes/cash.routes')));
 app.use('/api/v1/admin', wrapRouterAsync(adminRoutes));
 app.use('/api/v1/merchant', wrapRouterAsync(merchantRoutes));
 app.use('/api/v1/cardholder', wrapRouterAsync(cardholderRoutes));
@@ -427,7 +430,7 @@ app.post('/internal/settlement/run', asyncHandler(async (req, res) => {
 }));
 
 app.get('/live', (_req, res) => {
-  res.json({ status: 'alive', version: '2.6.0', uptime: process.uptime() });
+  res.json({ status: 'alive', version: require('../package.json').version, uptime: process.uptime() });
 });
 
 app.get('/ready', asyncHandler(async (_req, res) => {
@@ -791,7 +794,7 @@ const start = async () => {
     logger.error('Database unreachable - starting anyway', { err: err.message });
   }
 
-  server = app.listen(PORT, () => logger.info(`CPlus 2.6.0 API started on :${PORT}`));
+  server = app.listen(PORT, () => logger.info(`C-Pay ${require('../package.json').version} API started on :${PORT}`));
 
   // Reconciliation automatique des transactions pending (toutes les 2 min)
   try {
