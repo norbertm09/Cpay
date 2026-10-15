@@ -138,7 +138,7 @@ class DisburseFragment : Fragment() {
         b.progressWithdraw.visibility = View.VISIBLE
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val r = ApiClient.api.merchantWithdraw(WithdrawRequest(
+                val r = ApiClient.api.merchantWithdraw(LegacyWithdrawRequest(
                     amount = amt!!, phone = phone, operator = withdrawOp, description = ref))
                 if (r.isSuccessful && r.body() != null) {
                     val d = r.body()!!

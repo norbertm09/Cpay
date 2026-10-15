@@ -8,6 +8,7 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import global.cpay.app.BuildConfig
 import global.cpay.app.common.*
 import global.cpay.app.databinding.ActivityPairingBinding
 import kotlinx.coroutines.launch
@@ -53,7 +54,7 @@ class PairingActivity : AppCompatActivity() {
                     pairingCode = code,
                     androidId   = androidId,
                     deviceModel = model,
-                    appVersion  = "2.6.0",
+                    appVersion  = BuildConfig.VERSION_NAME,
                 ))
                 if (r.isSuccessful && r.body() != null) {
                     val d = r.body()!!

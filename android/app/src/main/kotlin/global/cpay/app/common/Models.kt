@@ -48,6 +48,9 @@ data class ApiError(
     @SerializedName("code")         val code: String? = null,
     @SerializedName("attemptsLeft") val attemptsLeft: Int? = null,
     @SerializedName("lockedUntil")  val lockedUntil: String? = null,
+    // WAVE-4 : 428 STEP_UP_REQUIRED { methods }, 422 INSUFFICIENT_BALANCE { available }
+    @SerializedName("methods")      val methods: List<String>? = null,
+    @SerializedName("available")    val available: Double? = null,
 )
 
 data class UserInfo(
@@ -62,6 +65,10 @@ data class UserInfo(
     @SerializedName("role")         val role: String? = null,
     @SerializedName("businessName") val businessName: String? = null,
     @SerializedName("kycLevel")     val kycLevel: Int = 0,
+    @SerializedName("kybLevel")     val kybLevel: Int = 0,
+    @SerializedName("currency")     val currency: String? = null,
+    @SerializedName("country")      val country: String? = null,
+    @SerializedName("mfaEnabled")   val mfaEnabled: Boolean? = null,
 ) {
     val displayName: String get() = when {
         !businessName.isNullOrBlank() -> businessName
@@ -221,7 +228,8 @@ data class DisburseRequest(
     @SerializedName("description")    val description: String = "",
 )
 
-data class WithdrawRequest(
+/** Ancien retrait direct (POST /merchant/withdraw, 410 depuis le hotfix v1). */
+data class LegacyWithdrawRequest(
     @SerializedName("amount")      val amount: Double,
     @SerializedName("phone")       val phone: String,
     @SerializedName("operator")    val operator: String,
@@ -417,7 +425,15 @@ data class BankAccount(
     @SerializedName("status")        val status: String = "verified",
     @SerializedName("isDefault")     val isDefault: Boolean = false,
     @SerializedName("institution")   val institution: InstitutionRef? = null,
-)
+    @SerializedName("bankName")      val bankName: String? = null,
+    @SerializedName("accountMasked") val accountMasked: String? = null,
+) {
+    val isVerified: Boolean get() = status == "verified" || status == "active"
+    val displayBank: String get() = bankName ?: institution?.name ?: "Banque"
+    val displayNumber: String get() = accountMasked ?: accountNumber.let {
+        if (it.length > 4) "…" + it.takeLast(4) else it
+    }
+}
 
 data class BankAccountsResponse(
     @SerializedName("data")  val data: List<BankAccount> = emptyList(),
@@ -601,3 +617,310 @@ data class GtpStatus(
     @SerializedName("hasCard")    val hasCard: Boolean = false,
     @SerializedName("message")    val message: String = "",
 )
+
+// ═══════════ CAISSE MARCHANDE (WAVE-4, docs/CAISSE-API.md) ═══════════
+// Tous les champs sont optionnels/par defaut : le backend est implemente en parallele.
+data class CashBalance(
+    @SerializedName("available") val available: Double = 0.0,
+    @SerializedName("pending")   val pending: Double = 0.0,
+    @SerializedName("reserved")  val reserved: Double = 0.0,
+)
+
+data class CashToday(
+    @SerializedName("collected")      val collected: Double = 0.0,
+    @SerializedName("collectedCount") val collectedCount: Int = 0,
+    @SerializedName("byMethod")       val byMethod: Map<String, Double>? = null,
+    @SerializedName("withdrawn")      val withdrawn: Double = 0.0,
+    @SerializedName("transfersOut")   val transfersOut: Double = 0.0,
+    @SerializedName("transfersIn")    val transfersIn: Double = 0.0,
+) {
+    val mobileMoney: Double get() = byMethod?.get("mobile_money") ?: 0.0
+    val card: Double        get() = byMethod?.get("card") ?: 0.0
+}
+
+data class CashLimits(
+    @SerializedName("withdrawDailyMax")       val withdrawDailyMax: Double? = null,
+    @SerializedName("withdrawDailyRemaining") val withdrawDailyRemaining: Double? = null,
+    @SerializedName("transferMin")            val transferMin: Double? = null,
+)
+
+data class CashWallet(
+    @SerializedName("operator")   val operator: String? = null,
+    @SerializedName("phone")      val phone: String? = null,
+    @SerializedName("verifiedAt") val verifiedAt: String? = null,
+) {
+    val isSet: Boolean get() = !phone.isNullOrBlank()
+    val operatorLabel: String get() = CashLabels.operator(operator)
+}
+
+data class CashProfile(
+    @SerializedName("kybLevel")       val kybLevel: Int = 0,
+    @SerializedName("wallet")         val wallet: CashWallet? = null,
+    @SerializedName("bankAccounts")   val bankAccounts: Int = 0,
+    @SerializedName("cardAcceptance") val cardAcceptance: String? = null,
+)
+
+data class CashSummary(
+    @SerializedName("currency") val currency: String? = null,
+    @SerializedName("balance")  val balance: CashBalance? = null,
+    @SerializedName("today")    val today: CashToday? = null,
+    @SerializedName("limits")   val limits: CashLimits? = null,
+    @SerializedName("profile")  val profile: CashProfile? = null,
+) {
+    val cur: String get() = currency ?: "XAF"
+    val available: Double get() = balance?.available ?: 0.0
+}
+
+data class CashCollectRequest(
+    @SerializedName("amount")        val amount: Double,
+    @SerializedName("method")        val method: String,               // mobile_money | card
+    @SerializedName("currency")      val currency: String? = null,
+    @SerializedName("customerPhone") val customerPhone: String? = null,
+    @SerializedName("operator")      val operator: String? = null,     // forcage (Wave, Express Union…)
+    @SerializedName("description")   val description: String? = null,
+    @SerializedName("reference")     val reference: String? = null,
+)
+
+data class CashPayLink(
+    @SerializedName("shortId")   val shortId: String? = null,
+    @SerializedName("shortUrl")  val shortUrl: String? = null,
+    @SerializedName("expiresAt") val expiresAt: String? = null,
+)
+
+data class CashCollectResponse(
+    @SerializedName("txnId")         val txnId: String? = null,
+    @SerializedName("status")        val status: String? = null,
+    @SerializedName("method")        val method: String? = null,
+    @SerializedName("operator")      val operator: String? = null,
+    @SerializedName("operatorLabel") val operatorLabel: String? = null,
+    @SerializedName("country")       val country: String? = null,
+    @SerializedName("currency")      val currency: String? = null,
+    @SerializedName("amount")        val amount: Double? = null,
+    @SerializedName("fee")           val fee: Double? = null,
+    @SerializedName("net")           val net: Double? = null,
+    @SerializedName("reference")     val reference: String? = null,
+    @SerializedName("statusUrl")     val statusUrl: String? = null,
+    @SerializedName("payLink")       val payLink: CashPayLink? = null,
+)
+
+data class CashCollectStatus(
+    @SerializedName("txnId")         val txnId: String? = null,
+    @SerializedName("status")        val status: String? = null,   // pending|authorized|failed|expired
+    @SerializedName("amount")        val amount: Double? = null,
+    @SerializedName("fee")           val fee: Double? = null,
+    @SerializedName("net")           val net: Double? = null,
+    @SerializedName("operator")      val operator: String? = null,
+    @SerializedName("customerPhone") val customerPhone: String? = null,
+    @SerializedName("reference")     val reference: String? = null,
+    @SerializedName("createdAt")     val createdAt: String? = null,
+    @SerializedName("finalizedAt")   val finalizedAt: String? = null,
+    @SerializedName("receiptUrl")    val receiptUrl: String? = null,
+    @SerializedName("error")         val error: String? = null,
+) {
+    val isDone    get() = status == "authorized"
+    val isFailed  get() = status == "failed" || status == "expired"
+    val isPending get() = status == null || status == "pending"
+}
+
+/** PUT /merchant/cash/wallet { operator, phone, confirm } (step-up §6). */
+data class CashWalletRequest(
+    @SerializedName("operator") val operator: String,
+    @SerializedName("phone")    val phone: String,
+    @SerializedName("confirm")  val confirm: Map<String, String>,
+)
+
+/** POST /merchant/cash/withdraw { amount, description?, confirm } */
+data class WithdrawRequest(
+    @SerializedName("amount")      val amount: Double,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("confirm")     val confirm: Map<String, String>,
+)
+
+data class WithdrawResponse(
+    @SerializedName("transferId") val transferId: String? = null,
+    @SerializedName("reference")  val reference: String? = null,
+    @SerializedName("status")     val status: String? = null,
+    @SerializedName("amount")     val amount: Double? = null,
+    @SerializedName("fee")        val fee: Double? = null,
+    @SerializedName("net")        val net: Double? = null,
+    @SerializedName("wallet")     val wallet: CashWallet? = null,
+)
+
+/** POST /merchant/cash/transfers { direction, accountId?, amount, description?, confirm } */
+data class TransferRequest(
+    @SerializedName("direction")   val direction: String,            // wallet_to_bank | bank_to_wallet
+    @SerializedName("amount")      val amount: Double,
+    @SerializedName("accountId")   val accountId: String? = null,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("confirm")     val confirm: Map<String, String>,
+)
+
+data class BankInstructions(
+    @SerializedName("bankName")      val bankName: String? = null,
+    @SerializedName("accountName")   val accountName: String? = null,
+    @SerializedName("accountNumber") val accountNumber: String? = null,
+    @SerializedName("iban")          val iban: String? = null,
+    @SerializedName("swift")         val swift: String? = null,
+    @SerializedName("reference")     val reference: String? = null,
+    @SerializedName("expiresAt")     val expiresAt: String? = null,
+)
+
+data class TransferBankAccount(
+    @SerializedName("bankName")      val bankName: String? = null,
+    @SerializedName("accountMasked") val accountMasked: String? = null,
+)
+
+data class Transfer(
+    @SerializedName("transferId")   val transferId: String = "",
+    @SerializedName("reference")    val reference: String? = null,
+    @SerializedName("direction")    val direction: String? = null,
+    @SerializedName("status")       val status: String? = null,
+    @SerializedName("amount")       val amount: Double = 0.0,
+    @SerializedName("fee")          val fee: Double? = null,
+    @SerializedName("net")          val net: Double? = null,
+    @SerializedName("currency")     val currency: String? = null,
+    @SerializedName("description")  val description: String? = null,
+    @SerializedName("bankAccount")  val bankAccount: TransferBankAccount? = null,
+    @SerializedName("instructions") val instructions: BankInstructions? = null,
+    @SerializedName("createdAt")    val createdAt: String? = null,
+    @SerializedName("completedAt")  val completedAt: String? = null,
+) {
+    val isFunding: Boolean  get() = direction == "bank_to_wallet" || direction == "funding"
+    val canCancel: Boolean  get() = status == "awaiting_funds" || status == "pending_manual"
+    val statusLabel: String get() = CashLabels.transferStatus(status)
+    val statusColor: String get() = CashLabels.statusColor(status)
+    val title: String get() = when {
+        isFunding -> "Approvisionnement banque → wallet"
+        bankAccount != null -> "Vers ${bankAccount.bankName ?: "banque"} ${bankAccount.accountMasked ?: ""}".trim()
+        direction == "wallet_to_bank" || direction == "payout" -> "Vers la banque"
+        else -> "Transfert"
+    }
+}
+
+data class TransfersResponse(
+    @SerializedName("data")  val data: List<Transfer> = emptyList(),
+    @SerializedName("total") val total: Int = 0,
+)
+
+/** GET /merchant/cash/history — une ligne du journal. */
+data class HistoryEntry(
+    @SerializedName("id")           val id: String = "",
+    @SerializedName("type")         val type: String? = null,        // collect|withdraw|transfer_out|transfer_in
+    @SerializedName("reference")    val reference: String? = null,
+    @SerializedName("amount")       val amount: Double = 0.0,
+    @SerializedName("fee")          val fee: Double? = null,
+    @SerializedName("net")          val net: Double? = null,
+    @SerializedName("status")       val status: String? = null,
+    @SerializedName("counterparty") val counterparty: String? = null,
+    @SerializedName("method")       val method: String? = null,
+    @SerializedName("createdAt")    val createdAt: String? = null,
+) {
+    val isIncoming: Boolean get() = type == "collect" || type == "transfer_in"
+    val typeLabel: String get() = when (type) {
+        "collect"      -> "Encaissement"
+        "withdraw"     -> "Retrait"
+        "transfer_out" -> "Transfert vers banque"
+        "transfer_in"  -> "Approvisionnement"
+        else           -> type ?: "Mouvement"
+    }
+    val icon: String get() = when (type) {
+        "collect"      -> "📥"
+        "withdraw"     -> "📤"
+        "transfer_out" -> "🏦"
+        "transfer_in"  -> "💰"
+        else           -> "💳"
+    }
+}
+
+data class HistoryTotals(
+    @SerializedName("in")  val inTotal: Double = 0.0,
+    @SerializedName("out") val outTotal: Double = 0.0,
+)
+
+data class HistoryResponse(
+    @SerializedName("data")   val data: List<HistoryEntry> = emptyList(),
+    @SerializedName("total")  val total: Int = 0,
+    @SerializedName("totals") val totals: HistoryTotals? = null,
+)
+
+/** 428 STEP_UP_REQUIRED { methods: ["totp"] | ["password"] } */
+data class StepUpError(
+    @SerializedName("error")   val error: String? = null,
+    @SerializedName("code")    val code: String? = null,
+    @SerializedName("methods") val methods: List<String> = emptyList(),
+) {
+    val method: String get() = methods.firstOrNull() ?: "password"
+}
+
+/** POST /detect/phone (public) — services/detection/detection.engine.js */
+data class PhoneAlternative(
+    @SerializedName("operator") val operator: String = "",
+    @SerializedName("brand")    val brand: String? = null,
+    @SerializedName("gateway")  val gateway: String? = null,
+)
+
+data class PhoneDetection(
+    @SerializedName("success")      val success: Boolean = false,
+    @SerializedName("phone")        val phone: String? = null,
+    @SerializedName("country")      val country: String? = null,
+    @SerializedName("countryName")  val countryName: String? = null,
+    @SerializedName("currency")     val currency: String? = null,
+    @SerializedName("region")       val region: String? = null,
+    @SerializedName("operator")     val operator: String? = null,
+    @SerializedName("brand")        val brand: String? = null,
+    @SerializedName("gateway")      val gateway: String? = null,
+    @SerializedName("verified")     val verified: Boolean? = null,
+    @SerializedName("alternatives") val alternatives: List<PhoneAlternative> = emptyList(),
+    @SerializedName("error")        val error: String? = null,
+    @SerializedName("code")         val code: String? = null,
+) {
+    val operatorLabel: String get() = brand ?: CashLabels.operator(operator)
+}
+
+/** Libelles partages (operateurs, statuts) pour la caisse. */
+object CashLabels {
+    val OPERATORS: List<Pair<String, String>> = listOf(
+        "mtn_momo"      to "MTN MoMo",
+        "orange_money"  to "Orange Money",
+        "airtel_money"  to "Airtel Money",
+        "moov_money"    to "Moov Money",
+        "wave"          to "Wave",
+        "express_union" to "Express Union Mobile",
+        "mpesa"         to "M-Pesa",
+        "free_money"    to "Free Money",
+    )
+
+    fun operator(code: String?): String {
+        if (code.isNullOrBlank()) return "Mobile Money"
+        val key = code.lowercase()
+        OPERATORS.firstOrNull { it.first == key }?.let { return it.second }
+        return when (key) {
+            "mtn"    -> "MTN MoMo"
+            "orange" -> "Orange Money"
+            "airtel" -> "Airtel Money"
+            "moov"   -> "Moov Money"
+            else     -> code.replace('_', ' ').replaceFirstChar { it.uppercase() }
+        }
+    }
+
+    fun transferStatus(status: String?): String = when (status) {
+        "pending"        -> "En attente"
+        "processing"     -> "En cours"
+        "pending_manual" -> "Traitement J+1"
+        "awaiting_funds" -> "Virement attendu"
+        "completed"      -> "Effectué"
+        "failed"         -> "Échoué"
+        "cancelled"      -> "Annulé"
+        "rejected"       -> "Rejeté"
+        "authorized"     -> "Autorisé"
+        "expired"        -> "Expiré"
+        else             -> status ?: "—"
+    }
+
+    fun statusColor(status: String?): String = when (status) {
+        "completed", "authorized"               -> "#007a5a"
+        "failed", "rejected", "expired"         -> "#c53030"
+        "cancelled"                             -> "#5a6677"
+        else                                    -> "#c47000"
+    }
+}

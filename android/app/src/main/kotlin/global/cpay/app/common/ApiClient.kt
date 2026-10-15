@@ -51,6 +51,7 @@ object ApiClient {
     private val PUBLIC_SUFFIXES = listOf(
         "/auth/login", "/auth/register", "/auth/2fa/validate", "/auth/refresh",
         "/auth/forgot-password", "/auth/reset-password",
+        "/detect/phone",                                  // WAVE-4 : detection operateur (publique)
     )
 
     private lateinit var retrofit: Retrofit
@@ -234,6 +235,8 @@ object ApiClient {
     fun onSessionLost() {
         if (!SessionManager.isLoggedIn) return
         SessionManager.clearSession()
+        global.cpay.app.merchant.CashSession.clear()
+        global.cpay.app.merchant.StepUp.reset()
         appContext.sendBroadcast(Intent(ACTION_LOGOUT).setPackage(appContext.packageName))
         Handler(Looper.getMainLooper()).post {
             val i = Intent(appContext, ProfileSelectActivity::class.java)
@@ -264,5 +267,7 @@ object ApiClient {
             Log.w(TAG, "logout: ${e.message}")
         }
         SessionManager.clearSession()
+        global.cpay.app.merchant.CashSession.clear()
+        global.cpay.app.merchant.StepUp.reset()
     }
 }

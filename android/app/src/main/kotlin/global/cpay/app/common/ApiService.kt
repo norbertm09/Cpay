@@ -133,7 +133,67 @@ interface ApiService {
     suspend fun merchantDisburse(@Body body: DisburseRequest): Response<PaymentResponse>
 
     @POST("merchant/withdraw")
-    suspend fun merchantWithdraw(@Body body: WithdrawRequest): Response<PaymentResponse>
+    suspend fun merchantWithdraw(@Body body: LegacyWithdrawRequest): Response<PaymentResponse>
+
+    // ═══════════ MERCHANT — CAISSE (WAVE-4, docs/CAISSE-API.md) ═══════════
+    // Toute operation qui cree un mouvement exige l'en-tete Idempotency-Key (8-128 car.).
+    @GET("merchant/cash/summary")
+    suspend fun cashSummary(): Response<CashSummary>
+
+    @POST("merchant/cash/collect")
+    suspend fun cashCollect(
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body body: CashCollectRequest,
+    ): Response<CashCollectResponse>
+
+    @GET("merchant/cash/collect/{txnId}")
+    suspend fun cashCollectStatus(@Path("txnId") txnId: String): Response<CashCollectStatus>
+
+    /** 200 { operator, phone, verifiedAt } ou 204 (aucun wallet enregistre). */
+    @GET("merchant/cash/wallet")
+    suspend fun cashWallet(): Response<CashWallet>
+
+    @PUT("merchant/cash/wallet")
+    suspend fun cashWalletUpdate(@Body body: CashWalletRequest): Response<CashWallet>
+
+    @POST("merchant/cash/withdraw")
+    suspend fun cashWithdraw(
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body body: WithdrawRequest,
+    ): Response<WithdrawResponse>
+
+    @GET("merchant/cash/transfers")
+    suspend fun cashTransfers(
+        @Query("direction") direction: String? = null,
+        @Query("status")    status: String? = null,
+        @Query("limit")     limit: Int = 20,
+        @Query("offset")    offset: Int = 0,
+    ): Response<TransfersResponse>
+
+    @GET("merchant/cash/transfers/{id}")
+    suspend fun cashTransferDetail(@Path("id") id: String): Response<Transfer>
+
+    @POST("merchant/cash/transfers")
+    suspend fun cashTransferCreate(
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body body: TransferRequest,
+    ): Response<Transfer>
+
+    @POST("merchant/cash/transfers/{id}/cancel")
+    suspend fun cashTransferCancel(@Path("id") id: String): Response<Transfer>
+
+    @GET("merchant/cash/history")
+    suspend fun cashHistory(
+        @Query("from")   from: String? = null,
+        @Query("to")     to: String? = null,
+        @Query("type")   type: String? = null,
+        @Query("limit")  limit: Int = 30,
+        @Query("offset") offset: Int = 0,
+    ): Response<HistoryResponse>
+
+    // ═══════════ DETECTION (publique, sans jeton) ═══════════
+    @POST("detect/phone")
+    suspend fun detectPhone(@Body body: Map<String, String>): Response<PhoneDetection>
 
     // ═══════════ MERCHANT — PAY LINKS ═══════════
     @GET("merchant/pay-links")

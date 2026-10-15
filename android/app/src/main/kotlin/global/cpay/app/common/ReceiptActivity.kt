@@ -37,12 +37,13 @@ class ReceiptActivity : AppCompatActivity() {
             "airtel_money" -> "🔴 Airtel Money"
             "mtn_momo"     -> "🟡 MTN MoMo"
             "card"         -> "💳 Carte"
+            "mobile_money" -> "📱 Mobile Money"
             else           -> method
         }
 
         val (statusLabel, statusColor) = when (status) {
-            "completed" -> "✅ APPROUVÉ" to 0xFF00c896.toInt()
-            "failed"    -> "❌ REFUSÉ"   to 0xFFff3b30.toInt()
+            "completed", "authorized" -> "✅ APPROUVÉ" to 0xFF00c896.toInt()
+            "failed", "expired"       -> "❌ REFUSÉ"   to 0xFFff3b30.toInt()
             else        -> "⏳ EN ATTENTE" to 0xFFff9500.toInt()
         }
 

@@ -1,96 +1,215 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@color/bg" android:padding="16dp">
+    android:background="@color/bg" android:padding="16dp"
+    android:fillViewport="true">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <TextView android:id="@+id/tv_welcome" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:text="Bonjour 🏪"
-            android:textSize="20sp" android:textStyle="bold" android:textColor="@color/text"
-            android:layout_marginBottom="16dp"/>
-
-        <!-- KPI Cards -->
+        <!-- En-tete : bonjour + profil + actualiser -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginBottom="12dp">
-            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1" android:orientation="vertical"
-                android:background="@drawable/bg_balance_card" android:padding="16dp"
-                android:layout_marginEnd="8dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Volume aujourd'hui" android:textColor="#B3FFFFFF" android:textSize="12sp"/>
-                <TextView android:id="@+id/tv_volume_today" android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" android:text="— XAF"
-                    android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold"/>
-                <TextView android:id="@+id/tv_txns_today" android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" android:text="0 txns"
-                    android:textColor="#B3FFFFFF" android:textSize="12sp"/>
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+            <TextView android:id="@+id/tv_welcome" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_weight="1"
+                android:text="Bonjour 🏪" android:textSize="20sp" android:textStyle="bold"
+                android:textColor="@color/text"/>
+            <TextView android:id="@+id/btn_refresh" android:layout_width="40dp"
+                android:layout_height="40dp" android:text="↻" android:textSize="20sp"
+                android:textColor="@color/primary" android:gravity="center"
+                android:background="@drawable/bg_card" android:layout_marginEnd="8dp"
+                android:contentDescription="@string/caisse_refresh"
+                android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/btn_profile" android:layout_width="40dp"
+                android:layout_height="40dp" android:text="👤" android:textSize="18sp"
+                android:gravity="center" android:background="@drawable/bg_card"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <!-- Solde -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_balance_card"
+            android:padding="20dp" android:layout_marginBottom="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="@string/caisse_available" android:textColor="#B3FFFFFF" android:textSize="13sp"/>
+            <TextView android:id="@+id/tv_available" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="— XAF"
+                android:textColor="#FFFFFF" android:textSize="32sp" android:textStyle="bold"/>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="8dp">
+                <TextView android:id="@+id/tv_pending" android:layout_width="0dp"
+                    android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="En attente : —" android:textColor="#D9FFFFFF" android:textSize="12sp"/>
+                <TextView android:id="@+id/tv_reserved" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:text="Réservé : —"
+                    android:textColor="#D9FFFFFF" android:textSize="12sp" android:visibility="gone"/>
             </LinearLayout>
-            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1" android:orientation="vertical"
-                android:background="@drawable/bg_card" android:padding="16dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Volume ce mois" android:textColor="@color/text_secondary" android:textSize="12sp"/>
-                <TextView android:id="@+id/tv_volume_month" android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" android:text="— XAF"
-                    android:textColor="@color/primary_dark" android:textSize="18sp" android:textStyle="bold"/>
-                <TextView android:id="@+id/tv_txns_month" android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" android:text="0 txns"
+        </LinearLayout>
+
+        <!-- Aujourd'hui -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_card"
+            android:padding="14dp" android:layout_marginBottom="12dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:text="@string/caisse_today"
+                    android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text"/>
+                <TextView android:id="@+id/tv_today_count" android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" android:text="0 encaissement"
                     android:textColor="@color/text_secondary" android:textSize="12sp"/>
             </LinearLayout>
-        </LinearLayout>
-
-        <!-- Acces rapides -->
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginBottom="16dp">
-            <TextView android:id="@+id/btn_settlements" android:layout_width="0dp"
-                android:layout_height="48dp" android:layout_weight="1"
-                android:text="💰 Règlements" android:textColor="@color/primary"
-                android:textSize="13sp" android:textStyle="bold"
-                android:background="@drawable/bg_card" android:gravity="center"
-                android:layout_marginEnd="8dp" android:clickable="true" android:focusable="true"/>
-            <TextView android:id="@+id/btn_terminals" android:layout_width="0dp"
-                android:layout_height="48dp" android:layout_weight="1"
-                android:text="🖥️ Terminaux" android:textColor="@color/primary"
-                android:textSize="13sp" android:textStyle="bold"
-                android:background="@drawable/bg_card" android:gravity="center"
-                android:clickable="true" android:focusable="true"/>
-        </LinearLayout>
-
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginBottom="16dp">
-            <TextView android:id="@+id/btn_transfers" android:layout_width="0dp"
-                android:layout_height="48dp" android:layout_weight="1"
-                android:text="💸 Retraits" android:textColor="@color/primary"
-                android:textSize="13sp" android:textStyle="bold"
-                android:background="@drawable/bg_card" android:gravity="center"
-                android:layout_marginEnd="8dp" android:clickable="true" android:focusable="true"/>
-            <TextView android:id="@+id/btn_pay_links" android:layout_width="0dp"
-                android:layout_height="48dp" android:layout_weight="1"
-                android:text="🔗 Liens" android:textColor="@color/primary"
-                android:textSize="13sp" android:textStyle="bold"
-                android:background="@drawable/bg_card" android:gravity="center"
-                android:clickable="true" android:focusable="true"/>
-        </LinearLayout>
-
-        <!-- Dernières transactions -->
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginBottom="10dp">
-            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1" android:text="Dernières transactions"
-                android:textSize="16sp" android:textStyle="bold" android:textColor="@color/text"/>
-            <TextView android:id="@+id/tv_see_all" android:layout_width="wrap_content"
-                android:layout_height="wrap_content" android:text="Voir tout"
-                android:textColor="@color/primary" android:textSize="13sp"
-                android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/tv_today_collected" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="— XAF"
+                android:textColor="@color/primary_dark" android:textSize="22sp" android:textStyle="bold"
+                android:layout_marginTop="2dp"/>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="8dp">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="📱 Mobile Money" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+                    <TextView android:id="@+id/tv_by_momo" android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" android:text="—"
+                        android:textColor="@color/text" android:textSize="14sp" android:textStyle="bold"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="💳 Carte" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+                    <TextView android:id="@+id/tv_by_card" android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" android:text="—"
+                        android:textColor="@color/text" android:textSize="14sp" android:textStyle="bold"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="📤 Retiré" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+                    <TextView android:id="@+id/tv_withdrawn" android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" android:text="—"
+                        android:textColor="@color/text" android:textSize="14sp" android:textStyle="bold"/>
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
 
         <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:layout_gravity="center"
-            android:visibility="gone"/>
+            android:visibility="gone" android:layout_marginBottom="8dp"/>
+        <TextView android:id="@+id/tv_error" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textColor="@color/danger"
+            android:textSize="13sp" android:visibility="gone" android:layout_marginBottom="8dp"/>
 
-        <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_transactions"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:nestedScrollingEnabled="false"/>
+        <!-- Onboarding -->
+        <TextView android:id="@+id/tv_hint_wallet" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/caisse_hint_wallet"
+            android:textColor="#8a5a00" android:textSize="13sp" android:background="#FFF8E8"
+            android:padding="12dp" android:layout_marginBottom="8dp" android:visibility="gone"
+            android:clickable="true" android:focusable="true"/>
+        <TextView android:id="@+id/tv_hint_bank" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/caisse_hint_bank"
+            android:textColor="#8a5a00" android:textSize="13sp" android:background="#FFF8E8"
+            android:padding="12dp" android:layout_marginBottom="8dp" android:visibility="gone"
+            android:clickable="true" android:focusable="true"/>
+        <TextView android:id="@+id/tv_hint_card" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/caisse_hint_card_unavailable"
+            android:textColor="@color/text_secondary" android:textSize="12sp" android:background="@drawable/bg_input"
+            android:padding="12dp" android:layout_marginBottom="8dp" android:visibility="gone"/>
+
+        <!-- 4 tuiles -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginTop="4dp" android:layout_marginBottom="10dp">
+            <LinearLayout android:id="@+id/tile_collect" android:layout_width="0dp"
+                android:layout_height="92dp" android:layout_weight="1" android:orientation="vertical"
+                android:gravity="center" android:background="@drawable/bg_btn_primary"
+                android:layout_marginEnd="10dp" android:clickable="true" android:focusable="true">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="📥" android:textSize="24sp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/caisse_tile_collect" android:textColor="#FFFFFF"
+                    android:textSize="15sp" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/caisse_tile_collect_sub" android:textColor="#D9FFFFFF" android:textSize="11sp"/>
+            </LinearLayout>
+            <LinearLayout android:id="@+id/tile_withdraw" android:layout_width="0dp"
+                android:layout_height="92dp" android:layout_weight="1" android:orientation="vertical"
+                android:gravity="center" android:background="@drawable/bg_card"
+                android:clickable="true" android:focusable="true">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="📤" android:textSize="24sp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/caisse_tile_withdraw" android:textColor="@color/primary_dark"
+                    android:textSize="15sp" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/caisse_tile_withdraw_sub" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="16dp">
+            <LinearLayout android:id="@+id/tile_transfer" android:layout_width="0dp"
+                android:layout_height="92dp" android:layout_weight="1" android:orientation="vertical"
+                android:gravity="center" android:background="@drawable/bg_card"
+                android:layout_marginEnd="10dp" android:clickable="true" android:focusable="true">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="🏦" android:textSize="24sp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/caisse_tile_transfer" android:textColor="@color/primary_dark"
+                    android:textSize="15sp" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/caisse_tile_transfer_sub" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+            </LinearLayout>
+            <LinearLayout android:id="@+id/tile_journal" android:layout_width="0dp"
+                android:layout_height="92dp" android:layout_weight="1" android:orientation="vertical"
+                android:gravity="center" android:background="@drawable/bg_card"
+                android:clickable="true" android:focusable="true">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="📒" android:textSize="24sp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/caisse_tile_journal" android:textColor="@color/primary_dark"
+                    android:textSize="15sp" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/caisse_tile_journal_sub" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Autres ecrans -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="@string/caisse_others" android:textSize="14sp" android:textStyle="bold"
+            android:textColor="@color/text" android:layout_marginBottom="8dp"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="8dp">
+            <TextView android:id="@+id/btn_settlements" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1" android:text="💰 Règlements"
+                android:textColor="@color/primary" android:textSize="12sp" android:textStyle="bold"
+                android:background="@drawable/bg_card" android:gravity="center"
+                android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/btn_terminals" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1" android:text="🖥️ Terminaux"
+                android:textColor="@color/primary" android:textSize="12sp" android:textStyle="bold"
+                android:background="@drawable/bg_card" android:gravity="center"
+                android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/btn_pay_links" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1" android:text="🔗 Liens"
+                android:textColor="@color/primary" android:textSize="12sp" android:textStyle="bold"
+                android:background="@drawable/bg_card" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="16dp">
+            <TextView android:id="@+id/btn_bank_accounts" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1" android:text="🏦 Comptes"
+                android:textColor="@color/primary" android:textSize="12sp" android:textStyle="bold"
+                android:background="@drawable/bg_card" android:gravity="center"
+                android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/btn_disburse" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1" android:text="💸 Décaisser"
+                android:textColor="@color/primary" android:textSize="12sp" android:textStyle="bold"
+                android:background="@drawable/bg_card" android:gravity="center"
+                android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/btn_kyb" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1" android:text="📄 KYB"
+                android:textColor="@color/primary" android:textSize="12sp" android:textStyle="bold"
+                android:background="@drawable/bg_card" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>
