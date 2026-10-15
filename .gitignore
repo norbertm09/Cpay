@@ -11,3 +11,8 @@ reset-creds.js
 docker/certbot/
 *.pem
 *.key
+
+# Artefacts locaux
+node_modules/
+dist/
+build/
