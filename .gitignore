@@ -2,3 +2,12 @@ docker/certbot/
 docker/dhparam.pem
 *.pem
 *.key
+
+# Jamais de secrets ni de sauvegardes dans le depot
+*.bak
+*.bak-*
+*.bak[0-9]
+reset-creds.js
+docker/certbot/
+*.pem
+*.key
