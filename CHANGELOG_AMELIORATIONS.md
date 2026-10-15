@@ -1,5 +1,14 @@
 # Changelog - ameliorations integrees
 
+## 2.6.0-hotfix-v1 (2026-10-15) — vague 1 de l'audit de production
+Voir `docs/HOTFIX-V1.md` : webhooks fail-closed avec re-verification operateur, IDOR cartes corrigees,
+endpoints creant de la valeur sans mouvement desactives (410), retrait carte refuse, statuts pending reels,
+un seul moteur de reglement (verrou, devise, resultat verifie), roles admin, 2FA partenaires reelle,
+pages de paiement echappees, cles API hachees, secrets masques, reservation atomique des fonds,
+routes de sante reparees, `/internal` et `/metrics` fail-closed, sauvegardes pg_dump, nginx/deploy corriges,
+APK debug retire, migration 007, 238 tests.
+
+
 Version cible: CPlus 2.6.0
 
 ## Backend

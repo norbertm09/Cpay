@@ -55,6 +55,13 @@ const agentAuth = async (req, res, next) => {
   } catch { res.status(401).json({ error: 'Token invalide' }); }
 };
 
+// Pagination bornée : limit ∈ [1,100], page ≥ 1
+const parsePagination = (q = {}) => {
+  const limit = Math.min(100, Math.max(1, parseInt(q.limit, 10) || 20));
+  const page  = Math.max(1, parseInt(q.page, 10) || 1);
+  return { limit, page, offset: (page - 1) * limit };
+};
+
 // ─── HELPER : Générer et envoyer token reset ──────────────────────
 const generateResetToken = () => {
   const raw  = crypto.randomBytes(32).toString('hex'); // token envoyé par email
@@ -289,23 +296,25 @@ distributionAdminRouter.post('/agencies', adminAuth, async (req, res) => {
 
 // GET /admin/distribution/agents
 distributionAdminRouter.get('/agents', adminAuth, async (req, res) => {
-  const { agencyId, bankId, page = 1, limit = 20 } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  const conds = ['1=1']; const params = [];
-  if (agencyId) { params.push(agencyId); conds.push(`a.agency_id=$${params.length}`); }
-  if (bankId)   { params.push(bankId);   conds.push(`a.bank_id=$${params.length}`); }
-  const r = await query(
-    `SELECT a.*, ag.agency_name, b.bank_name,
-            COUNT(ch.cardholder_id) as cardholder_count
-     FROM distribution_agents a
-     JOIN distribution_agencies ag ON ag.agency_id=a.agency_id
-     JOIN distribution_banks b ON b.bank_id=a.bank_id
-     LEFT JOIN cardholders ch ON ch.agent_id=a.agent_id AND ch.is_active=TRUE
-     WHERE ${conds.join(' AND ')} GROUP BY a.agent_id, ag.agency_name, b.bank_name
-     ORDER BY a.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-    [...params, parseInt(limit), offset]
-  );
-  res.json({ data: r.rows });
+  const { agencyId, bankId } = req.query;
+  const { page, limit, offset } = parsePagination(req.query);
+  try {
+    const conds = ['1=1']; const params = [];
+    if (agencyId) { params.push(agencyId); conds.push(`a.agency_id=$${params.length}`); }
+    if (bankId)   { params.push(bankId);   conds.push(`a.bank_id=$${params.length}`); }
+    const r = await query(
+      `SELECT a.*, ag.agency_name, b.bank_name,
+              COUNT(ch.cardholder_id) as cardholder_count
+       FROM distribution_agents a
+       JOIN distribution_agencies ag ON ag.agency_id=a.agency_id
+       JOIN distribution_banks b ON b.bank_id=a.bank_id
+       LEFT JOIN cardholders ch ON ch.agent_id=a.agent_id AND ch.is_active=TRUE
+       WHERE ${conds.join(' AND ')} GROUP BY a.agent_id, ag.agency_name, b.bank_name
+       ORDER BY a.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
+      [...params, limit, offset]
+    );
+    res.json({ data: r.rows.map(a => ({ ...a, password_hash: undefined })), page, limit });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // POST /admin/distribution/agents
@@ -387,19 +396,21 @@ agentRouter.post('/auth/login', async (req, res) => {
 
 // GET /agent/cardholders — Mes porteurs de carte
 agentRouter.get('/cardholders', agentAuth, async (req, res) => {
-  const { page = 1, limit = 20, search } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  const conds  = ['ch.agent_id=$1']; const params = [req.agent.sub];
-  if (search) { params.push(`%${search}%`); conds.push(`(ch.first_name ILIKE $${params.length} OR ch.last_name ILIKE $${params.length} OR ch.phone ILIKE $${params.length})`); }
-  const r = await query(
-    `SELECT ch.cardholder_id, ch.first_name, ch.last_name, ch.phone, ch.email, ch.kyc_level, ch.created_at,
-            vc.card_masked, vc.balance, vc.currency, vc.status as card_status
-     FROM cardholders ch LEFT JOIN virtual_cards vc ON vc.card_id=ch.card_id
-     WHERE ${conds.join(' AND ')} ORDER BY ch.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-    [...params, parseInt(limit), offset]
-  );
-  const cnt = await query(`SELECT COUNT(*) FROM cardholders WHERE ${conds.join(' AND ')}`, params);
-  res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
+  const { search } = req.query;
+  const { page, limit, offset } = parsePagination(req.query);
+  try {
+    const conds  = ['ch.agent_id=$1']; const params = [req.agent.sub];
+    if (search) { params.push(`%${search}%`); conds.push(`(ch.first_name ILIKE $${params.length} OR ch.last_name ILIKE $${params.length} OR ch.phone ILIKE $${params.length})`); }
+    const r = await query(
+      `SELECT ch.cardholder_id, ch.first_name, ch.last_name, ch.phone, ch.email, ch.kyc_level, ch.created_at,
+              vc.card_masked, vc.balance, vc.currency, vc.status as card_status
+       FROM cardholders ch LEFT JOIN virtual_cards vc ON vc.card_id=ch.card_id
+       WHERE ${conds.join(' AND ')} ORDER BY ch.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
+      [...params, limit, offset]
+    );
+    const cnt = await query(`SELECT COUNT(*) FROM cardholders ch WHERE ${conds.join(' AND ')}`, params);
+    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page, limit });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // POST /agent/cardholders — Enrôler un nouveau porteur
@@ -416,23 +427,25 @@ agentRouter.post('/cardholders', agentAuth, async (req, res) => {
 
     const pwdHash = await bcrypt.hash(password, 12);
 
-    await withTransaction(async client => {
+    // HOTFIX : réponse envoyée après COMMIT (withTransaction retourne les données)
+    const created = await withTransaction(async client => {
       // Créer la carte virtuelle
       const cardId  = uuidv4();
+      const chId    = uuidv4();
       const last4   = Math.floor(1000 + Math.random() * 9000).toString();
       const cardNum = ('4000000000000000' + last4).slice(-16);
       const masked  = cardNum.slice(0, 4) + ' **** **** ' + last4;
       const expYear = new Date().getFullYear() + 3;
       const emboss  = (firstName.slice(0, 13) + ' ' + lastName.slice(0, 13)).toUpperCase();
 
+      // HOTFIX IDOR : la carte est rattachée à son porteur dès la création
       await client.query(
-        `INSERT INTO virtual_cards (card_id, card_number, card_masked, cardholder_name, expiry_month, expiry_year, balance, currency, network, country)
-         VALUES ($1,$2,$3,$4,12,$5,0,'XAF','visa',$6)`,
-        [cardId, cardNum, masked, emboss, expYear, country]
+        `INSERT INTO virtual_cards (card_id, cardholder_id, card_number, card_masked, cardholder_name, expiry_month, expiry_year, balance, currency, network, country)
+         VALUES ($1,$2,$3,$4,$5,12,$6,0,'XAF','visa',$7)`,
+        [cardId, chId, cardNum, masked, emboss, expYear, country]
       );
 
       // Créer le cardholder lié à l'agent
-      const chId = uuidv4();
       await client.query(
         `INSERT INTO cardholders (cardholder_id, card_id, first_name, last_name, phone, email, date_of_birth, id_type, id_number, country, password_hash, kyc_level, agent_id, agency_id, bank_id, onboarded_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12,$13,$14,'agent')`,
@@ -442,12 +455,15 @@ agentRouter.post('/cardholders', agentAuth, async (req, res) => {
       // Incrémenter le compteur de l'agent
       await client.query(`UPDATE distribution_agents SET cards_issued=cards_issued+1 WHERE agent_id=$1`, [req.agent.sub]);
 
-      res.status(201).json({
-        success:     true,
-        cardholderId: chId,
-        card: { cardId, cardMasked: masked, cardholderName: emboss, expiryMonth: 12, expiryYear: expYear },
-        message: `Porteur ${firstName} ${lastName} enrôlé avec succès.`,
-      });
+      return { chId, cardId, masked, emboss, expYear };
+    });
+
+    const { chId, cardId, masked, emboss, expYear } = created;
+    res.status(201).json({
+      success:     true,
+      cardholderId: chId,
+      card: { cardId, cardMasked: masked, cardholderName: emboss, expiryMonth: 12, expiryYear: expYear },
+      message: `Porteur ${firstName} ${lastName} enrôlé avec succès.`,
     });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Téléphone ou email déjà utilisé' });

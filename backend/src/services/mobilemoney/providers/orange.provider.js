@@ -45,7 +45,23 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
   const result = await httpRequest('POST', config.baseUrl, '/transfer',
     { merchant_key: config.apiKey, recipient_msisdn: phone, amount: String(amount), currency, reference: txnId }
   );
-  return { success: result.statusCode === 200, transactionId: result.body?.txnid };
+  // HTTP 200 seul ne prouve rien : il faut un indicateur de succes dans le corps.
+  const body   = result.body || {};
+  const st     = String(body.status || body.transaction_status || body.txnstatus || '').toUpperCase();
+  const okCode = body.success === true || ['SUCCESS', 'SUCCESSFUL', 'COMPLETED', 'OK'].includes(st) || String(body.code) === '200';
+  const failed = ['FAILED', 'FAILURE', 'ERROR', 'REJECTED', 'CANCELLED'].includes(st)
+              || body.success === false || result.statusCode >= 400;
+  const txnid  = body.txnid || body.transactionId || body.transaction_id || null;
+  const success = !failed && okCode && !!txnid;
+  // Accepte (2xx + txnid) mais sans confirmation explicite → pending
+  const pending = !failed && !success && result.statusCode >= 200 && result.statusCode < 300 && !!txnid;
+  return {
+    success,
+    pending,
+    transactionId: txnid,
+    errorMessage:  (success || pending) ? null : (body.message || body.description || 'Orange Money payout failed'),
+    retryable:     false,
+  };
 };
 
 const httpRequest = (method, baseUrl, path, body) => new Promise((resolve, reject) => {

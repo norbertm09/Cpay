@@ -103,13 +103,15 @@ agencyRouter.post('/agents', agencyAuth, async (req,res) => {
   const {firstName,lastName,phone,email:agentEmail,password,commissionRate=0.001,cardsLimit=200} = req.body;
   if (!firstName||!lastName||!phone||!password) return res.status(422).json({error:'Champs requis'});
   try {
-    await withTransaction(async client => {
+    // HOTFIX : réponse envoyée après COMMIT
+    const created = await withTransaction(async client => {
       const agentCode=`AGT-${Date.now().toString(36).toUpperCase()}`;
       const hash=await bcrypt.hash(password,12);
       const ag=await client.query(`INSERT INTO distribution_agents (agency_id,bank_id,agent_code,first_name,last_name,phone,email,password_hash,commission_rate,cards_limit) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[req.user.agencyId,req.user.bankId,agentCode,firstName,lastName,phone,agentEmail||null,hash,commissionRate,cardsLimit]);
       await client.query(`INSERT INTO distribution_users (first_name,last_name,email,phone,password_hash,role,bank_id,agency_id,agent_id,created_by_type,created_by_id) VALUES ($1,$2,$3,$4,$5,'agent',$6,$7,$8,'agency_admin',$9)`,[firstName,lastName,agentEmail||`${agentCode.toLowerCase()}@cplus.local`,phone,hash,req.user.bankId,req.user.agencyId,ag.rows[0].agent_id,req.user.sub]);
-      res.status(201).json({success:true,agentId:ag.rows[0].agent_id,agentCode});
+      return { agentId: ag.rows[0].agent_id, agentCode };
     });
+    res.status(201).json({success:true, ...created});
   } catch(err){ if(err.code==='23505') return res.status(409).json({error:'Téléphone déjà utilisé'}); res.status(500).json({error:err.message}); }
 });
 
@@ -142,14 +144,16 @@ agentPortalRouter.post('/cardholders', agentAuth, async (req,res) => {
     const ag=agRes.rows[0];
     if (ag.cards_issued>=ag.cards_limit) return res.status(429).json({error:`Quota atteint (${ag.cards_limit})`});
     const hash=await bcrypt.hash(password,12);
-    await withTransaction(async client => {
-      const cardId=uuidv4(),last4=Math.floor(1000+Math.random()*9000).toString(),cardNum=('4000000000000000'+last4).slice(-16),masked=`${cardNum.slice(0,4)} **** **** ${last4}`,expYear=new Date().getFullYear()+3,emboss=`${firstName.slice(0,13).toUpperCase()} ${lastName.slice(0,13).toUpperCase()}`;
-      await client.query(`INSERT INTO virtual_cards (card_id,card_number,card_masked,cardholder_name,expiry_month,expiry_year,balance,currency,network,country) VALUES ($1,$2,$3,$4,12,$5,0,'XAF','visa',$6)`,[cardId,cardNum,masked,emboss,expYear,country]);
-      const chId=uuidv4();
+    // HOTFIX : réponse envoyée après COMMIT ; la carte est rattachée à son porteur (IDOR)
+    const created = await withTransaction(async client => {
+      const cardId=uuidv4(),chId=uuidv4(),last4=Math.floor(1000+Math.random()*9000).toString(),cardNum=('4000000000000000'+last4).slice(-16),masked=`${cardNum.slice(0,4)} **** **** ${last4}`,expYear=new Date().getFullYear()+3,emboss=`${firstName.slice(0,13).toUpperCase()} ${lastName.slice(0,13).toUpperCase()}`;
+      await client.query(`INSERT INTO virtual_cards (card_id,cardholder_id,card_number,card_masked,cardholder_name,expiry_month,expiry_year,balance,currency,network,country) VALUES ($1,$2,$3,$4,$5,12,$6,0,'XAF','visa',$7)`,[cardId,chId,cardNum,masked,emboss,expYear,country]);
       await client.query(`INSERT INTO cardholders (cardholder_id,card_id,first_name,last_name,phone,email,date_of_birth,id_type,id_number,country,password_hash,kyc_level,agent_id,agency_id,bank_id,onboarded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12,$13,$14,'agent')`,[chId,cardId,firstName,lastName,phone,chEmail||null,dateOfBirth||null,idType||null,idNumber||null,country,hash,req.user.agentId,req.user.agencyId,req.user.bankId]);
       await client.query(`UPDATE distribution_agents SET cards_issued=cards_issued+1 WHERE agent_id=$1`,[req.user.agentId]);
-      res.status(201).json({success:true,cardholderId:chId,card:{cardId,cardMasked:masked,cardholderName:emboss,expiryMonth:12,expiryYear:expYear}});
+      return { chId, cardId, masked, emboss, expYear };
     });
+    const { chId, cardId, masked, emboss, expYear } = created;
+    res.status(201).json({success:true,cardholderId:chId,card:{cardId,cardMasked:masked,cardholderName:emboss,expiryMonth:12,expiryYear:expYear}});
   } catch(err){ if(err.code==='23505') return res.status(409).json({error:'Téléphone déjà utilisé'}); res.status(500).json({error:err.message}); }
 });
 

@@ -1,8 +1,145 @@
 'use strict';
 
 const crypto = require('crypto');
+const net = require('net');
+const dns = require('dns').promises;
 const { query } = require('../../config/database');
 const logger = require('../../config/logger');
+
+// Delai maximal d'un appel sortant (webhook / integration) : 10 s
+const OUTBOUND_TIMEOUT_MS = 10000;
+
+// ─── CSV sur : quoting, echappement des guillemets, anti-injection de formule ──
+// Toute cellule est entouree de guillemets, les guillemets internes sont doubles
+// et une cellule commencant par = + - @ (ou tab / CR) est prefixee d'une apostrophe
+// pour qu'Excel / LibreOffice ne l'interprete pas comme une formule.
+const csvCell = (v) => {
+  let s = v === null || v === undefined ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+};
+const csvRow = (values) => values.map(csvCell).join(',');
+
+// ─── Garde SSRF pour les URLs de webhook sortantes ────────────────
+// Refuse tout ce qui n'est pas https:// et toute cible loopback / privee /
+// link-local / multicast / reserved, en IPv4 comme en IPv6 (y compris IPv4-mapped).
+const ipv4ToInt = (ip) => ip.split('.').reduce((acc, o) => (acc << 8) + parseInt(o, 10), 0) >>> 0;
+const IPV4_BLOCKED = [
+  ['0.0.0.0', 8],        // "this" network
+  ['10.0.0.0', 8],       // private
+  ['100.64.0.0', 10],    // CGNAT
+  ['127.0.0.0', 8],      // loopback
+  ['169.254.0.0', 16],   // link-local (metadonnees cloud incluses)
+  ['172.16.0.0', 12],    // private
+  ['192.0.0.0', 24],     // IETF protocol assignments
+  ['192.0.2.0', 24],     // TEST-NET-1
+  ['192.168.0.0', 16],   // private
+  ['198.18.0.0', 15],    // benchmarking
+  ['198.51.100.0', 24],  // TEST-NET-2
+  ['203.0.113.0', 24],   // TEST-NET-3
+  ['224.0.0.0', 4],      // multicast
+  ['240.0.0.0', 4],      // reserved + broadcast
+].map(([base, bits]) => [ipv4ToInt(base), bits]);
+
+const isBlockedIPv4 = (ip) => {
+  const n = ipv4ToInt(ip);
+  return IPV4_BLOCKED.some(([base, bits]) => {
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (n & mask) >>> 0 === (base & mask) >>> 0;
+  });
+};
+
+const isBlockedIPv6 = (raw) => {
+  const ip = raw.toLowerCase().replace(/^\[|\]$/g, '');
+  if (ip === '::' || ip === '::1') return true;
+  // IPv4-mapped (::ffff:a.b.c.d) ou IPv4-compatible
+  const mapped = ip.match(/^(?:0*:)*ffff:(\d+\.\d+\.\d+\.\d+)$/) || ip.match(/^::(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return net.isIPv4(mapped[1]) ? isBlockedIPv4(mapped[1]) : true;
+  // ::ffff:XXXX:XXXX forme hexadecimale
+  const mappedHex = ip.match(/^(?:0*:)*ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16), lo = parseInt(mappedHex[2], 16);
+    return isBlockedIPv4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
+  const first = ip.split(':')[0].padStart(4, '0');
+  if (/^f[cd]/.test(first)) return true;    // fc00::/7  ULA (prive)
+  if (/^fe[89ab]/.test(first)) return true; // fe80::/10 link-local
+  if (/^ff/.test(first)) return true;       // ff00::/8  multicast
+  return false;
+};
+
+const isBlockedAddress = (ip) => {
+  if (net.isIPv4(ip)) return isBlockedIPv4(ip);
+  if (net.isIPv6(ip)) return isBlockedIPv6(ip);
+  return true;
+};
+
+const isBlockedHostname = (host) => {
+  const h = String(host || '').toLowerCase().replace(/\.$/, '');
+  if (!h) return true;
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.localdomain') || h.endsWith('.home.arpa')) return true;
+  if (h === 'metadata.google.internal' || h === 'metadata') return true;
+  return false;
+};
+
+/**
+ * Verification synchrone (syntaxique) d'une URL de webhook :
+ *  - https:// obligatoire, pas d'identifiants dans l'URL
+ *  - pas d'IP litterale privee / loopback / link-local, pas de localhost
+ * Retourne { ok:true, url } ou { ok:false, reason }.
+ */
+const isSafeWebhookUrl = (input) => {
+  let url;
+  try { url = new URL(String(input || '')); } catch (e) { return { ok: false, reason: 'URL invalide' }; }
+  if (url.protocol !== 'https:') return { ok: false, reason: 'Seules les URLs https:// sont acceptees' };
+  if (url.username || url.password) return { ok: false, reason: 'Identifiants interdits dans l\'URL' };
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  if (isBlockedHostname(host)) return { ok: false, reason: 'Hote non autorise' };
+  if (net.isIP(host) && isBlockedAddress(host)) return { ok: false, reason: 'Adresse IP privee ou reservee interdite' };
+  return { ok: true, url: url.toString() };
+};
+
+/**
+ * Verification complete : syntaxe + resolution DNS. Toutes les adresses
+ * resolues doivent etre publiques (anti DNS-rebinding partiel).
+ * Leve une erreur (statusCode 422) si l'URL est refusee.
+ */
+const assertSafeWebhookUrl = async (input) => {
+  const check = isSafeWebhookUrl(input);
+  if (!check.ok) {
+    const err = new Error(`Webhook URL refusee : ${check.reason}`);
+    err.statusCode = 422; err.code = 'UNSAFE_WEBHOOK_URL';
+    throw err;
+  }
+  const host = new URL(check.url).hostname.replace(/^\[|\]$/g, '');
+  if (!net.isIP(host)) {
+    let addrs;
+    try { addrs = await dns.lookup(host, { all: true, verbatim: true }); }
+    catch (e) {
+      const err = new Error('Webhook URL refusee : hote introuvable (DNS)');
+      err.statusCode = 422; err.code = 'UNSAFE_WEBHOOK_URL';
+      throw err;
+    }
+    if (!addrs.length || addrs.some(a => isBlockedAddress(a.address))) {
+      const err = new Error('Webhook URL refusee : resolution vers une adresse privee ou reservee');
+      err.statusCode = 422; err.code = 'UNSAFE_WEBHOOK_URL';
+      throw err;
+    }
+  }
+  return check.url;
+};
+
+// fetch avec delai maximal (AbortController)
+const fetchWithTimeout = async (url, options = {}, timeoutMs = OUTBOUND_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal, redirect: 'manual' });
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const ALLOWED_TYPES = ['accounting', 'crm', 'erp', 'webhook'];
 const DEFAULT_EVENTS = ['transaction.authorized', 'transaction.failed', 'settlement.completed'];
@@ -65,7 +202,9 @@ const deliverEvent = async ({ merchantId, eventType, payload }) => {
   await Promise.allSettled(integrations.rows.map(async (integration) => {
     const body = { eventType, merchantId, payload, sentAt: new Date().toISOString() };
     try {
-      const res = await fetch(integration.endpoint_url, {
+      // Garde SSRF + delai 10 s sur tout appel sortant
+      const safeUrl = await assertSafeWebhookUrl(integration.endpoint_url);
+      const res = await fetchWithTimeout(safeUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -113,8 +252,12 @@ const exportTransactions = async ({ merchantId, dateFrom, dateTo, format = 'json
 
   if (format !== 'csv') return { contentType: 'application/json', body: JSON.stringify({ data: result.rows }, null, 2) };
   const cols = ['transaction_id','type','amount','currency','payment_method','status','gateway_name','auth_code','fee_amount','net_amount','description','initiated_at','completed_at'];
-  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  return { contentType: 'text/csv', body: [cols.join(','), ...result.rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n') };
+  return { contentType: 'text/csv', body: [csvRow(cols), ...result.rows.map(r => csvRow(cols.map(c => r[c])))].join('\n') };
 };
 
-module.exports = { listIntegrations, upsertIntegration, deliverEvent, exportTransactions };
+module.exports = {
+  listIntegrations, upsertIntegration, deliverEvent, exportTransactions,
+  csvCell, csvRow,
+  isSafeWebhookUrl, assertSafeWebhookUrl, isBlockedAddress, fetchWithTimeout,
+  OUTBOUND_TIMEOUT_MS,
+};

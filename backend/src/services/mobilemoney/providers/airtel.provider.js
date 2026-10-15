@@ -51,15 +51,22 @@ const collectPayment = async ({ txnId, amount, currency, phone, config }) => {
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Country': cc, 'X-Currency': currency }
   );
   logger.info('AIRTEL RAW collectPayment', { txnId, rawBody: JSON.stringify(r.body || {}) });
-  const txStatus = r.body?.data?.transaction?.status;
-  const apiOk = r.body?.status?.success === true || r.body?.status?.code === '200';
-  // Succes de CREATION = requete acceptee par Airtel (push envoye). TF/TE = echec immediat.
-  const success = apiOk && txStatus !== 'TF' && txStatus !== 'TE';
+  const txStatus = String(r.body?.data?.transaction?.status || '').toUpperCase();
+  const apiOk = r.body?.status?.success === true || String(r.body?.status?.code) === '200';
+  // Acceptation de la requete (push envoye, statut TIP ou absent) != paiement confirme.
+  // success:true UNIQUEMENT sur un statut final TS ; sinon pending:true (webhook / reconciliation
+  // finalisent) ; TF/TE ou refus API = echec.
+  const failed  = !apiOk || txStatus === 'TF' || txStatus === 'TE';
+  const success = apiOk && txStatus === 'TS';
+  const pending = apiOk && !success && !failed;
   return {
     success,
+    pending,
     transactionId: r.body?.data?.transaction?.id || ref,
     airtelMoneyId: r.body?.data?.transaction?.airtel_money_id || null,
-    errorMessage:  success ? null : (r.body?.status?.message || 'Airtel payment failed'),
+    rawStatus:     txStatus || null,
+    errorMessage:  failed ? (r.body?.status?.message || 'Airtel payment failed') : null,
+    retryable:     false,
   };
 };
 
@@ -79,13 +86,21 @@ const sendPayout = async ({ txnId, amount, currency, phone, config, txType }) =>
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Country': cc, 'X-Currency': currency }
   );
   logger.info('AIRTEL RAW sendPayout', { txnId, rawBody: JSON.stringify(r.body || {}) });
-  const success = r.body?.data?.transaction?.status === 'TS';
+  const txStatus = String(r.body?.data?.transaction?.status || '').toUpperCase();
+  const apiOk = r.body?.status?.success === true || String(r.body?.status?.code) === '200'
+             || String(r.body?.status?.response_code || '').toUpperCase() === 'DP00900001001';
+  const success = txStatus === 'TS';
+  const failed  = !success && (!apiOk || txStatus === 'TF' || txStatus === 'TE');
+  const pending = !success && !failed;   // TIP / TA / statut absent apres acceptation
   return {
     success,
+    pending,
     transactionId: r.body?.data?.transaction?.id || ref,
     airtelMoneyId: r.body?.data?.transaction?.reference_id || r.body?.data?.transaction?.airtel_money_id || null,
+    rawStatus:     txStatus || null,
     rawResponse: JSON.stringify(r.body || {}),
-    errorMessage:  success ? null : (r.body?.status_message || r.body?.status?.message || 'Airtel payout failed'),
+    errorMessage:  failed ? (r.body?.status_message || r.body?.status?.message || 'Airtel payout failed') : null,
+    retryable:     false,
   };
 };
 

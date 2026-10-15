@@ -4,7 +4,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.api
-    image: cplus-api:2.6.0
+    image: cplus-api:${CPLUS_TAG:-2.6.0}
     container_name: cplus-api
     restart: unless-stopped
     dns:
@@ -95,6 +95,8 @@ services:
       -d admin.c-pay.global
       -d merchant.c-pay.global
       -d pay.c-pay.global
+      -d app.c-pay.global
+      -d card.c-pay.global
     networks:
       - cplus-internal
 
@@ -124,6 +126,19 @@ services:
       - "80"
     ports:
       - "127.0.0.1:3003:80"
+    networks:
+      - cplus-internal
+
+  # Règlement J+1 : appelle l'API chaque nuit à 01:15 UTC avec le jeton interne (route bloquée publiquement par nginx)
+  settlement-cron:
+    image: alpine:3.21
+    container_name: cplus-settlement-cron
+    restart: unless-stopped
+    depends_on: [api]
+    env_file:
+      - ../backend/.env
+    command: >
+      sh -c "echo '15 1 * * * wget -qO- --post-data= --header=\"X-Internal-Token: $$INTERNAL_TOKEN\" --header=\"Content-Type: application/json\" http://api:3000/internal/settlement/run' > /etc/crontabs/root && crond -f -l 2"
     networks:
       - cplus-internal
 

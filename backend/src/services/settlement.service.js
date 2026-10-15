@@ -27,6 +27,7 @@ async function payout({ operator, amount, phone, description, externalId }) {
       rsaPubKey:    process.env.AIRTEL_CG_DISB_RSA_PUBKEY,
     };
     const r = await airtel.sendPayout({ txnId: externalId, amount, currency: 'XAF', phone, config: cfg });
+    if (r.pending) return { ref: r.transactionId || externalId, raw: r, pending: true };
     if (!r.success) throw new Error(r.errorMessage || 'Airtel payout failed');
     return { ref: r.transactionId || externalId, raw: r };
   }
@@ -67,6 +68,18 @@ function resolveSettlement(m) {
 }
 
 async function settleTransaction(txnId) {
+  // Claim atomique : une seule exécution concurrente peut passer ici (audit §6, double règlement).
+  // Seules les transactions collect autorisées jamais réglées sont éligibles ; un échec ('echec')
+  // n'est PAS rejoué automatiquement (l'opérateur a peut-être déjà versé) : action manuelle.
+  const claim = await query(
+    `UPDATE transactions SET settlement_status = 'en_cours'
+     WHERE transaction_id = $1 AND status = 'authorized' AND type = 'collect'
+       AND (settlement_status IS NULL OR settlement_status = 'en_attente_cumul')
+     RETURNING transaction_id`, [txnId]);
+  if (!claim.rows.length) {
+    logger.info('Settlement: transaction non éligible ou déjà traitée', { txnId });
+    return;
+  }
   const r = await query(
     `SELECT t.transaction_id, t.amount, t.detected_operator, t.settlement_status, t.merchant_id,
             m.wallet_mtn, m.wallet_airtel, m.commission_rate, m.business_name,
@@ -76,11 +89,6 @@ async function settleTransaction(txnId) {
      WHERE t.transaction_id = $1`, [txnId]);
   if (!r.rows.length) { logger.warn('Settlement: txn introuvable', { txnId }); return; }
   const t = r.rows[0];
-
-  if (t.settlement_status === 'regle' || t.settlement_status === 'en_cours') {
-    logger.info('Settlement deja traite', { txnId, statut: t.settlement_status });
-    return;
-  }
 
   const plan = resolveSettlement(t);
 
@@ -111,17 +119,24 @@ async function settleTransaction(txnId) {
   const gross = parseFloat(t.amount);
   const net = Math.round(gross * (1 - rate));
 
-  await query(`UPDATE transactions SET settlement_status='en_cours' WHERE transaction_id=$1`, [txnId]);
-
-  // Essayer principal puis secours
+  // Essayer principal puis secours — externalId stable par (transaction, cible) pour que
+  // l'opérateur dédoublonne un éventuel rejeu
   let lastErr = null;
-  for (const tg of plan.targets) {
-    const externalId = 'STL-' + txnId.slice(0, 8) + '-' + Date.now().toString(36);
+  for (const [i, tg] of plan.targets.entries()) {
+    const externalId = 'STL-' + txnId.replace(/-/g, '').slice(0, 20) + '-' + i;
     try {
       const res = await payout({
         operator: tg.operator, amount: net, phone: tg.account,
         description: 'Reglement CPay ' + (t.business_name || ''), externalId,
       });
+      if (res.pending) {
+        // Versement accepté mais non confirmé : reste 'soumis' jusqu'à confirmation opérateur
+        await query(
+          `UPDATE transactions SET settlement_status='soumis', settlement_ref=$1 WHERE transaction_id=$2`,
+          [String(res.ref).slice(0, 80), txnId]);
+        logger.info('Settlement soumis (en attente opérateur)', { txnId, net, operator: tg.operator });
+        return { ok: true, pending: true, net, ref: res.ref, operator: tg.operator };
+      }
       await query(
         `UPDATE transactions SET settlement_status='regle', settled_at=NOW(), settlement_ref=$1
          WHERE transaction_id=$2`, [String(res.ref).slice(0, 80), txnId]);

@@ -4,10 +4,17 @@
 // POST /api/v1/momo/topup       — Collections (client paye)
 // POST /api/v1/momo/payout      — Disbursements (CPlus envoie)
 // GET  /api/v1/momo/status/:ref — Statut transaction
-// POST /api/v1/webhooks/mtn     — Callback MTN
-// GET  /api/v1/momo/balance     — Soldes comptes
+// POST /api/v1/momo/webhooks/mtn    — Callback MTN    (délégué à webhook-handlers)
+// POST /api/v1/momo/webhooks/airtel — Callback Airtel (délégué à webhook-handlers)
+// GET  /api/v1/momo/balance     — Soldes comptes (admin / marchand)
 // GET  /api/v1/momo/validate/:phone — Valider numéro MTN
 // ================================================================
+//
+// HOTFIX WAVE-1 :
+//   * webhooks MTN/Airtel : plus de doublon, délégation aux handlers fail-closed ;
+//   * /balance : authentification admin ou marchand obligatoire ;
+//   * cardId (body) : la carte doit appartenir au porteur authentifié (403 sinon) ;
+//   * /status/:ref : claim `status='pending'` avant tout crédit (rejeu idempotent).
 
 'use strict';
 
@@ -17,18 +24,30 @@ const { v4: uuidv4 } = require('uuid');
 const router  = express.Router();
 const mtn     = require('../services/rails/mtn-momo.client');
 const { query, withTransaction } = require('../config/database');
-const { auditLog } = require('../middleware/pci.middleware');
+const webhooks = require('./webhook-handlers');
 
 // ─── Auth middleware ──────────────────────────────────────────────
-const cardAuth = async (req, res, next) => {
+const makeAuth = (allowedTypes) => async (req, res, next) => {
   try {
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
     const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    if (!['cardholder', 'merchant'].includes(decoded.type)) return res.status(403).json({ error: 'Accès refusé' });
+    if (!allowedTypes.includes(decoded.type)) return res.status(403).json({ error: 'Accès refusé' });
     req.actor = decoded;
     next();
   } catch { res.status(401).json({ error: 'Token invalide' }); }
+};
+const cardAuth       = makeAuth(['cardholder', 'merchant']);
+const privilegedAuth = makeAuth(['admin', 'merchant']);
+
+// ─── Propriété de la carte ────────────────────────────────────────
+// Un cardId venant du body n'est jamais pris pour argent comptant :
+// la carte doit appartenir au porteur authentifié (virtual_cards.cardholder_id).
+const ownsCard = (card, actor) => {
+  if (!card || !actor || actor.type !== 'cardholder') return false;
+  const chId = actor.sub || actor.cardholderId || actor.chId;
+  if (!chId || !card.cardholder_id) return false;
+  return String(card.cardholder_id) === String(chId);
 };
 
 // ─── TOP-UP : Collections (MTN → Carte virtuelle) ─────────────────
@@ -50,6 +69,9 @@ router.post('/topup', cardAuth, async (req, res) => {
     );
     if (!cardRes.rows.length) return res.status(404).json({ error: 'Carte introuvable' });
     const card = cardRes.rows[0];
+    if (!ownsCard(card, req.actor)) {
+      return res.status(403).json({ error: 'Cette carte ne vous appartient pas', code: 'CARD_NOT_OWNED' });
+    }
     if (card.status === 'cancelled') return res.status(422).json({ error: 'Carte annulée' });
 
     // Frais 1%
@@ -58,7 +80,7 @@ router.post('/topup', cardAuth, async (req, res) => {
     const externalId = uuidv4();
 
     // Enregistrer la transaction en PENDING
-    const txnRes = await query(
+    await query(
       `INSERT INTO card_transactions
          (txn_id, card_id, cardholder_id, type, amount, fee, net_amount,
           balance_before, balance_after, currency, status, description,
@@ -83,6 +105,13 @@ router.post('/topup', cardAuth, async (req, res) => {
       description: `CPlus Top-up ${amount} XAF`,
       externalId,
     });
+
+    // La référence MTN (X-Reference-Id) est celle que le webhook/le polling recevront
+    await query(
+      `UPDATE card_transactions SET mm_reference=$1, metadata = COALESCE(metadata,'{}'::jsonb) || $2::jsonb
+       WHERE txn_id=$3 AND status='pending'`,
+      [mtnResult.referenceId, JSON.stringify({ mtnReferenceId: mtnResult.referenceId }), externalId]
+    );
 
     res.json({
       success:     true,
@@ -113,6 +142,7 @@ router.post('/payout', cardAuth, async (req, res) => {
   if (!pin)    return res.status(422).json({ error: 'PIN requis' });
 
   const resolvedCardId = cardId || req.actor.cardId;
+  if (!resolvedCardId) return res.status(422).json({ error: 'cardId requis' });
 
   try {
     await withTransaction(async client => {
@@ -122,6 +152,9 @@ router.post('/payout', cardAuth, async (req, res) => {
       );
       const card = cardRes.rows[0];
       if (!card) throw Object.assign(new Error('Carte introuvable'), { statusCode: 404 });
+      if (!ownsCard(card, req.actor)) {
+        throw Object.assign(new Error('Cette carte ne vous appartient pas'), { statusCode: 403, code: 'CARD_NOT_OWNED' });
+      }
       if (card.status !== 'active') throw Object.assign(new Error('Carte non active'), { statusCode: 422 });
 
       // Vérifier PIN
@@ -174,6 +207,12 @@ router.post('/payout', cardAuth, async (req, res) => {
         externalId,
       });
 
+      await client.query(
+        `UPDATE card_transactions SET mm_reference=$1, metadata = COALESCE(metadata,'{}'::jsonb) || $2::jsonb
+         WHERE txn_id=$3 AND status='pending'`,
+        [mtnResult.referenceId, JSON.stringify({ mtnReferenceId: mtnResult.referenceId }), externalId]
+      );
+
       res.json({
         success:     true,
         referenceId: mtnResult.referenceId,
@@ -190,12 +229,14 @@ router.post('/payout', cardAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[MTN-PAYOUT]', err.message);
-    res.status(err.statusCode || 500).json({ error: err.message, code: 'MTN_ERROR' });
+    res.status(err.statusCode || 500).json({ error: err.message, code: err.code || 'MTN_ERROR' });
   }
 });
 
 // ─── STATUT transaction ───────────────────────────────────────────
 // GET /api/v1/momo/status/:referenceId?product=collections|disbursements
+// Le statut réel vient de MTN ; l'application en base passe par le même
+// helper que le webhook (claim pending → crédit), donc rejouable sans double crédit.
 router.get('/status/:referenceId', cardAuth, async (req, res) => {
   const { referenceId } = req.params;
   const product = req.query.product || 'collections';
@@ -205,124 +246,39 @@ router.get('/status/:referenceId', cardAuth, async (req, res) => {
       ? await mtn.getCollectionStatus(referenceId)
       : await mtn.getDisbursementStatus(referenceId);
 
-    // Si SUCCESSFUL — mettre à jour la transaction en DB
-    if (status.status === 'SUCCESSFUL') {
-      await query(
-        `UPDATE card_transactions
-         SET status='completed', completed_at=NOW(), auth_code=$1
-         WHERE mm_reference=$2 AND status='pending'`,
-        [status.financialTxnId || referenceId, referenceId]
-      );
-
-      // Si c'est un topup — créditer la carte
-      if (product === 'collections') {
-        const txnRes = await query(
-          `SELECT * FROM card_transactions WHERE mm_reference=$1`,
-          [referenceId]
-        );
-        if (txnRes.rows.length) {
-          const txn = txnRes.rows[0];
-          await query(
-            `UPDATE virtual_cards SET balance=balance+$1, updated_at=NOW() WHERE card_id=$2`,
-            [txn.net_amount, txn.card_id]
-          );
-        }
+    const txn = await webhooks.findCardTxnByReference(referenceId);
+    let applied = null;
+    if (txn && txn.status === 'pending' && (status.status === 'SUCCESSFUL' || status.status === 'FAILED')) {
+      applied = await webhooks.applyCardTxnProviderStatus(txn, {
+        provider: 'mtn',
+        status:   status.status,
+        financialTransactionId: status.financialTxnId || status.financialTransactionId || null,
+        reason:   status.reason || 'MTN_FAILED',
+        amount:   status.amount,
+        currency: status.currency,
+      });
+      if (applied.reason === 'mismatch') {
+        return res.status(409).json({ ...status, error: 'Montant ou devise incohérent', code: 'AMOUNT_MISMATCH' });
       }
     }
 
-    // Si FAILED — rembourser si c'était un payout
-    if (status.status === 'FAILED' && product === 'disbursements') {
-      const txnRes = await query(
-        `SELECT * FROM card_transactions WHERE mm_reference=$1 AND status='pending'`,
-        [referenceId]
-      );
-      if (txnRes.rows.length) {
-        const txn = txnRes.rows[0];
-        // Rembourser : recréditer le total débité (amount + fee)
-        const totalDebited = parseFloat(txn.amount) + parseFloat(txn.fee);
-        await query(
-          `UPDATE virtual_cards SET balance=balance+$1, updated_at=NOW() WHERE card_id=$2`,
-          [totalDebited, txn.card_id]
-        );
-        await query(
-          `UPDATE card_transactions SET status='failed', failure_reason=$1 WHERE mm_reference=$2`,
-          [status.reason || 'MTN_FAILED', referenceId]
-        );
-      }
-    }
-
-    res.json(status);
+    res.json({ ...status, txnStatus: applied?.newStatus || txn?.status || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // ─── WEBHOOK MTN callback ─────────────────────────────────────────
-// POST /api/v1/webhooks/mtn
-router.post('/webhooks/mtn', async (req, res) => {
-  try {
-    const { referenceId, status, financialTransactionId, reason } = req.body;
-    if (!referenceId) return res.status(400).json({ error: 'referenceId requis' });
+// POST /api/v1/momo/webhooks/mtn — même implémentation que /api/v1/webhooks/mtn
+router.post('/webhooks/mtn', webhooks.handleMtnWebhook);
 
-    // Logger le callback
-    await auditLog({
-      eventType: `MTN_WEBHOOK_${status}`,
-      actorType: 'system',
-      details:   req.body,
-      ipAddress: req.ip,
-      success:   status === 'SUCCESSFUL',
-    });
-
-    if (status === 'SUCCESSFUL') {
-      // Topup — créditer la carte
-      const txnRes = await query(
-        `SELECT * FROM card_transactions WHERE mm_reference=$1 AND status='pending'`,
-        [referenceId]
-      );
-      if (txnRes.rows.length) {
-        const txn = txnRes.rows[0];
-        if (txn.type === 'topup') {
-          await query(
-            `UPDATE virtual_cards SET balance=balance+$1, updated_at=NOW() WHERE card_id=$2`,
-            [txn.net_amount, txn.card_id]
-          );
-        }
-        await query(
-          `UPDATE card_transactions SET status='completed', completed_at=NOW(), auth_code=$1 WHERE mm_reference=$2`,
-          [financialTransactionId || referenceId, referenceId]
-        );
-      }
-    }
-
-    if (status === 'FAILED') {
-      const txnRes = await query(
-        `SELECT * FROM card_transactions WHERE mm_reference=$1 AND status='pending'`,
-        [referenceId]
-      );
-      if (txnRes.rows.length && txnRes.rows[0].type === 'unload') {
-        // Rembourser le payout échoué
-        const txn = txnRes.rows[0];
-        await query(
-          `UPDATE virtual_cards SET balance=balance+$1, updated_at=NOW() WHERE card_id=$2`,
-          [parseFloat(txn.amount) + parseFloat(txn.fee), txn.card_id]
-        );
-      }
-      await query(
-        `UPDATE card_transactions SET status='failed', failure_reason=$1 WHERE mm_reference=$2`,
-        [reason || 'FAILED', referenceId]
-      );
-    }
-
-    res.status(200).json({ received: true });
-  } catch (err) {
-    console.error('[MTN-WEBHOOK]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+// ─── WEBHOOK AIRTEL MONEY callback ────────────────────────────────
+// POST /api/v1/momo/webhooks/airtel — même implémentation que /api/v1/webhooks/airtel
+router.post('/webhooks/airtel', webhooks.handleAirtelWebhook);
 
 // ─── BALANCE ─────────────────────────────────────────────────────
-// GET /api/v1/momo/balance (admin uniquement)
-router.get('/balance', async (req, res) => {
+// GET /api/v1/momo/balance (admin ou marchand authentifié)
+router.get('/balance', privilegedAuth, async (req, res) => {
   try {
     const [collections, disbursements] = await Promise.all([
       mtn.getCollectionBalance(),
@@ -390,136 +346,3 @@ router.post('/requesttopay', cardAuth, async (req, res) => {
 });
 
 module.exports = router;
-
-// ─── WEBHOOK AIRTEL MONEY callback ────────────────────────────────
-// POST /api/v1/webhooks/airtel
-// Airtel Africa Open API envoie un callback asynchrone après chaque
-// transaction (collection ou disbursement)
-// Sécurité : vérification signature X-Airtel-Signature (HMAC-SHA256)
-router.post('/webhooks/airtel', async (req, res) => {
-  // 1. Vérification signature Airtel
-  const signature = req.headers['x-airtel-signature'];
-  const secret    = process.env.AIRTEL_WEBHOOK_SECRET;
-  if (secret && signature) {
-    const expected = require('crypto')
-      .createHmac('sha256', secret)
-      .update(JSON.stringify(req.body))
-      .digest('hex');
-    if (signature !== expected) {
-      await auditLog({ eventType: 'AIRTEL_WEBHOOK_INVALID_SIGNATURE', actorType: 'system', ipAddress: req.ip, success: false });
-      return res.status(401).json({ error: 'Signature invalide' });
-    }
-  }
-
-  try {
-    // Format Airtel Africa Open API callback
-    const {
-      transaction,   // { id, status, airtel_money_id, message }
-      data,          // { transaction: { id, status, airtel_money_id } }
-    } = req.body;
-
-    // Normaliser selon la version Airtel API (v1 vs v2)
-    const txnData    = transaction || data?.transaction || {};
-    const referenceId = txnData.id || req.body.reference;
-    const status      = txnData.status || req.body.status;  // TS=success, TF=failed, TIP=pending
-    const airtelRef   = txnData.airtel_money_id || txnData.airtel_money_id;
-    const message     = txnData.message || req.body.message;
-
-    if (!referenceId) return res.status(400).json({ error: 'transaction.id requis' });
-
-    const isSuccess = ['TS', 'SUCCESS', 'SUCCESSFUL', 'COMPLETE'].includes(status?.toUpperCase());
-    const isFailed  = ['TF', 'FAILED', 'FAILED', 'EXPIRED'].includes(status?.toUpperCase());
-
-    console.log(`[AIRTEL-WEBHOOK] ref=${referenceId} status=${status} airtelRef=${airtelRef}`);
-
-    // 2. Audit log
-    await auditLog({
-      eventType: `AIRTEL_WEBHOOK_${status}`,
-      actorType: 'system',
-      details:   { referenceId, status, airtelRef, message },
-      ipAddress: req.ip,
-      success:   isSuccess,
-    });
-
-    // 3. Retrouver la transaction en attente
-    // Chercher dans card_transactions (portail cardholder)
-    const cardTxnRes = await query(
-      `SELECT * FROM card_transactions WHERE mm_reference=$1 AND status='pending' LIMIT 1`,
-      [referenceId]
-    );
-
-    // Chercher dans audit_logs / transactions principales
-    const mainTxnRes = await query(
-      `SELECT * FROM transactions WHERE reference_id=$1 AND status='pending' LIMIT 1`,
-      [referenceId]
-    ).catch(() => ({ rows: [] }));
-
-    if (isSuccess) {
-      // ── Traitement succès ──────────────────────────────────────
-      if (cardTxnRes.rows.length) {
-        const txn = cardTxnRes.rows[0];
-
-        if (txn.type === 'topup') {
-          // Créditer la carte virtuelle
-          await query(
-            `UPDATE virtual_cards SET balance=balance+$1, updated_at=NOW() WHERE card_id=$2`,
-            [parseFloat(txn.net_amount), txn.card_id]
-          );
-          // Créditer aussi la carte GTP si liée
-          await query(
-            `UPDATE gtp_cards SET updated_at=NOW() WHERE cardholder_id=(SELECT cardholder_id FROM cardholders WHERE cardholder_id=$1)`,
-            [txn.cardholder_id]
-          ).catch(() => {});
-        }
-        // Marquer complété
-        await query(
-          `UPDATE card_transactions
-           SET status='completed', completed_at=NOW(), auth_code=$1, metadata=metadata||$2
-           WHERE mm_reference=$3`,
-          [airtelRef || referenceId, JSON.stringify({ airtelRef, webhook: 'airtel' }), referenceId]
-        );
-      }
-
-      if (mainTxnRes.rows.length) {
-        await query(
-          `UPDATE transactions SET status='completed', completed_at=NOW(), gateway_ref=$1 WHERE reference_id=$2`,
-          [airtelRef, referenceId]
-        ).catch(() => {});
-      }
-
-    } else if (isFailed) {
-      // ── Traitement échec — remboursement si unload ─────────────
-      if (cardTxnRes.rows.length) {
-        const txn = cardTxnRes.rows[0];
-        if (txn.type === 'unload') {
-          // Rembourser le montant + frais sur la carte
-          await query(
-            `UPDATE virtual_cards SET balance=balance+$1, updated_at=NOW() WHERE card_id=$2`,
-            [parseFloat(txn.amount) + parseFloat(txn.fee), txn.card_id]
-          );
-        }
-        await query(
-          `UPDATE card_transactions SET status='failed', failure_reason=$1 WHERE mm_reference=$2`,
-          [message || `Airtel ${status}`, referenceId]
-        );
-      }
-
-      if (mainTxnRes.rows.length) {
-        await query(
-          `UPDATE transactions SET status='failed', failure_reason=$1 WHERE reference_id=$2`,
-          [message || `Airtel ${status}`, referenceId]
-        ).catch(() => {});
-      }
-    }
-    // TIP (Transaction In Progress) → ne rien faire, attendre le prochain callback
-
-    // 4. Répondre 200 immédiatement (Airtel re-essaie si timeout)
-    res.status(200).json({ success: true, referenceId, status });
-
-  } catch (err) {
-    console.error('[AIRTEL-WEBHOOK-ERROR]', err.message);
-    // Toujours répondre 200 pour éviter les re-essais infinis d'Airtel
-    res.status(200).json({ received: true });
-  }
-});
-

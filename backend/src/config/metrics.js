@@ -81,12 +81,12 @@ const renderMetrics = () => {
 // ─── Handler Express ──────────────────────────────────────────────
 const metricsHandler = (req, res) => {
   const token = process.env.METRICS_TOKEN;
-  if (token) {
-    const auth = req.headers.authorization || '';
-    if (auth !== `Bearer ${token}` && req.query.token !== token) {
-      return res.status(403).json({ error: 'Metrics access denied' });
-    }
-  }
+  // Fail-closed : sans METRICS_TOKEN configuré, l'endpoint n'existe pas ; jamais de jeton en query string
+  if (!token) return res.status(404).json({ error: 'Not found' });
+  const auth = String(req.headers.authorization || '');
+  const expected = `Bearer ${token}`;
+  const ok = auth.length === expected.length && require('crypto').timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
+  if (!ok) return res.status(403).json({ error: 'Metrics access denied' });
   res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
   res.send(renderMetrics());
 };

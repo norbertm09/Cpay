@@ -44,6 +44,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get upgrade -y -qq
 apt-get install -y -qq \
+  postgresql-client \
   curl wget gnupg2 ca-certificates lsb-release \
   apt-transport-https software-properties-common \
   htop iotop ncdu tree unzip git \

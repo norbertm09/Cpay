@@ -29,6 +29,22 @@ const fromGtpDate = (s) => {
 const digits = (p) => String(p || '').replace(/\D/g, '');
 const mask = (bin, last4) => (bin && last4) ? `${bin.slice(0,4)} **** **** ${last4}` : null;
 
+// ─── HOTFIX IDOR (audit 2.6.0 §2.5) : contrôle de propriété ──────
+// Toute opération sur un gtpCardId exige que la carte appartienne au
+// porteur (gtp_cards.cardholder_id). Sinon : 404 (pas d'énumération).
+const notOwned = () => Object.assign(new Error('Carte introuvable'),
+  { code: 'GTP_CARD_NOT_OWNED', statusCode: 404 });
+
+const assertOwner = async (gtpCardId, cardholderId) => {
+  const id = parseInt(gtpCardId, 10);
+  if (!cardholderId || !Number.isInteger(id)) throw notOwned();
+  const r = await query(
+    `SELECT gtp_card_id, last4, status FROM gtp_cards
+     WHERE gtp_card_id=$1 AND cardholder_id=$2`, [id, cardholderId]);
+  if (!r.rows[0]) throw notOwned();
+  return r.rows[0];
+};
+
 // ─── PING ────────────────────────────────────────────────────────
 const ping = async () => {
   const id = Math.floor(Math.random() * 10000);
@@ -113,7 +129,8 @@ const getBalance = async (gtpCardId) => {
 };
 
 // ─── DETAIL CARTE ────────────────────────────────────────────────
-const getCardDetails = async (gtpCardId) => {
+const getCardDetails = async (gtpCardId, cardholderId) => {
+  await assertOwner(gtpCardId, cardholderId);
   const [bal, cust, bank] = await Promise.all([
     getBalance(gtpCardId),
     callSoap('CustomerDataRequest', { CustomerID: gtpCardId }).catch(() => ({ parsed: {} })),
@@ -199,9 +216,10 @@ const TRANSFER_TYPES = ['CardToWallet','CardToBank','WalletToCard','BankToCard',
 const fundTransfer = async ({ gtpCardId, cardholderId, amount, transferType, memo, mobilePhone, currency }) => {
   if (!TRANSFER_TYPES.includes(transferType))
     throw new Error(`TransferType invalide: ${transferType}`);
+  if (!(parseFloat(amount) > 0)) throw new Error('Montant invalide');
 
-  const card = await query(
-    `SELECT last4 FROM gtp_cards WHERE gtp_card_id=$1`, [gtpCardId]);
+  // HOTFIX IDOR : la carte doit appartenir au porteur
+  const card = await assertOwner(gtpCardId, cardholderId);
 
   const r = await callSoap('FundTransferRequest', {
     TransferType:      transferType,
@@ -210,7 +228,7 @@ const fundTransfer = async ({ gtpCardId, cardholderId, amount, transferType, mem
     CurrencyCode:      currency || 'XAF',
     ReferenceMemo:     (memo || 'CPlus').slice(0, 100),
     MobilePhoneNumber: digits(mobilePhone),
-    Last4Digits:       card.rows[0]?.last4,
+    Last4Digits:       card.last4,
     ReturnNewBalance:  'true',
   });
 
@@ -270,6 +288,9 @@ const bankToCard = ({ gtpCardId, cardholderId, amount, bankRef, mobilePhone }) =
 
 // ─── PAIEMENT (carte a carte) ────────────────────────────────────
 const payment = async ({ gtpCardId, cardholderId, toCustomerId, toLast4, amount, description, mobilePhone }) => {
+  if (!(parseFloat(amount) > 0)) throw new Error('Montant invalide');
+  // HOTFIX IDOR : la carte débitée doit appartenir au porteur
+  await assertOwner(gtpCardId, cardholderId);
   const type = mobilePhone ? 'FundTransferCardToCardRequestMobile' : 'FundTransferCardToCardRequest';
   const body = {
     PaymentType:    'C2C',
@@ -302,7 +323,8 @@ const payment = async ({ gtpCardId, cardholderId, toCustomerId, toLast4, amount,
 const paymentToken = payment;  // meme mecanisme, token = customerId
 
 // ─── HISTORIQUE ──────────────────────────────────────────────────
-const getTransactions = async (gtpCardId, { startDate, endDate, limit } = {}) => {
+const getTransactions = async (gtpCardId, { startDate, endDate, limit } = {}, cardholderId) => {
+  await assertOwner(gtpCardId, cardholderId);
   const now = new Date();
   const start = startDate ? new Date(startDate) : new Date(now.getTime() - 90*86400000);
 
@@ -333,55 +355,59 @@ const getTransactions = async (gtpCardId, { startDate, endDate, limit } = {}) =>
 };
 
 // ─── GEL / REACTIVATION ──────────────────────────────────────────
-const freezeCard = async (gtpCardId, mobilePhone) => {
-  const c = await query(`SELECT last4 FROM gtp_cards WHERE gtp_card_id=$1`, [gtpCardId]);
+// Toutes ces opérations exigent le cardholderId propriétaire (HOTFIX IDOR).
+const freezeCard = async (gtpCardId, mobilePhone, cardholderId) => {
+  const c = await assertOwner(gtpCardId, cardholderId);
   const r = await callSoap('DeactivateCardRequest', {
     CustomerID: gtpCardId,
-    Last4Digits: c.rows[0]?.last4,
+    Last4Digits: c.last4,
     MobilePhoneNumber: digits(mobilePhone),
   });
   const ok = String(r.parsed.Success).toLowerCase() === 'true';
   if (ok) await query(
-    `UPDATE gtp_cards SET status='frozen', updated_at=NOW() WHERE gtp_card_id=$1`,
-    [gtpCardId]).catch(() => {});
+    `UPDATE gtp_cards SET status='frozen', updated_at=NOW() WHERE gtp_card_id=$1 AND cardholder_id=$2`,
+    [gtpCardId, cardholderId]).catch(() => {});
   return { success: ok };
 };
 
-const unfreezeCard = async (gtpCardId, mobilePhone) => {
-  const c = await query(`SELECT last4 FROM gtp_cards WHERE gtp_card_id=$1`, [gtpCardId]);
+const unfreezeCard = async (gtpCardId, mobilePhone, cardholderId) => {
+  const c = await assertOwner(gtpCardId, cardholderId);
   const r = await callSoap('ReactivateCardRequest', {
     CustomerID: gtpCardId,
-    Last4Digits: c.rows[0]?.last4,
+    Last4Digits: c.last4,
     MobilePhoneNumber: digits(mobilePhone),
   });
   const ok = String(r.parsed.Success).toLowerCase() === 'true';
   if (ok) await query(
-    `UPDATE gtp_cards SET status='active', updated_at=NOW() WHERE gtp_card_id=$1`,
-    [gtpCardId]).catch(() => {});
+    `UPDATE gtp_cards SET status='active', updated_at=NOW() WHERE gtp_card_id=$1 AND cardholder_id=$2`,
+    [gtpCardId, cardholderId]).catch(() => {});
   return { success: ok };
 };
 
-const cancelCard = async (gtpCardId, mobilePhone) => {
-  const r = await freezeCard(gtpCardId, mobilePhone);
+const cancelCard = async (gtpCardId, mobilePhone, cardholderId) => {
+  const r = await freezeCard(gtpCardId, mobilePhone, cardholderId);
   if (r.success) await query(
-    `UPDATE gtp_cards SET status='cancelled', updated_at=NOW() WHERE gtp_card_id=$1`,
-    [gtpCardId]).catch(() => {});
+    `UPDATE gtp_cards SET status='cancelled', updated_at=NOW() WHERE gtp_card_id=$1 AND cardholder_id=$2`,
+    [gtpCardId, cardholderId]).catch(() => {});
   return r;
 };
 
 // ─── PIN ─────────────────────────────────────────────────────────
-const changePin = async (gtpCardId, pin) => {
+const changePin = async (gtpCardId, pin, cardholderId) => {
+  await assertOwner(gtpCardId, cardholderId);
   const r = await callSoap('PINChangeRequest', { CustomerID: gtpCardId, PIN: pin });
   return { success: String(r.parsed.Success).toLowerCase() === 'true' };
 };
 
-const checkPin = async (gtpCardId, pin) => {
+const checkPin = async (gtpCardId, pin, cardholderId) => {
+  await assertOwner(gtpCardId, cardholderId);
   const r = await callSoap('PINCheckRequest', { CustomerID: gtpCardId, PIN: pin });
   return { valid: String(r.parsed.Success).toLowerCase() === 'true' };
 };
 
 // ─── REVERSAL ────────────────────────────────────────────────────
-const reverseTransaction = async (gtpCardId, transactionId, reason) => {
+const reverseTransaction = async (gtpCardId, transactionId, reason, cardholderId) => {
+  await assertOwner(gtpCardId, cardholderId);
   const r = await callSoap('FundTransferReverseRequest', {
     CustomerID: gtpCardId,
     TransactionID: transactionId,
@@ -410,6 +436,7 @@ module.exports = {
   changePin,
   checkPin,
   reverseTransaction,
+  assertOwner,
   toGtpDate,
   fromGtpDate,
   TRANSFER_TYPES,

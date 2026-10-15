@@ -129,16 +129,22 @@ const testProvider = async (providerKey) => {
 // Invalider le cache (après mise à jour config admin)
 const invalidateCache = () => { _cacheTime = 0; };
 
-const normalize = (raw, operator) => ({
-  approved:      raw.success === true,
-  pending:       raw.pending === true,
-  authCode:      raw.transactionId || raw.financialTransactionId || raw.sessionId || null,
-  responseCode:  raw.responseCode || (raw.success ? '00' : '05'),
-  declineReason: raw.errorMessage || raw.reason || null,
-  gatewayRef:    raw.externalId   || raw.transactionId || null,
-  retryable:     raw.retryable    ?? false,
-  _operator:     operator,
-});
+// pending:true (push accepte, PIN non saisi, timeout de polling) est propage tel quel :
+// l'orchestrateur laisse alors la transaction `pending` (jamais `failed`).
+const normalize = (raw, operator) => {
+  const pending  = raw.pending === true;
+  const approved = !pending && raw.success === true;
+  return {
+    approved,
+    pending,
+    authCode:      raw.transactionId || raw.financialTransactionId || raw.sessionId || null,
+    responseCode:  raw.responseCode || (approved ? '00' : (pending ? '09' : '05')),
+    declineReason: raw.errorMessage || raw.reason || null,
+    gatewayRef:    raw.externalId   || raw.transactionId || null,
+    retryable:     raw.retryable    ?? false,
+    _operator:     operator,
+  };
+};
 
 // Fallback env vars si pas de config DB
 const buildConfigFromEnv = (key) => ({
@@ -157,4 +163,4 @@ const buildConfigFromEnv = (key) => ({
   callbackUrl:process.env[`${key.toUpperCase()}_CALLBACK_URL`],
 });
 
-module.exports = { processPayment, sendPayout, testProvider, invalidateCache };
+module.exports = { processPayment, sendPayout, testProvider, invalidateCache, getConfig, normalize, PROVIDERS };

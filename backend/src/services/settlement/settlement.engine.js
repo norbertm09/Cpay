@@ -47,153 +47,118 @@ const enqueue = async ({ txnId, merchantId, amount, currency }) => {
   logger.debug('Settlement: enqueued', { txnId });
 };
 
-// ─── Job de settlement (à lancer chaque nuit à 23h) ───────────────
+// ─── Job de settlement (J+1 : règle tout ce qui a été mis en file AVANT le jour courant) ───
+
+const ZERO_DECIMAL = new Set(['XOF', 'XAF', 'CDF', 'GNF', 'RWF', 'UGX']);
+const round = (n, currency) => ZERO_DECIMAL.has(currency) ? Math.round(n) : Math.round(n * 100) / 100;
 
 /**
- * Traiter tous les settlements de la journée.
- * Groupe par marchand, calcule les commissions, crée les batches.
+ * @param {string} [cutoffDate] YYYY-MM-DD : règle les items mis en file avant ce jour (défaut : aujourd'hui → J-1 et avant)
+ * Verrou global PostgreSQL : deux appels concurrents ne règlent jamais les mêmes items.
  */
-const runSettlement = async (batchDate = null) => {
-  const date = batchDate || new Date().toISOString().slice(0, 10);
-  logger.info(`Settlement: running for ${date}`);
+const runSettlement = async (cutoffDate = null) => {
+  const cutoff = (cutoffDate && /^\d{4}-\d{2}-\d{2}$/.test(cutoffDate)) ? cutoffDate : new Date().toISOString().slice(0, 10);
+  const lock = await query(`SELECT pg_try_advisory_lock(hashtext('cpay_settlement_run')) AS ok`);
+  if (!lock.rows[0].ok) { logger.warn('Settlement: déjà en cours, exécution ignorée'); return { skipped: true, reason: 'already_running', cutoff }; }
+  try {
+    logger.info(`Settlement: running, cutoff ${cutoff}`);
+    const groups = await query(
+      `SELECT sq.merchant_id, sq.currency, COUNT(*)::int AS n
+       FROM settlement_queue sq JOIN transactions t ON t.transaction_id = sq.transaction_id
+       WHERE sq.settled = FALSE AND sq.queued_at < $1::date AND t.status = 'authorized' AND t.type = 'collect'
+       GROUP BY sq.merchant_id, sq.currency ORDER BY sq.merchant_id`, [cutoff]);
+    if (!groups.rows.length) { logger.info('Settlement: nothing to process'); return { batches: 0, settled: 0, errors: 0, cutoff }; }
 
-  // Récupérer tous les items non settled de la journée
-  const pending = await query(
-    `SELECT sq.*, t.payment_method, t.merchant_id, m.settlement_type,
-            m.settlement_account, m.settlement_provider, m.kyb_level
-     FROM settlement_queue sq
-     JOIN transactions t  ON sq.transaction_id = t.transaction_id
-     JOIN merchants m     ON sq.merchant_id     = m.merchant_id
-     WHERE sq.settled = FALSE
-       AND DATE(sq.queued_at) = $1
-     ORDER BY sq.merchant_id`,
-    [date]
-  );
-
-  if (!pending.rows.length) {
-    logger.info('Settlement: nothing to process');
-    return { settled: 0, errors: 0 };
-  }
-
-  // Grouper par marchand
-  const byMerchant = {};
-  for (const row of pending.rows) {
-    if (!byMerchant[row.merchant_id]) byMerchant[row.merchant_id] = [];
-    byMerchant[row.merchant_id].push(row);
-  }
-
-  let settled = 0, errors = 0;
-
-  for (const [merchantId, items] of Object.entries(byMerchant)) {
-    try {
-      await settleForMerchant(merchantId, items, date);
-      settled += items.length;
-    } catch (err) {
-      errors++;
-      logger.error('Settlement: merchant failed', { merchantId, error: err.message });
+    let settled = 0, errors = 0, batches = 0;
+    for (const g of groups.rows) {
+      try {
+        const n = await settleGroup(g.merchant_id, g.currency, cutoff);
+        if (n > 0) { settled += n; batches++; }
+      } catch (err) {
+        errors++;
+        logger.error('Settlement: group failed', { merchantId: g.merchant_id, currency: g.currency, error: err.message });
+      }
     }
+    logger.info(`Settlement complete: ${batches} batches, ${settled} items, ${errors} errors`);
+    return { batches, settled, errors, cutoff };
+  } finally {
+    await query(`SELECT pg_advisory_unlock(hashtext('cpay_settlement_run'))`).catch(() => {});
   }
-
-  logger.info(`Settlement complete: ${settled} settled, ${errors} errors`);
-  return { settled, errors, date };
 };
 
-const settleForMerchant = async (merchantId, items, date) => {
-  const merchant = items[0]; // header info du premier item
-  const kybLevel = merchant.kyb_level || 0;
+/**
+ * 1) Transaction SQL : claim des items (FOR UPDATE SKIP LOCKED), batch 'pending', marquage settled — COMMIT.
+ * 2) Hors transaction : virement, puis statut du batch selon le résultat réel.
+ */
+const settleGroup = async (merchantId, currency, cutoff) => {
+  const claimed = await withTransaction(async (client) => {
+    const items = await client.query(
+      `SELECT sq.id, sq.transaction_id, sq.amount, t.payment_method,
+              m.settlement_type, m.settlement_account, m.settlement_provider, m.kyb_level, m.country
+       FROM settlement_queue sq
+       JOIN transactions t ON t.transaction_id = sq.transaction_id
+       JOIN merchants m    ON m.merchant_id = sq.merchant_id
+       WHERE sq.merchant_id = $1 AND sq.currency = $2 AND sq.settled = FALSE AND sq.queued_at < $3::date
+         AND t.status = 'authorized' AND t.type = 'collect'
+       FOR UPDATE OF sq SKIP LOCKED`, [merchantId, currency, cutoff]);
+    if (!items.rows.length) return null;
+    const head = items.rows[0];
+    const kybLevel = head.kyb_level || 0;
+    let totalGross = 0, totalFees = 0;
+    for (const it of items.rows) {
+      const amount = Number(it.amount);
+      const fee = round(amount * getCommissionRate(it.payment_method, kybLevel), currency);
+      it._fee = fee; it._net = round(amount - fee, currency);
+      totalGross += amount; totalFees += fee;
+    }
+    totalGross = round(totalGross, currency); totalFees = round(totalFees, currency);
+    const totalNet = round(totalGross - totalFees, currency);
 
-  // Calculer les totaux et commissions
-  let totalGross = 0;
-  let totalFees  = 0;
-
-  for (const item of items) {
-    const rate = getCommissionRate(item.payment_method, kybLevel);
-    const fee  = parseFloat((item.amount * rate).toFixed(2));
-    item._fee  = fee;
-    item._net  = parseFloat((item.amount - fee).toFixed(2));
-    totalGross += parseFloat(item.amount);
-    totalFees  += fee;
-  }
-
-  const totalNet = parseFloat((totalGross - totalFees).toFixed(2));
-
-  await withTransaction(async (client) => {
-    // Créer le batch de settlement
-    const batchResult = await client.query(
+    const b = await client.query(
       `INSERT INTO settlement_batches
-         (merchant_id, batch_date, total_gross, total_fees, total_net,
-          currency, txn_count, settlement_type, settlement_account,
-          settlement_provider, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending')
-       RETURNING batch_id`,
-      [
-        merchantId, date, totalGross, totalFees, totalNet,
-        merchant.currency,
-        items.length,
-        merchant.settlement_type,
-        merchant.settlement_account,
-        merchant.settlement_provider,
-      ]
-    );
-
-    const batchId = batchResult.rows[0].batch_id;
-
-    // Marquer les transactions comme settled
-    for (const item of items) {
+         (merchant_id, batch_date, total_gross, total_fees, total_net, currency, txn_count,
+          settlement_type, settlement_account, settlement_provider, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending') RETURNING batch_id`,
+      [merchantId, cutoff, totalGross, totalFees, totalNet, currency, items.rows.length,
+       head.settlement_type, head.settlement_account, head.settlement_provider]);
+    const batchId = b.rows[0].batch_id;
+    for (const it of items.rows) {
       await client.query(
-        `UPDATE settlement_queue SET settled = TRUE, batch_id = $1, settled_at = NOW(),
-         fee_amount = $2, net_amount = $3
-         WHERE transaction_id = $4`,
-        [batchId, item._fee, item._net, item.transaction_id]
-      );
+        `UPDATE settlement_queue SET settled = TRUE, batch_id = $1, settled_at = NOW(), fee_amount = $2, net_amount = $3 WHERE id = $4`,
+        [batchId, it._fee, it._net, it.id]);
     }
-
-    // Déclencher le virement selon le type de compte
-    if (merchant.settlement_type === 'bank') {
-      await initiateBankTransfer({ batchId, merchantId, amount: totalNet, currency: merchant.currency, account: merchant.settlement_account });
-    } else if (merchant.settlement_type === 'mobile_money') {
-      await initiateMobileMoneyTransfer({ batchId, merchantId, amount: totalNet, currency: merchant.currency, phone: merchant.settlement_account, provider: merchant.settlement_provider });
-    }
-
-    // Mettre à jour le statut du batch
-    await client.query(
-      `UPDATE settlement_batches SET status = 'submitted', submitted_at = NOW()
-       WHERE batch_id = $1`,
-      [batchId]
-    );
+    return { batchId, head, totalNet, count: items.rows.length };
   });
+  if (!claimed) return 0;
 
-  logger.info('Settlement: merchant settled', {
-    merchantId, items: items.length, totalGross, totalFees, totalNet,
-  });
+  const { batchId, head, totalNet, count } = claimed;
+  if (head.settlement_type === 'mobile_money' && head.settlement_account) {
+    const r = await initiateMobileMoneyTransfer({ batchId, amount: totalNet, currency, phone: head.settlement_account, country: head.country });
+    await query(
+      `UPDATE settlement_batches SET status = $1, submitted_at = CASE WHEN $1 = 'submitted' THEN NOW() ELSE submitted_at END,
+         failure_reason = $2, payout_ref = $3 WHERE batch_id = $4`,
+      [r.ok ? 'submitted' : 'failed', r.ok ? null : r.reason, r.ref || null, batchId]).catch(err => logger.error('Settlement: batch status update failed', { batchId, err: err.message }));
+  } else {
+    // Banque : virement manuel / API bancaire à brancher — le batch reste 'pending' et apparaît au back office finance
+    logger.info('Settlement: bank batch awaiting manual transfer', { batchId, amount: totalNet, currency });
+  }
+  logger.info('Settlement: batch created', { batchId, merchantId, items: count, totalNet, currency });
+  return count;
 };
 
 // ─── Virements ────────────────────────────────────────────────────
 
-const initiateBankTransfer = async ({ batchId, merchantId, amount, currency, account }) => {
-  logger.info('Settlement: initiating bank transfer', { batchId, amount, currency });
-  // TODO: intégrer l'API bancaire (GIMAC interbank, SWIFT, etc.)
-  // En attendant, marquer comme "pending_manual"
-};
-
-const initiateMobileMoneyTransfer = async ({ batchId, merchantId, amount, currency, phone, provider }) => {
-  logger.info('Settlement: initiating MM payout', { batchId, amount, provider });
+const initiateMobileMoneyTransfer = async ({ batchId, amount, currency, phone, country }) => {
   const mmRouter = require('../mobilemoney/mobilemoney.router');
-  const detectionEngine = require('../detection/detection.engine');
-
-  const detection = detectionEngine.detectFromPhone(phone);
-  if (!detection.success) {
-    logger.error('Settlement: phone detection failed for payout', { phone });
-    return;
-  }
-
-  await mmRouter.sendPayout({
-    txnId:    `SETTLE-${batchId}`,
-    amount, currency, phone,
-    operator: detection.operator,
-    gateway:  detection.gateway,
-    country:  detection.country,
+  const detection = require('../detection/detection.engine').detectFromPhone(phone, { defaultCountry: country });
+  if (!detection.success) return { ok: false, reason: `Numéro de règlement invalide : ${detection.error}` };
+  if (detection.currency && detection.currency !== currency) return { ok: false, reason: `Devise du compte de règlement (${detection.currency}) différente de ${currency}` };
+  const r = await mmRouter.sendPayout({
+    txnId: `SETTLE-${batchId}`, amount, currency, phone: detection.phone,
+    operator: detection.operator, gateway: detection.gateway, country: detection.country,
   });
+  if (r.approved || r.pending) return { ok: true, ref: r.gatewayRef || r.authCode || null };
+  return { ok: false, reason: r.declineReason || r.message || 'Virement Mobile Money refusé' };
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -205,4 +170,4 @@ const getCommissionRate = (paymentMethod, kybLevel) => {
   return rates.default;
 };
 
-module.exports = { enqueue, runSettlement, COMMISSION_RATES };
+module.exports = { enqueue, runSettlement, getCommissionRate, COMMISSION_RATES };

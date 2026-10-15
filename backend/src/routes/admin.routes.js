@@ -24,6 +24,28 @@ const ticketing = require('../services/support/ticketing.service');
 const integrations = require('../services/integrations/integration.service');
 const pilotControl = require('../services/pilot/pilot-control.service');
 
+// ═══════════════════════════════════════════════════════════════════
+// HOTFIX WAVE-1 (audit prod 2.6.0) — helpers
+// ═══════════════════════════════════════════════════════════════════
+
+// Pagination bornee : page >= 1, 1 <= limit <= 100 (audit §3.12)
+const parsePagination = (q = {}, defaultLimit = 25) => {
+  let page = parseInt(q.page, 10);
+  if (!Number.isFinite(page) || page < 1) page = 1;
+  let limit = parseInt(q.limit, 10);
+  if (!Number.isFinite(limit)) limit = defaultLimit;
+  limit = Math.min(100, Math.max(1, limit));
+  return { page, limit, offset: (page - 1) * limit };
+};
+
+// Masquage d'un secret : { configured, last4 } — jamais la valeur (audit §2.12)
+const maskSecret = (v) => {
+  if (v === undefined || v === null || v === '') return { configured: false };
+  const s = String(v);
+  return { configured: true, last4: s.length >= 8 ? s.slice(-4) : '****' };
+};
+const NOTIF_SECRET_FIELDS = ['smtp_pass', 'wa_token', 'smpp_pass', 'wa_verify_token'];
+
 // ─── LOGIN ADMIN ──────────────────────────────────────────────────
 router.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
@@ -162,7 +184,8 @@ router.get('/api-configs', adminAuth, async (req, res) => {
   res.json({ data: result.rows, total: result.rows.length });
 });
 
-// GET une config (avec les vraies valeurs pour l'admin super)
+// GET une config — HOTFIX (audit §2.12) : les secrets sont masques pour TOUS les
+// roles, super_admin inclus. Ils ne sont modifiables que par PUT, jamais relus.
 router.get('/api-configs/:id', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const result = await query(
     'SELECT * FROM api_configurations WHERE config_id = $1',
@@ -170,11 +193,13 @@ router.get('/api-configs/:id', requireRole('super_admin', 'ops_admin'), async (r
   );
   if (!result.rows.length) return res.status(404).json({ error: 'Configuration introuvable' });
 
-  const config = result.rows[0];
-  // Masquer les secrets sauf pour super_admin
-  if (req.user.role !== 'super_admin') {
-    config.api_key    = config.api_key    ? '***' + config.api_key.slice(-4)    : null;
-    config.api_secret = config.api_secret ? '[hidden]' : null;
+  const { api_key, api_secret, extra_params, ...config } = result.rows[0];
+  config.api_key    = maskSecret(api_key);
+  config.api_secret = maskSecret(api_secret);
+  // extra_params peut contenir des secrets (tokens, mots de passe) : masques aussi
+  config.extra_params = {};
+  for (const [k, v] of Object.entries(extra_params || {})) {
+    config.extra_params[k] = /secret|pass|token|key|pin|private/i.test(k) ? maskSecret(v) : v;
   }
   res.json(config);
 });
@@ -366,15 +391,15 @@ router.post('/merchants', requireRole('super_admin', 'ops_admin'), async (req, r
 });
 
 router.get('/merchants', adminAuth, async (req, res) => {
-  const { page = 1, limit = 20, search, status, country } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const { search, status, country } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 20);
   const params = [];
   let where = 'WHERE 1=1';
   if (search) { params.push(`%${search}%`); where += ` AND (m.business_name ILIKE $${params.length} OR m.email ILIKE $${params.length} OR m.phone ILIKE $${params.length})`; }
   if (status)  { params.push(status);  where += ` AND m.merchant_status = $${params.length}`; }
   if (country) { params.push(country); where += ` AND m.country = $${params.length}`; }
 
-  params.push(parseInt(limit), offset);
+  params.push(limit, offset);
   const [data, count] = await Promise.all([
     query(
       `SELECT m.*, COUNT(t.transaction_id) as txn_count, COALESCE(SUM(t.amount),0) as total_volume
@@ -388,8 +413,8 @@ router.get('/merchants', adminAuth, async (req, res) => {
 
   res.json({
     data: data.rows, total: parseInt(count.rows[0].count),
-    page: parseInt(page), limit: parseInt(limit),
-    pages: Math.ceil(count.rows[0].count / parseInt(limit)),
+    page: page, limit: limit,
+    pages: Math.ceil(count.rows[0].count / limit),
   });
 });
 
@@ -563,11 +588,10 @@ router.patch('/support/tickets/:id', requireRole('super_admin', 'ops_admin', 'su
 });
 
 router.get('/audit-logs', requireRole('super_admin'), async (req, res) => {
-  const { page = 1, limit = 50 } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const { page, limit, offset } = parsePagination(req.query, 50);
   const result = await query(
     `SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
-    [parseInt(limit), offset]
+    [limit, offset]
   );
   res.json({ data: result.rows });
 });
@@ -738,7 +762,7 @@ router.get('/settlements/summary', adminAuth, async (req, res) => {
 });
 
 // Marquer un retrait comme vire (settlement manuel)
-router.post('/settlements/:transferId/complete', adminAuth, async (req, res) => {
+router.post('/settlements/:transferId/complete', requireRole('super_admin', 'finance_admin'), async (req, res) => {
   const { settlementRef, note } = req.body;
   const adminId = req.admin?.adminId || req.user?.adminId || req.user?.sub;
 
@@ -786,7 +810,7 @@ router.post('/settlements/:transferId/complete', adminAuth, async (req, res) => 
 });
 
 // Rejeter un retrait (rembourse le solde marchand)
-router.post('/settlements/:transferId/reject', adminAuth, async (req, res) => {
+router.post('/settlements/:transferId/reject', requireRole('super_admin', 'finance_admin'), async (req, res) => {
   const { reason } = req.body;
   try {
     const r = await query(
@@ -803,7 +827,26 @@ router.post('/settlements/:transferId/reject', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-module.exports = router;
+// ─── Reconciliation manuelle des transactions pending ───────────
+// Deplacee depuis merchant.routes.js (audit §2.18) : operation GLOBALE, reservee
+// aux roles super_admin / ops_admin.
+router.post('/reconcile', requireRole('super_admin', 'ops_admin'), async (req, res) => {
+  try {
+    const { reconcilePending } = require('../services/reconcile.service');
+    let maxAgeHours = parseInt(req.body?.maxAgeHours, 10);
+    if (!Number.isFinite(maxAgeHours) || maxAgeHours < 1 || maxAgeHours > 720) maxAgeHours = 24;
+    const r = await reconcilePending({ maxAgeHours, limit: 100 });
+    await query(
+      `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, new_values, ip_address)
+       VALUES ('admin',$1,$2,'RECONCILE_RUN','system','reconcile',$3,$4)`,
+      [req.user.sub, req.user.email, JSON.stringify({ maxAgeHours, summary: r?.summary || null }), req.ip]
+    ).catch(() => {});
+    res.json(r.summary);
+  } catch (err) {
+    logger.error('[reconcile]', { err: err.message });
+    res.status(500).json({ error: 'Erreur reconciliation' });
+  }
+});
 
 // ================================================================
 // ROUTES ENRICHIES v2 — Fraud, Transactions, Users, Alerts
@@ -811,8 +854,10 @@ module.exports = router;
 
 // ─── FRAUD EVENTS ────────────────────────────────────────────────
 router.get('/fraud/events', adminAuth, async (req, res) => {
-  const { limit = 50, offset = 0, action } = req.query;
-  const { query } = require('../config/database');
+  const { action } = req.query;
+  // limit borne [1,100], offset >= 0 (audit §3.12)
+  const { limit } = parsePagination(req.query, 50);
+  let offset = parseInt(req.query.offset, 10); if (!Number.isFinite(offset) || offset < 0) offset = 0;
   try {
     const conditions = ['1=1'];
     const params = [];
@@ -823,7 +868,7 @@ router.get('/fraud/events', adminAuth, async (req, res) => {
        LEFT JOIN merchants m ON m.merchant_id = fe.merchant_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY fe.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), parseInt(offset)]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*) FROM fraud_events fe WHERE ${conditions.join(' AND ')}`, params);
     res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
@@ -886,24 +931,23 @@ router.put('/fraud/rules/:id', requireRole('super_admin', 'ops_admin'), async (r
 
 // ─── TRANSACTIONS (liste globale admin) ──────────────────────────
 router.get('/transactions', adminAuth, async (req, res) => {
-  const { page = 1, limit = 25, status, type, method, merchant_id } = req.query;
-  const { query } = require('../config/database');
+  const { status, type, method, merchant_id } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 25);
   try {
     const conditions = ['1=1'];
     const params = [];
     const add = (col, val) => { if (val) { params.push(val); conditions.push(`t.${col}=$${params.length}`); } };
     add('status', status); add('type', type); add('payment_method', method); add('merchant_id', merchant_id);
-    const offset = (parseInt(page) - 1) * parseInt(limit);
     const r = await query(
       `SELECT t.*, m.business_name, m.country, m.currency as merchant_currency
        FROM transactions t
        LEFT JOIN merchants m ON m.merchant_id = t.merchant_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY t.initiated_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*) FROM transactions t WHERE ${conditions.join(' AND ')}`, params);
-    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page: parseInt(page) });
+    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page: page });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -921,40 +965,32 @@ router.get('/transactions/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/transactions/:id/refund', requireRole('super_admin', 'ops_admin'), async (req, res) => {
-  const { query } = require('../config/database');
-  try {
-    const r = await query(`SELECT * FROM transactions WHERE transaction_id=$1`, [req.params.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'Transaction introuvable' });
-    const txn = r.rows[0];
-    if (txn.status !== 'authorized') return res.status(422).json({ error: 'Seules les transactions approuvées sont remboursables' });
-    await query(
-      `UPDATE transactions SET status='reversed' WHERE transaction_id=$1`,
-      [req.params.id]
-    );
-    await query(
-      `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, ip_address)
-       VALUES ('admin',$1,$2,'TRANSACTION_REFUND','transaction',$3,$4)`,
-      [req.user.sub, req.user.email, req.params.id, req.ip]
-    );
-    res.json({ success: true, message: 'Remboursement initié' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+// HOTFIX (audit §3.13) : le remboursement marquait la transaction 'reversed' sans
+// aucun appel gateway/operateur (argent jamais rendu au client). Desactive tant
+// que le remboursement reel n'est pas implemente. Aucune ecriture.
+router.post('/transactions/:id/refund', requireRole('super_admin', 'ops_admin'), (req, res) => {
+  res.status(501).json({
+    error: 'Remboursement non implémenté : aucun appel opérateur/gateway disponible',
+    code: 'REFUND_NOT_IMPLEMENTED',
+  });
 });
 
 // ─── USERS (opérateurs/caissiers marchands) ───────────────────────
 router.get('/users', adminAuth, async (req, res) => {
-  const { page = 1, limit = 20, search } = req.query;
-  const { query } = require('../config/database');
+  const { search } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 20);
   try {
-    const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [];
     let where = '1=1';
     if (search) { params.push(`%${search}%`); where += ` AND (u.email ILIKE $${params.length} OR u.first_name ILIKE $${params.length} OR u.last_name ILIKE $${params.length})`; }
+    // HOTFIX (audit §2.12) : colonnes explicites — jamais password_hash / mfa_secret
     const r = await query(
-      `SELECT u.*, m.business_name FROM merchant_users u
+      `SELECT u.user_id, u.merchant_id, u.email, u.phone, u.first_name, u.last_name,
+              u.role, u.is_active, u.last_login_at, u.created_at, u.updated_at,
+              m.business_name FROM merchant_users u
        LEFT JOIN merchants m ON m.merchant_id = u.merchant_id
        WHERE ${where} ORDER BY u.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*) FROM merchant_users u WHERE ${where}`, params);
     res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
@@ -1008,21 +1044,20 @@ router.post('/users/:id/reset-password', requireRole('super_admin', 'ops_admin')
 
 // ─── ALERTS ──────────────────────────────────────────────────────
 router.get('/alerts', adminAuth, async (req, res) => {
-  const { page = 1, limit = 25, severity, resolved = false } = req.query;
-  const { query } = require('../config/database');
+  const { severity, resolved = false } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 25);
   try {
     const conditions = ['1=1'];
     const params = [];
     if (severity) { params.push(parseInt(severity)); conditions.push(`severity=$${params.length}`); }
     const resolvedBool = resolved === 'true' || resolved === true;
     params.push(resolvedBool); conditions.push(`resolved=$${params.length}`);
-    const offset = (parseInt(page) - 1) * parseInt(limit);
     const r = await query(
       `SELECT a.*, m.business_name FROM aml_alerts a
        LEFT JOIN merchants m ON m.merchant_id = a.merchant_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY a.severity DESC, a.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*) FROM aml_alerts a WHERE ${conditions.join(' AND ')}`, params);
     res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
@@ -1083,32 +1118,7 @@ router.post('/merchants/create', requireRole('super_admin', 'ops_admin'), async 
   }
 });
 
-// ─── GESTION MERCHANTS ────────────────────────────────────────────
-router.get('/merchants', adminAuth, async (req, res) => {
-  const { page=1, limit=20, search } = req.query;
-  const offset = (parseInt(page)-1)*parseInt(limit);
-  const conds = ['1=1']; const params = [];
-  if (search) { params.push(`%${search}%`); conds.push(`(m.business_name ILIKE $${params.length} OR m.email ILIKE $${params.length})`); }
-  try {
-    const r = await query(
-      `SELECT m.merchant_id, m.business_name, m.email, m.phone, m.country,
-              m.kyb_status, m.merchant_status, m.currency, m.created_at,
-              COUNT(DISTINCT t.txn_id) as txn_count,
-              COALESCE(SUM(t.amount) FILTER (WHERE t.status='authorized'), 0) as total_volume
-       FROM merchants m
-       LEFT JOIN transactions t ON t.merchant_id=m.merchant_id
-       WHERE ${conds.join(' AND ')}
-       GROUP BY m.merchant_id ORDER BY m.created_at DESC
-       LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
-    );
-    const cnt = await query(`SELECT COUNT(*) FROM merchants m WHERE ${conds.join(' AND ')}`, params);
-    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-
-router.put('/merchants/:id/fees', adminAuth, async (req, res) => {
+router.put('/merchants/:id/fees', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { fees } = req.body;
   if (!Array.isArray(fees)) return res.status(422).json({error:'fees doit être un tableau'});
   try {
@@ -1140,7 +1150,7 @@ router.get('/merchants/:id/velocity', adminAuth, async (req, res) => {
 });
 
 // PUT velocite d'un marchand
-router.put('/merchants/:id/velocity', adminAuth, async (req, res) => {
+router.put('/merchants/:id/velocity', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { velocity_max_per_txn, velocity_max_daily_amount, velocity_max_daily_count,
           velocity_max_monthly_amount, velocity_max_monthly_count } = req.body;
   const num = v => (v === '' || v === null || v === undefined) ? null : parseFloat(v);
@@ -1152,15 +1162,6 @@ router.put('/merchants/:id/velocity', adminAuth, async (req, res) => {
       WHERE merchant_id=$6`,
       [num(velocity_max_per_txn), num(velocity_max_daily_amount), int(velocity_max_daily_count),
        num(velocity_max_monthly_amount), int(velocity_max_monthly_count), req.params.id]);
-    res.json({ success: true });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-router.patch('/merchants/:id/status', adminAuth, async (req, res) => {
-  const { status } = req.body;
-  if (!['active','suspended','pending'].includes(status)) return res.status(422).json({error:'Statut invalide'});
-  try {
-    await query(`UPDATE merchants SET merchant_status=$1, updated_at=NOW() WHERE merchant_id=$2`, [status, req.params.id]);
     res.json({ success: true });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
@@ -1208,47 +1209,7 @@ router.patch('/merchants/:id/kyb/documents/:docId', adminAuth, async (req, res) 
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-// PATCH /admin/merchants/:id/kyb — Mettre à jour statut KYB global
-router.patch('/merchants/:id/kyb', adminAuth, async (req, res) => {
-  const { kybStatus, kybNotes, kybLevel } = req.body;
-  try {
-    await query(
-      `UPDATE merchants SET
-         kyb_status = COALESCE($1, kyb_status),
-         kyb_notes  = COALESCE($2, kyb_notes),
-         kyb_level  = COALESCE($3, kyb_level),
-         kyb_reviewed_at = NOW(),
-         updated_at = NOW()
-       WHERE merchant_id=$4`,
-      [kybStatus||null, kybNotes||null, kybLevel!=null?parseInt(kybLevel):null, req.params.id]
-    );
-    res.json({ success: true });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-// ─── RÈGLEMENTS ADMIN ─────────────────────────────────────────────
-router.get('/settlements', adminAuth, async (req, res) => {
-  const { merchantId, status, page=1, limit=20 } = req.query;
-  const offset = (parseInt(page)-1)*parseInt(limit);
-  const conds = ['1=1']; const params = [];
-  if (merchantId) { params.push(merchantId); conds.push(`sb.merchant_id=$${params.length}`); }
-  if (status) { params.push(status); conds.push(`sb.status=$${params.length}`); }
-  try {
-    const r = await query(
-      `SELECT sb.*, m.business_name, m.settlement_account
-       FROM settlement_batches sb
-       JOIN merchants m ON m.merchant_id = sb.merchant_id
-       WHERE ${conds.join(' AND ')}
-       ORDER BY sb.batch_date DESC
-       LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
-    );
-    const cnt = await query(`SELECT COUNT(*) FROM settlement_batches sb WHERE ${conds.join(' AND ')}`, params);
-    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-router.post('/settlement/run', adminAuth, async (req, res) => {
+router.post('/settlement/run', requireRole('super_admin', 'finance_admin'), async (req, res) => {
   try {
     const { runAutoSettlement } = require('../services/settlement/auto-settlement');
     await runAutoSettlement();
@@ -1258,8 +1219,8 @@ router.post('/settlement/run', adminAuth, async (req, res) => {
 
 // ─── TICKETS SUPPORT ADMIN ────────────────────────────────────────
 router.get('/support/tickets', adminAuth, async (req, res) => {
-  const { status, priority, page=1, limit=20 } = req.query;
-  const offset = (parseInt(page)-1)*parseInt(limit);
+  const { status, priority } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 20);
   const conds = ['1=1']; const params = [];
   if (status)   { params.push(status);   conds.push(`t.status=$${params.length}`); }
   if (priority) { params.push(priority); conds.push(`t.priority=$${params.length}`); }
@@ -1274,7 +1235,7 @@ router.get('/support/tickets', adminAuth, async (req, res) => {
        LEFT JOIN cardholders ch ON ch.cardholder_id=t.cardholder_id
        WHERE ${conds.join(' AND ')} ORDER BY t.created_at DESC
        LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*) FROM support_tickets t WHERE ${conds.join(' AND ')}`, params);
     res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
@@ -1292,23 +1253,6 @@ router.get('/support/tickets/:id', adminAuth, async (req, res) => {
     if (!t.rows.length) return res.status(404).json({ error: 'Ticket introuvable' });
     const msgs = await query('SELECT * FROM ticket_messages WHERE ticket_id=$1 ORDER BY created_at ASC', [req.params.id]);
     res.json({ ticket: t.rows[0], messages: msgs.rows });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-router.post('/support/tickets/:id/messages', adminAuth, async (req, res) => {
-  const { message, attachments } = req.body;
-  if (!message?.trim()) return res.status(422).json({ error: 'Message requis' });
-  try {
-    const r = await query(
-      `INSERT INTO ticket_messages (ticket_id, sender_type, sender_id, sender_name, message, attachments)
-       VALUES ($1,'admin',$2,$3,$4,$5) RETURNING *`,
-      [req.params.id, req.user?.sub, req.user?.name || 'Admin C-Pay', message.trim(), JSON.stringify(attachments || [])]
-    );
-    await query(
-      `UPDATE support_tickets SET status='pending_merchant', last_message_at=NOW(), updated_at=NOW() WHERE ticket_id=$1`,
-      [req.params.id]
-    );
-    res.status(201).json(r.rows[0]);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -1340,14 +1284,14 @@ router.get('/admin-users', adminAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-router.post('/admin-users', adminAuth, async (req, res) => {
+router.post('/admin-users', requireRole('super_admin'), async (req, res) => {
   const { email, password, firstName, lastName, role } = req.body;
   const validRoles = ['super_admin','ops_admin','finance_admin','support_agent'];
   if (!email || !password || !role) return res.status(422).json({error:'Champs requis'});
   if (!validRoles.includes(role)) return res.status(422).json({error:'Role invalide'});
   try {
-    const bcrypt = require('bcrypt');
-    const hash = await bcrypt.hash(password, 10);
+    // bcryptjs (module-level) — `bcrypt` natif n'est pas installe (audit §3.5)
+    const hash = await bcrypt.hash(password, 12);
     const r = await query(
       `INSERT INTO admin_users (email, password_hash, first_name, last_name, role, is_active)
        VALUES ($1,$2,$3,$4,$5,true) RETURNING admin_id, email, role`,
@@ -1360,8 +1304,10 @@ router.post('/admin-users', adminAuth, async (req, res) => {
   }
 });
 
-router.patch('/admin-users/:id', adminAuth, async (req, res) => {
+router.patch('/admin-users/:id', requireRole('super_admin'), async (req, res) => {
   const { role, isActive, firstName, lastName } = req.body;
+  const validRoles = ['super_admin','ops_admin','finance_admin','support_agent'];
+  if (role && !validRoles.includes(role)) return res.status(422).json({error:'Role invalide'});
   try {
     await query(
       `UPDATE admin_users SET
@@ -1377,7 +1323,8 @@ router.patch('/admin-users/:id', adminAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-router.delete('/admin-users/:id', adminAuth, async (req, res) => {
+router.delete('/admin-users/:id', requireRole('super_admin'), async (req, res) => {
+  if (String(req.params.id) === String(req.user.sub)) return res.status(422).json({error:'Impossible de desactiver son propre compte'});
   try {
     await query(`UPDATE admin_users SET is_active=false WHERE admin_id=$1`, [req.params.id]);
     res.json({success:true});
@@ -1385,9 +1332,9 @@ router.delete('/admin-users/:id', adminAuth, async (req, res) => {
 });
 
 // ─── RÈGLEMENTS FINANCE ───────────────────────────────────────────
-router.get('/finance/settlements', adminAuth, async (req, res) => {
-  const { status, merchantId, page=1, limit=20 } = req.query;
-  const offset = (parseInt(page)-1)*parseInt(limit);
+router.get('/finance/settlements', requireRole('super_admin', 'finance_admin'), async (req, res) => {
+  const { status, merchantId } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 20);
   const conds = ['1=1']; const params = [];
   if (status)     { params.push(status);     conds.push(`sb.status=$${params.length}`); }
   if (merchantId) { params.push(merchantId); conds.push(`sb.merchant_id=$${params.length}`); }
@@ -1402,7 +1349,7 @@ router.get('/finance/settlements', adminAuth, async (req, res) => {
        GROUP BY sb.batch_id, m.business_name, m.settlement_account, m.settlement_type
        ORDER BY sb.batch_date DESC
        LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*), COALESCE(SUM(total_net),0) as total_net, COALESCE(SUM(total_gross),0) as total_gross FROM settlement_batches sb WHERE ${conds.join(' AND ')}`, params);
     res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), summary: cnt.rows[0] });
@@ -1410,7 +1357,7 @@ router.get('/finance/settlements', adminAuth, async (req, res) => {
 });
 
 // Valider un règlement (Finance)
-router.patch('/finance/settlements/:id/validate', adminAuth, async (req, res) => {
+router.patch('/finance/settlements/:id/validate', requireRole('super_admin', 'finance_admin'), async (req, res) => {
   const { reference, notes } = req.body;
   try {
     await query(
@@ -1427,7 +1374,7 @@ router.patch('/finance/settlements/:id/validate', adminAuth, async (req, res) =>
 });
 
 // Rejeter un règlement (Finance)
-router.patch('/finance/settlements/:id/reject', adminAuth, async (req, res) => {
+router.patch('/finance/settlements/:id/reject', requireRole('super_admin', 'finance_admin'), async (req, res) => {
   const { reason } = req.body;
   try {
     await query(
@@ -1439,16 +1386,20 @@ router.patch('/finance/settlements/:id/reject', adminAuth, async (req, res) => {
 });
 
 // Export CSV règlements
-router.get('/finance/settlements/export', adminAuth, async (req, res) => {
+router.get('/finance/settlements/export', requireRole('super_admin', 'finance_admin'), async (req, res) => {
   try {
     const r = await query(
       `SELECT sb.batch_date, m.business_name, m.settlement_account, sb.txn_count, sb.total_gross, sb.total_fees, sb.total_net, sb.currency, sb.status, sb.completed_at
        FROM settlement_batches sb JOIN merchants m ON m.merchant_id=sb.merchant_id
        ORDER BY sb.batch_date DESC LIMIT 1000`
     );
-    const header = 'Date,Merchant,Compte,Transactions,Brut,Frais,Net,Devise,Statut,Date paiement\n';
-    const rows = r.rows.map(r => `${r.batch_date},${r.business_name},${r.settlement_account},${r.txn_count},${r.total_gross},${r.total_fees},${r.total_net},${r.currency},${r.status},${r.completed_at||''}`).join('\n');
-    res.setHeader('Content-Type', 'text/csv');
+    // HOTFIX (audit §2.22) : cellules quotees, guillemets echappes, anti-injection de formule
+    const header = integrations.csvRow(['Date','Merchant','Compte','Transactions','Brut','Frais','Net','Devise','Statut','Date paiement']) + '\n';
+    const rows = r.rows.map(r => integrations.csvRow([
+      r.batch_date, r.business_name, r.settlement_account, r.txn_count, r.total_gross,
+      r.total_fees, r.total_net, r.currency, r.status, r.completed_at || '',
+    ])).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=reglements.csv');
     res.send(header + rows);
   } catch(err){ res.status(500).json({error:err.message}); }
@@ -1600,7 +1551,12 @@ router.get('/notification-configs', adminAuth, async (req, res) => {
   try {
     const r = await query(`SELECT provider_key, extra_params, last_tested_at, last_test_ok FROM api_configurations WHERE provider_key LIKE 'notif_%'`);
     const cfg = {};
-    r.rows.forEach(row => { Object.assign(cfg, row.extra_params || {}); });
+    // HOTFIX (audit §2.12) : les secrets ne sortent jamais en clair
+    r.rows.forEach(row => {
+      for (const [k, v] of Object.entries(row.extra_params || {})) {
+        cfg[k] = NOTIF_SECRET_FIELDS.includes(k) ? maskSecret(v) : v;
+      }
+    });
     // Ajouter statuts de test
     r.rows.forEach(row => {
       const section = row.provider_key.replace('notif_','');
@@ -1624,7 +1580,13 @@ router.post('/notification-configs', adminAuth, async (req, res) => {
     };
     const fields = sectionFields[section] || Object.keys(allParams);
     const params = {};
-    fields.forEach(f => { if (allParams[f] !== undefined) params[f] = allParams[f]; });
+    fields.forEach(f => {
+      const v = allParams[f];
+      if (v === undefined) return;
+      // Un secret renvoye masque par l'UI ({configured,last4}) ou vide n'ecrase pas la valeur stockee
+      if (NOTIF_SECRET_FIELDS.includes(f) && (v === '' || v === null || typeof v === 'object')) return;
+      params[f] = v;
+    });
 
     const existing = await query(`SELECT config_id, extra_params FROM api_configurations WHERE provider_key=$1`, [key]);
     if (existing.rows.length) {
@@ -1811,7 +1773,7 @@ router.get('/partners/banks/:id/agents', adminAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-router.post('/partners/banks', adminAuth, async (req, res) => {
+router.post('/partners/banks', requireRole('super_admin'), async (req, res) => {
   const { bankName, bankCode, country='CG', contactEmail, contactPhone, address, city, swift, status='active',
           adminFirstName, adminLastName, adminEmail, adminPhone } = req.body;
   if (!bankName || !bankCode) return res.status(422).json({error:'bankName et bankCode requis'});
@@ -1843,18 +1805,19 @@ router.post('/partners/banks', adminAuth, async (req, res) => {
     await query(`INSERT INTO admin_notifications (type, title, message, metadata)
       VALUES ('bank_created','Nouvelle banque créée',$1,$2)`,
       [`${bankName} (${bankCode}) — Admin: ${adminEmail}`,
-       JSON.stringify({ bankId: bank.bank_id, bankName, adminEmail, tempPwd })]
+       JSON.stringify({ bankId: bank.bank_id, bankName, adminEmail })]
     ).catch(()=>{});
 
+    // Le mot de passe temporaire est renvoye UNE fois au super_admin createur, jamais stocke en clair
     res.status(201).json({
       bank,
       admin: { ...userRes.rows[0], tempPassword: tempPwd },
-      message: `Banque créée ✅ — Admin: ${adminEmail} / MDP temp: ${tempPwd}`
+      message: `Banque créée ✅ — Admin: ${adminEmail} (mot de passe temporaire ci-joint, non réaffiché)`
     });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-router.patch('/partners/banks/:id', adminAuth, async (req, res) => {
+router.patch('/partners/banks/:id', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { bankName, bankCode, contactEmail, contactPhone, city, address, swift } = req.body;
   try {
     await query(`UPDATE banks SET bank_name=COALESCE($1,bank_name), bank_code=COALESCE($2,bank_code),
@@ -1865,7 +1828,7 @@ router.patch('/partners/banks/:id', adminAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-router.patch('/partners/banks/:id/status', adminAuth, async (req, res) => {
+router.patch('/partners/banks/:id/status', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   try {
     await query(`UPDATE banks SET status=$1, updated_at=NOW() WHERE bank_id=$2`, [req.body.status, req.params.id]);
     res.json({success:true});
@@ -1908,7 +1871,7 @@ router.get('/tenants', adminAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-router.post('/tenants', adminAuth, async (req, res) => {
+router.post('/tenants', requireRole('super_admin'), async (req, res) => {
   const { bankId, subdomain, displayName, primaryColor='#12b6c7', secondaryColor='#1d4f92', accentColor='#00c896', logoUrl, supportEmail, supportPhone } = req.body;
   if (!bankId || !subdomain || !displayName) return res.status(422).json({error:'bankId, subdomain et displayName requis'});
   if (!/^[a-z0-9-]+$/.test(subdomain)) return res.status(422).json({error:'Subdomain: lettres minuscules, chiffres et tirets uniquement'});
@@ -1926,7 +1889,7 @@ router.post('/tenants', adminAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-router.patch('/tenants/:id', adminAuth, async (req, res) => {
+router.patch('/tenants/:id', requireRole('super_admin'), async (req, res) => {
   const { displayName, primaryColor, secondaryColor, accentColor, logoUrl, supportEmail, supportPhone, isActive } = req.body;
   try {
     await query(`UPDATE tenants SET
@@ -1941,3 +1904,5 @@ router.patch('/tenants/:id', adminAuth, async (req, res) => {
     res.json({success:true});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
+
+module.exports = router;

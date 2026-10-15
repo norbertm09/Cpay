@@ -17,6 +17,24 @@ const {
   revokeCard, resolveToken, generateSessionKey,
 } = require('../services/tokenization/card-enrollment.service');
 const { query, withTransaction } = require('../config/database');
+const { notify } = require('../services/notifications');
+
+// ─── HOTFIX P0 (audit 2.6.0 §2.6) ─────────────────────────────────
+// Les endpoints qui créditent/débitent une carte sans mouvement réel
+// chez un opérateur sont désactivés (410) tant qu'aucun provider n'est
+// branché. Le code reste en place derrière FEATURE_DISABLED.
+const FEATURE_DISABLED = true;
+const featureDisabled = (res) => res.status(410).json({
+  error: 'Fonctionnalité désactivée en attendant l’intégration opérateur',
+  code: 'FEATURE_DISABLED',
+});
+
+// Pagination bornée : limit ∈ [1,100], page ≥ 1
+const parsePagination = (q = {}) => {
+  const limit = Math.min(100, Math.max(1, parseInt(q.limit, 10) || 20));
+  const page  = Math.max(1, parseInt(q.page, 10) || 1);
+  return { limit, page, offset: (page - 1) * limit };
+};
 
 // ─── Middleware Auth Cardholder ───────────────────────────────────
 const cardAuth = async (req, res, next) => {
@@ -103,18 +121,20 @@ router.post('/auth/register', async (req, res) => {
     return res.status(422).json({ error: "Mot de passe trop court (min 8 caractères)" });
   try {
     const hash = await bcrypt.hash(password, 12);
-    await withTransaction(async client => {
+    // La réponse (JWT) n'est envoyée qu'après COMMIT : withTransaction retourne les données.
+    const created = await withTransaction(async client => {
       const cardId  = uuidv4();
+      const chId    = uuidv4();
       const last4   = Math.floor(1000 + Math.random() * 9000).toString();
       const cardNum = ('4000000000000000' + last4).slice(-16);
       const masked  = cardNum.slice(0,4)+' **** **** '+last4;
       const expYear = new Date().getFullYear() + 3;
       const emboss  = (firstName.slice(0,13)+' '+lastName.slice(0,13)).toUpperCase();
+      // HOTFIX IDOR : la carte est rattachée à son porteur dès la création
       await client.query(
-        `INSERT INTO virtual_cards (card_id,card_number,card_masked,cardholder_name,expiry_month,expiry_year,balance,currency,network,country) VALUES ($1,$2,$3,$4,12,$5,0,'XAF','visa',$6)`,
-        [cardId, cardNum, masked, emboss, expYear, country]
+        `INSERT INTO virtual_cards (card_id,cardholder_id,card_number,card_masked,cardholder_name,expiry_month,expiry_year,balance,currency,network,country) VALUES ($1,$2,$3,$4,$5,12,$6,0,'XAF','visa',$7)`,
+        [cardId, chId, cardNum, masked, emboss, expYear, country]
       );
-      const chId = uuidv4();
       await client.query(
         `INSERT INTO cardholders (cardholder_id,card_id,first_name,last_name,email,phone,date_of_birth,id_type,id_number,country,password_hash,kyc_level) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1)`,
         [chId, cardId, firstName, lastName, email.toLowerCase(), phone, dateOfBirth||null, idType||null, idNumber||null, country, hash]
@@ -127,32 +147,35 @@ router.post('/auth/register', async (req, res) => {
         `UPDATE cardholders SET email_verify_token=$1, email_verified=FALSE WHERE cardholder_id=$2`,
         [verifyHash, chId]);
 
-      const accessToken  = jwt.sign({ sub: chId, cardId, type: 'cardholder', email }, process.env.JWT_SECRET, { expiresIn: '8h' });
-      const refreshToken = jwt.sign({ sub: chId, type: 'cardholder_refresh' }, process.env.JWT_SECRET, { expiresIn: '7d' });
-      await auditLog({ eventType: 'CARDHOLDER_REGISTERED', actorType: 'cardholder', actorId: chId, ipAddress: req.ip, success: true, details: { country, email } });
+      return { chId, cardId, masked, emboss, expYear, verifyRaw };
+    });
 
-      // Email d'activation (best-effort, ne bloque pas l'inscription)
-      const verifyUrl = `${process.env.APP_URL_CARDHOLDER || 'https://app.c-pay.global'}/verify-email?token=${verifyRaw}`;
-      (async () => {
-        try {
-          const emailSvc = require('../services/notifications/email.service');
-          await emailSvc.send({
-            to: email.toLowerCase(),
-            subject: 'Activez votre compte CPlus',
-            html: `<h2>Bienvenue ${firstName} !</h2>
-              <p>Merci de votre inscription. Cliquez sur le bouton ci-dessous pour activer votre compte :</p>
-              <p><a href="${verifyUrl}" style="display:inline-block;background:#1d4f92;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Activer mon compte</a></p>
-              <p style="color:#5a6677;font-size:13px">Ou copiez ce lien : ${verifyUrl}</p>
-              <p style="color:#5a6677;font-size:13px">Ce lien expire dans 48h. Si vous n'êtes pas à l'origine de cette inscription, ignorez cet email.</p>`,
-          });
-        } catch (e) { console.error('[verify-email]', e.message); }
-      })();
+    const { chId, cardId, masked, emboss, expYear, verifyRaw } = created;
+    const accessToken  = jwt.sign({ sub: chId, cardId, type: 'cardholder', email }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    const refreshToken = jwt.sign({ sub: chId, type: 'cardholder_refresh' }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    await auditLog({ eventType: 'CARDHOLDER_REGISTERED', actorType: 'cardholder', actorId: chId, ipAddress: req.ip, success: true, details: { country, email } });
 
-      res.status(201).json({
-        access_token: accessToken, refresh_token: refreshToken,
-        cardholder: { cardholderId: chId, firstName, lastName, email, phone, kycLevel: 1, emailVerified: false },
-        card: { cardId, cardMasked: masked, cardholderName: emboss, balance: 0, currency: 'XAF', status: 'active', expiryMonth: 12, expiryYear: expYear, network: 'visa' },
-      });
+    // Email d'activation (best-effort, ne bloque pas l'inscription) — envoyé après COMMIT
+    const verifyUrl = `${process.env.APP_URL_CARDHOLDER || 'https://app.c-pay.global'}/verify-email?token=${verifyRaw}`;
+    (async () => {
+      try {
+        const emailSvc = require('../services/notifications/email.service');
+        await emailSvc.send({
+          to: email.toLowerCase(),
+          subject: 'Activez votre compte CPlus',
+          html: `<h2>Bienvenue ${firstName} !</h2>
+            <p>Merci de votre inscription. Cliquez sur le bouton ci-dessous pour activer votre compte :</p>
+            <p><a href="${verifyUrl}" style="display:inline-block;background:#1d4f92;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Activer mon compte</a></p>
+            <p style="color:#5a6677;font-size:13px">Ou copiez ce lien : ${verifyUrl}</p>
+            <p style="color:#5a6677;font-size:13px">Ce lien expire dans 48h. Si vous n'êtes pas à l'origine de cette inscription, ignorez cet email.</p>`,
+        });
+      } catch (e) { console.error('[verify-email]', e.message); }
+    })();
+
+    res.status(201).json({
+      access_token: accessToken, refresh_token: refreshToken,
+      cardholder: { cardholderId: chId, firstName, lastName, email, phone, kycLevel: 1, emailVerified: false },
+      card: { cardId, cardMasked: masked, cardholderName: emboss, balance: 0, currency: 'XAF', status: 'active', expiryMonth: 12, expiryYear: expYear, network: 'visa' },
     });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: "Email ou téléphone déjà utilisé", code: 'DUPLICATE' });
@@ -257,9 +280,10 @@ router.post('/card/pin', cardAuth, async (req, res) => {
     const chId = req.cardholder.cardholderId || req.cardholder.sub;
     const target = cardId || req.cardholder.cardId;
 
+    // HOTFIX IDOR : uniquement la carte dont le porteur est propriétaire
     const r = await query(
       `SELECT pin_hash FROM virtual_cards
-       WHERE card_id=$1 AND (cardholder_id=$2 OR cardholder_id IS NULL)`,
+       WHERE card_id=$1 AND cardholder_id=$2`,
       [target, chId]);
     if (!r.rows.length) return res.status(404).json({ error: 'Carte introuvable' });
 
@@ -274,8 +298,8 @@ router.post('/card/pin', cardAuth, async (req, res) => {
     }
 
     const hash = await bcrypt.hash(targetPin, 12);
-    await query(`UPDATE virtual_cards SET pin_hash=$1, updated_at=NOW() WHERE card_id=$2`,
-      [hash, target]);
+    await query(`UPDATE virtual_cards SET pin_hash=$1, updated_at=NOW() WHERE card_id=$2 AND cardholder_id=$3`,
+      [hash, target, chId]);
     await query(`INSERT INTO pin_attempts (card_id, ip_address, success) VALUES ($1,$2,TRUE)`,
       [target, req.ip]);
 
@@ -322,8 +346,8 @@ router.post('/profile/change-password', cardAuth, async (req, res) => {
 
 // Historique transactions
 router.get('/transactions', cardAuth, async (req, res) => {
-  const { page = 1, limit = 20, type, status } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const { type, status } = req.query;
+  const { page, limit, offset } = parsePagination(req.query);
   try {
     const conditions = ['card_id = $1'];
     const params     = [req.cardholder.cardId];
@@ -332,10 +356,10 @@ router.get('/transactions', cardAuth, async (req, res) => {
     const r = await query(
       `SELECT * FROM card_transactions WHERE ${conditions.join(' AND ')}
        ORDER BY initiated_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*) FROM card_transactions WHERE ${conditions.join(' AND ')}`, params);
-    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page: parseInt(page) });
+    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page, limit });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -346,9 +370,10 @@ router.post('/payment', cardAuth, async (req, res) => {
   if (!pin) return res.status(422).json({ error: 'PIN requis' });
 
   try {
-    await withTransaction(async client => {
-      // Récupérer la carte
-      const cardRes = await client.query(`SELECT * FROM virtual_cards WHERE card_id=$1 FOR UPDATE`, [req.cardholder.cardId]);
+    // Réponse envoyée après COMMIT (withTransaction retourne le résultat)
+    const out = await withTransaction(async client => {
+      // Récupérer la carte (HOTFIX IDOR : scopée au porteur)
+      const cardRes = await client.query(`SELECT * FROM virtual_cards WHERE card_id=$1 AND cardholder_id=$2 FOR UPDATE`, [req.cardholder.cardId, req.cardholder.sub]);
       const card = cardRes.rows[0];
       if (!card) throw new Error("Carte introuvable");
       if (card.status !== 'active') throw new Error(`Carte ${card.status === 'frozen' ? 'gelée' : 'inactive'}`);
@@ -387,27 +412,32 @@ router.post('/payment', cardAuth, async (req, res) => {
         [uuidv4(), card.card_id, req.cardholder.sub, amount, fee, amount - fee, balBefore, balAfter, card.currency, description || null, merchantName, merchantId || null, authCode]
       );
 
-      res.json({ success: true, txn: txnRes.rows[0], newBalance: balAfter, authCode });
+      return { txn: txnRes.rows[0], newBalance: balAfter, authCode };
     });
+    res.json({ success: true, ...out });
   } catch (err) {
-    const status = ['PIN incorrect','Solde insuffisant','Carte gelée','Carte inactive'].some(m => err.message.includes(m)) ? 422 : 500;
+    const status = ['PIN incorrect','Solde insuffisant','Carte gelée','Carte inactive','Carte introuvable'].some(m => err.message.includes(m)) ? 422 : 500;
     res.status(status).json({ error: err.message });
   }
 });
 
 // ─── TOP-UP (Mobile Money → Carte) ───────────────────────────────
 router.post('/topup', cardAuth, async (req, res) => {
+  // HOTFIX P0 : ce flux « Simuler appel Mobile Money » créditait la carte sans
+  // débit réel chez l'opérateur. Désactivé (410) jusqu'au branchement provider.
+  if (FEATURE_DISABLED) return featureDisabled(res);
+
   const { amount, operator, phone, pin } = req.body;
   if (!amount || amount <= 0 || amount < 500) return res.status(422).json({ error: 'Montant minimum 500 XAF' });
   if (!operator || !['mtn', 'orange', 'airtel', 'vodacom'].includes(operator)) return res.status(422).json({ error: 'Opérateur invalide' });
   if (!phone) return res.status(422).json({ error: 'Numéro Mobile Money requis' });
 
   try {
-    await withTransaction(async client => {
+    const out = await withTransaction(async client => {
       const chId = req.cardholder.cardholderId || req.cardholder.sub;
       const targetCardId = req.body.cardId || req.cardholder.cardId;
       const cardRes = await client.query(
-        `SELECT * FROM virtual_cards WHERE card_id=$1 AND (cardholder_id=$2 OR cardholder_id IS NULL) FOR UPDATE`,
+        `SELECT * FROM virtual_cards WHERE card_id=$1 AND cardholder_id=$2 FOR UPDATE`,
         [targetCardId, chId]);
       const card = cardRes.rows[0];
       if (!card) throw new Error("Carte introuvable");
@@ -432,13 +462,17 @@ router.post('/topup', cardAuth, async (req, res) => {
         [uuidv4(), card.card_id, req.cardholder.sub, amount, fee, credited, balBefore, balAfter, card.currency, `Top-up via ${operator.toUpperCase()}`, operator, phone, mmRef]
       );
 
-      res.json({ success: true, txn: txnRes.rows[0], newBalance: balAfter, credited, fee, mmReference: mmRef });
+      return { txn: txnRes.rows[0], newBalance: balAfter, credited, fee, mmReference: mmRef };
     });
+    res.json({ success: true, ...out });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ─── UNLOAD (Carte → Mobile Money) ───────────────────────────────
 router.post('/unload', cardAuth, async (req, res) => {
+  // HOTFIX P0 : déchargement sans transfert réel vers l'opérateur → 410.
+  if (FEATURE_DISABLED) return featureDisabled(res);
+
   const { amount, operator, phone, pin } = req.body;
   if (!amount || amount <= 0 || amount < 500) return res.status(422).json({ error: 'Montant minimum 500 XAF' });
   if (!operator || !['mtn', 'orange', 'airtel', 'vodacom'].includes(operator)) return res.status(422).json({ error: 'Opérateur invalide' });
@@ -446,11 +480,11 @@ router.post('/unload', cardAuth, async (req, res) => {
   if (!pin) return res.status(422).json({ error: 'PIN requis' });
 
   try {
-    await withTransaction(async client => {
+    const out = await withTransaction(async client => {
       const chId = req.cardholder.cardholderId || req.cardholder.sub;
       const targetCardId = req.body.cardId || req.cardholder.cardId;
       const cardRes = await client.query(
-        `SELECT * FROM virtual_cards WHERE card_id=$1 AND (cardholder_id=$2 OR cardholder_id IS NULL) FOR UPDATE`,
+        `SELECT * FROM virtual_cards WHERE card_id=$1 AND cardholder_id=$2 FOR UPDATE`,
         [targetCardId, chId]);
       const card = cardRes.rows[0];
       if (!card) throw new Error("Carte introuvable");
@@ -477,8 +511,9 @@ router.post('/unload', cardAuth, async (req, res) => {
         [uuidv4(), card.card_id, req.cardholder.sub, amount, fee, amount - fee, balBefore, balAfter, card.currency, `Déchargement vers ${operator.toUpperCase()} ${phone}`, operator, phone, mmRef]
       );
 
-      res.json({ success: true, txn: txnRes.rows[0], newBalance: balAfter, sent: amount - fee, fee, mmReference: mmRef });
+      return { txn: txnRes.rows[0], newBalance: balAfter, sent: amount - fee, fee, mmReference: mmRef };
     });
+    res.json({ success: true, ...out });
   } catch (err) {
     const status = err.message.includes('PIN') || err.message.includes('Solde') ? 422 : 500;
     res.status(status).json({ error: err.message });
@@ -555,7 +590,7 @@ router.post('/cards/enroll', cardAuth, async (req, res) => {
   const { v4: uuidv4 } = require('uuid');
   const { cardNumber, expiryMonth, expiryYear, cardholderName, cvv, network } = req.body;
 
-  if (!cardNumber || cardNumber.replace(/\\s/g,'').length < 13)
+  if (!cardNumber || String(cardNumber).replace(/\s/g,'').length < 13)
     return res.status(422).json({ error: 'Numero de carte invalide' });
   if (!expiryMonth || !expiryYear)
     return res.status(422).json({ error: "Date d'expiration requise" });
@@ -566,7 +601,8 @@ router.post('/cards/enroll', cardAuth, async (req, res) => {
 
   try {
     const chId = req.cardholder.cardholderId || req.cardholder.sub;
-    const pan = cardNumber.replace(/\\s/g, '');
+    const pan = String(cardNumber).replace(/\s/g, '');
+    if (!/^[0-9]{13,19}$/.test(pan)) return res.status(422).json({ error: 'Numero de carte invalide' });
 
     // Luhn
     let sum = 0, alt = false;
@@ -775,62 +811,74 @@ router.post('/payment/tokenized', cardAuth, async (req, res) => {
 
     // ─── Cas 1: paiement depuis une CARTE CREEE (solde interne) ───
     if (cardId) {
-      const cardRes = await query(
-        `SELECT * FROM virtual_cards WHERE card_id=$1 AND (cardholder_id=$2 OR cardholder_id IS NULL)`,
-        [cardId, chId]);
-      const card = cardRes.rows[0];
-      if (!card) return res.status(404).json({ error: 'Carte introuvable' });
-      if (card.status !== 'active')
-        return res.status(422).json({ error: card.status === 'frozen' ? 'Carte gelee' : 'Carte inactive' });
+      // HOTFIX : débit atomique (SELECT ... FOR UPDATE dans une transaction),
+      // carte scopée au porteur (plus de `OR cardholder_id IS NULL`),
+      // refus si solde insuffisant, réponse après COMMIT.
+      const fail = (status, error) => { const e = new Error(error); e.statusCode = status; return e; };
+      let out;
+      try {
+        out = await withTransaction(async client => {
+          const cardRes = await client.query(
+            `SELECT * FROM virtual_cards WHERE card_id=$1 AND cardholder_id=$2 FOR UPDATE`,
+            [cardId, chId]);
+          const card = cardRes.rows[0];
+          if (!card) throw fail(404, 'Carte introuvable');
+          if (card.status !== 'active')
+            throw fail(422, card.status === 'frozen' ? 'Carte gelee' : 'Carte inactive');
 
-      const pinOk = card.pin_hash ? await bcrypt.compare(pin, card.pin_hash) : false;
-      if (!pinOk) return res.status(401).json({ error: 'PIN incorrect' });
+          const pinOk = card.pin_hash ? await bcrypt.compare(pin, card.pin_hash) : false;
+          await client.query(`INSERT INTO pin_attempts (card_id, ip_address, success) VALUES ($1,$2,$3)`,
+            [card.card_id, req.ip, pinOk]).catch(() => {});
+          if (!pinOk) throw fail(401, 'PIN incorrect');
 
-      const bal = parseFloat(card.balance);
-      if (amt > bal) return res.status(422).json({ error: `Solde insuffisant (${bal} XAF)` });
+          const bal = parseFloat(card.balance);
+          if (amt > bal) throw fail(422, `Solde insuffisant (${bal} XAF)`);
 
-      const fee = Math.round(amt * 0.01);
-      const total = amt + fee;
-      if (total > bal) return res.status(422).json({ error: `Solde insuffisant avec frais (${total} XAF requis)` });
+          const fee = Math.round(amt * 0.01);
+          const total = amt + fee;
+          if (total > bal) throw fail(422, `Solde insuffisant avec frais (${total} XAF requis)`);
 
-      const ref = 'PAY-' + Date.now().toString(36).toUpperCase();
-      const authCode = 'AUTH' + Math.random().toString(36).slice(2,8).toUpperCase();
+          const ref = 'PAY-' + Date.now().toString(36).toUpperCase();
+          const authCode = 'AUTH' + crypto.randomBytes(4).toString('hex').toUpperCase();
 
-      await query(`UPDATE virtual_cards SET balance = balance - $1, updated_at=NOW() WHERE card_id=$2`,
-        [total, cardId]);
+          const upd = await client.query(
+            `UPDATE virtual_cards SET balance = balance - $1, updated_at=NOW()
+             WHERE card_id=$2 AND cardholder_id=$3 AND balance >= $1 RETURNING balance`,
+            [total, cardId, chId]);
+          if (!upd.rows.length) throw fail(422, 'Solde insuffisant');
 
-      const txn = await query(
-        `INSERT INTO card_transactions (txn_id, card_id, cardholder_id, type, amount, currency,
-          fee_amount, net_amount, status, auth_code, description, merchant_id, initiated_at, completed_at)
-         VALUES ($1,$2,$3,'payment',$4,'XAF',$5,$6,'completed',$7,$8,$9,NOW(),NOW())
-         RETURNING txn_id, amount, fee_amount, status, auth_code`,
-        [uuidv4(), cardId, chId, amt, fee, amt, authCode,
-         description || 'Paiement CPlus', merchantId || null]
-      ).catch(async () => {
-        return await query(
-          `INSERT INTO transactions (merchant_id, type, amount, currency, fee_amount, net_amount,
-            payment_method, status, auth_code, description, initiated_at, completed_at)
-           VALUES ($1,'qr_payment',$2,'XAF',$3,$4,'qr','authorized',$5,$6,NOW(),NOW())
-           RETURNING transaction_id as txn_id, amount, fee_amount, status, auth_code`,
-          [merchantId || null, amt, fee, amt, authCode, description || 'Paiement CPlus']);
-      });
+          const txn = await client.query(
+            `INSERT INTO card_transactions (txn_id, card_id, cardholder_id, type, amount, currency,
+              fee_amount, net_amount, status, auth_code, description, merchant_id, initiated_at, completed_at)
+             VALUES ($1,$2,$3,'payment',$4,'XAF',$5,$6,'completed',$7,$8,$9,NOW(),NOW())
+             RETURNING txn_id, amount, fee_amount, status, auth_code`,
+            [uuidv4(), cardId, chId, amt, fee, amt, authCode,
+             description || 'Paiement CPlus', merchantId || null]
+          );
 
-      const newBal = await query(`SELECT balance FROM virtual_cards WHERE card_id=$1`, [cardId]);
+          return {
+            txnId: txn.rows[0].txn_id,
+            reference: ref,
+            authCode,
+            amount: amt,
+            fee,
+            newBalance: parseFloat(upd.rows[0].balance),
+          };
+        });
+      } catch (e) {
+        if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+        throw e;
+      }
 
-      return res.json({
-        success: true,
-        txnId: txn.rows[0].txn_id,
-        reference: ref,
-        authCode,
-        amount: amt,
-        fee,
-        newBalance: parseFloat(newBal.rows[0].balance),
-        status: 'completed',
-        paymentSource: 'created_card'
-      });
+      return res.json({ success: true, ...out, status: 'completed', paymentSource: 'created_card' });
     }
 
     // ─── Cas 2: paiement depuis une CARTE ENROLEE (via PSP) ───
+    // HOTFIX P0 : `const authorized = true` insérait une transaction `authorized`
+    // pour un merchantId arbitraire sans appel PSP. Désactivé (410) tant que
+    // l'appel CyberSource réel n'est pas branché. Code conservé ci-dessous.
+    if (FEATURE_DISABLED) return featureDisabled(res);
+
     const enr = await query(
       `SELECT * FROM cardholder_enrolled_cards
        WHERE enrollment_id=$1 AND cardholder_id=$2 AND status='active'`,
@@ -946,7 +994,8 @@ router.post('/support/tickets', cardAuth, async (req, res) => {
 
 router.get('/support/tickets/:id', cardAuth, async (req, res) => {
   try {
-    const t = await query(`SELECT * FROM support_tickets WHERE ticket_id=$1`, [req.params.id]);
+    // HOTFIX IDOR : ticket scopé au porteur
+    const t = await query(`SELECT * FROM support_tickets WHERE ticket_id=$1 AND cardholder_id=$2`, [req.params.id, req.cardholder.sub]);
     if (!t.rows.length) return res.status(404).json({error:'Ticket introuvable'});
     const msgs = await query(`SELECT * FROM ticket_messages WHERE ticket_id=$1 ORDER BY created_at ASC`, [req.params.id]);
     res.json({ ...t.rows[0], messages: msgs.rows });
@@ -957,6 +1006,9 @@ router.post('/support/tickets/:id/messages', cardAuth, async (req, res) => {
   const { message, attachments } = req.body;
   if (!message) return res.status(422).json({error:'Message requis'});
   try {
+    // HOTFIX IDOR : ticket scopé au porteur
+    const own = await query(`SELECT 1 FROM support_tickets WHERE ticket_id=$1 AND cardholder_id=$2`, [req.params.id, req.cardholder.sub]);
+    if (!own.rows.length) return res.status(404).json({error:'Ticket introuvable'});
     await query(
       `INSERT INTO ticket_messages (ticket_id, sender_type, sender_id, sender_name, message, attachments)
        VALUES ($1,'merchant',$2,$3,$4,$5)`,
@@ -982,8 +1034,10 @@ router.post('/auth/2fa/setup', cardAuth, async (req, res) => {
 
 router.post('/auth/2fa/verify', cardAuth, async (req, res) => {
   const { token } = req.body;
+  if (!token || typeof token !== 'string') return res.status(400).json({error:'Code requis'});
   try {
     const u = await query(`SELECT mfa_secret FROM cardholders WHERE cardholder_id=$1`, [req.cardholder.sub]);
+    if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
     const valid = speakeasy2.totp.verify({ secret: u.rows[0].mfa_secret, encoding:'base32', token:token.replace(/\s/g,''), window:2 });
     if (!valid) return res.status(400).json({error:'Code invalide'});
     await query(`UPDATE cardholders SET mfa_enabled=TRUE WHERE cardholder_id=$1`, [req.cardholder.sub]);
