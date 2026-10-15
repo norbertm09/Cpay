@@ -1,4 +1,4 @@
-// CPlus — i18n (FR / EN)
+// C-Pay — i18n (FR / EN)
 export const translations = {
   fr: {
     // Opérations

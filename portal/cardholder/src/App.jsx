@@ -1,4 +1,4 @@
-// CPlus 2.6.0 — Cardholder Portal
+// C-Pay 2.6.0 — Cardholder Portal
 // Virtual Card: Payment, Top-up, Unload, History, PIN, Profile
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
@@ -14,7 +14,10 @@ api.interceptors.request.use(cfg => {
   return cfg;
 });
 api.interceptors.response.use(r => r, err => {
-  if (err.response?.status === 401) { localStorage.removeItem('ch_token'); window.location.href = '/login'; }
+  const st = err.response?.status;
+  if (st === 401) { localStorage.removeItem('ch_token'); if (window.location.pathname !== '/login') window.location.href = '/login'; }
+  else if (st === 403) { toast.error('Accès refusé'); }
+  else if (st === 410 || err.response?.data?.code === 'FEATURE_DISABLED') { toast.error('Fonctionnalité en cours d\u2019intégration'); } // topup / unload / paiement tokenisé (hotfix v1)
   return Promise.reject(err);
 });
 
@@ -314,11 +317,11 @@ const ConsentModal = ({ userId, onAccepted }) => {
             <li>Aucune vente de donnees a des tiers</li>
             <li>Contact : legal@c-pay.global</li>
           </ul>
-          <a href="https://c-pay.global/legal/privacy.html" target="_blank" rel="noreferrer" style={{ color:'#12b6c7', fontSize:12 }}>Lire la politique complete</a>
+          <a href="https://c-pay.global/legal/confidentialite.html" target="_blank" rel="noreferrer" style={{ color:'#12b6c7', fontSize:12 }}>Lire la politique complete</a>
         </div>
         <label style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:10, cursor:'pointer' }}>
           <input type="checkbox" checked={cgu} onChange={e=>setCgu(e.target.checked)} style={{ width:18, height:18, marginTop:2 }} />
-          <span style={{ fontSize:13 }}>J&apos;accepte les CGU de CPlus *</span>
+          <span style={{ fontSize:13 }}>J&apos;accepte les CGU de C-Pay *</span>
         </label>
         <label style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:16, cursor:'pointer' }}>
           <input type="checkbox" checked={privacy} onChange={e=>setPrivacy(e.target.checked)} style={{ width:18, height:18, marginTop:2 }} />
@@ -374,8 +377,8 @@ const Layout = ({ children, lang, toggleLang }) => {
       {/* Sidebar */}
       <aside style={{ width:220, background:CARD, borderRight:`1px solid ${BORDER}`, display:'flex', flexDirection:'column', position:'fixed', top:bannerHeight, bottom:0, left:0, zIndex:100 }}>
         <div style={{ padding:'16px 16px 12px', borderBottom:`1px solid ${BORDER}` }}>
-          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width:'100%', maxWidth:175, height:'auto', objectFit:'contain' }} />
-          <div style={{ fontSize:10, color:MUTED, marginTop:4, fontFamily:FONT }}>Espace Cardholder</div>
+          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:'100%', maxWidth:175, height:'auto', objectFit:'contain' }} />
+          <div style={{ fontSize:10, color:MUTED, marginTop:4, fontFamily:FONT }}>C-Pay — Espace Porteur</div>
         </div>
         <nav style={{ flex:1, padding:'10px 0', overflowY:'auto' }}>
           {nav.map(n => (
@@ -389,7 +392,7 @@ const Layout = ({ children, lang, toggleLang }) => {
           <button onClick={() => { localStorage.removeItem('ch_token'); navigate('/login'); }} style={{ background:'none', border:`1px solid ${BORDER}`, color:MUTED, padding:'6px 10px', borderRadius:6, cursor:'pointer', fontSize:12, width:'100%', fontFamily:FONT }}>{t('logout')}</button>
           <div style={{ marginTop:12, paddingTop:10, borderTop:`1px solid ${BORDER}`, fontSize:10, color:MUTED, textAlign:'center' }}>
             <a href="https://c-pay.global/legal/cgu.html" target="_blank" rel="noreferrer" style={{ color:MUTED, display:'block', marginBottom:2 }}>CGU</a>
-            <a href="https://c-pay.global/legal/privacy.html" target="_blank" rel="noreferrer" style={{ color:MUTED }}>Confidentialité</a>
+            <a href="https://c-pay.global/legal/confidentialite.html" target="_blank" rel="noreferrer" style={{ color:MUTED }}>Confidentialité</a>
           </div>
         </div>
       </aside>
@@ -434,7 +437,7 @@ const Register = ({ lang, toggleLang }) => {
     <div style={{ minHeight:'100vh', background:`linear-gradient(135deg, #1d4f92, ${P})`, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
       <div style={{ background:'#fff', borderRadius:20, padding:32, width:440, maxWidth:'100%', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ textAlign:'center', marginBottom:24 }}>
-          <img src="/logo-calculus.png" alt="CPlus" style={{ width:180, height:'auto', marginBottom:12 }} />
+          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:180, height:'auto', marginBottom:12 }} />
           <div style={{ fontSize:16, fontWeight:700, fontFamily:FONT }}>{lang==='fr'?'Créer un compte':'Create an account'}</div>
           <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}>
             {[1,2].map(s=>(
@@ -565,7 +568,7 @@ const ResetPassword = ({ lang }) => {
     <div style={{ minHeight:'100vh', background:`linear-gradient(135deg, #1d4f92, ${P})`, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
       <div style={{ background:'#fff', borderRadius:20, padding:32, width:400, maxWidth:'100%', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ textAlign:'center', marginBottom:24 }}>
-          <img src="/logo-calculus.png" alt="CPlus" style={{ width:160, height:'auto', marginBottom:12 }} />
+          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:160, height:'auto', marginBottom:12 }} />
           <div style={{ fontSize:16, fontWeight:700, fontFamily:FONT }}>🔐 {lang==='fr'?'Réinitialiser le mot de passe':'Reset password'}</div>
         </div>
 
@@ -642,7 +645,7 @@ const VerifyEmail = ({ lang }) => {
   return (
     <div style={{ minHeight:'100vh', background:`linear-gradient(135deg, #1d4f92, ${P})`, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
       <div style={{ background:'#fff', borderRadius:20, padding:32, width:400, maxWidth:'100%', boxShadow:'0 20px 60px rgba(0,0,0,0.2)', textAlign:'center' }}>
-        <img src="/logo-calculus.png" alt="CPlus" style={{ width:160, height:'auto', marginBottom:20 }} />
+        <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:160, height:'auto', marginBottom:20 }} />
         {state==='loading' && (
           <div style={{ fontSize:15, color:MUTED }}>{lang==='fr'?'Vérification en cours…':'Verifying…'}</div>
         )}
@@ -679,19 +682,56 @@ const Login = ({ lang, toggleLang }) => {
   const t = k => T[lang][k] || k;
   const [creds, setCreds] = useState({ emailOrPhone:'', password:'' });
   const [loading, setLoading] = useState(false);
+  // Etapes supplementaires renvoyees par /auth/login (hotfix v1) :
+  //   { mfaRequired:true, mfaToken }  -> saisie du code TOTP a 6 chiffres
+  //   { mustChangePassword:true }     -> changement de mot de passe force
+  const [mfa, setMfa] = useState(null);
+  const [code, setCode] = useState('');
+  const [forcePwd, setForcePwd] = useState(false);
+  const [pwd, setPwd] = useState({ newPassword:'', confirm:'' });
   const navigate = useNavigate();
   const { isAuth } = useAuth();
-  useEffect(() => { if (isAuth) navigate('/'); }, [isAuth, navigate]);
+  useEffect(() => { if (isAuth && !forcePwd) navigate('/'); }, [isAuth, forcePwd, navigate]);
+
+  const finishLogin = (data) => {
+    if (data.mfaRequired && data.mfaToken) { setMfa({ mfaToken: data.mfaToken }); return; }
+    if (data.access_token) localStorage.setItem('ch_token', data.access_token);
+    if (data.mustChangePassword) { setForcePwd(true); return; }
+    navigate('/');
+  };
 
   const submit = async () => {
     setLoading(true);
     try {
       const { data } = await api.post('/auth/login', creds);
-      localStorage.setItem('ch_token', data.access_token);
-      navigate('/');
-    } catch { toast.error(t('loginError')); }
+      finishLogin(data);
+    } catch (err) { toast.error(err.response?.data?.error || t('loginError')); }
     finally { setLoading(false); }
   };
+
+  const submitMfa = async () => {
+    if (code.length !== 6) return toast.error(lang==='fr'?'Code à 6 chiffres requis':'6-digit code required');
+    setLoading(true);
+    try {
+      const { data } = await api.post('/auth/2fa/validate', { mfaToken: mfa.mfaToken, code, tempToken: mfa.mfaToken, totpCode: code });
+      finishLogin({ ...data, mfaRequired: false });
+    } catch (err) { toast.error(err.response?.data?.error || (lang==='fr'?'Code invalide':'Invalid code')); }
+    finally { setLoading(false); }
+  };
+
+  const submitPwd = async () => {
+    if (pwd.newPassword.length < 8) return toast.error(lang==='fr'?'8 caractères minimum':'8 characters minimum');
+    if (pwd.newPassword !== pwd.confirm) return toast.error(lang==='fr'?'Les mots de passe ne correspondent pas':'Passwords do not match');
+    setLoading(true);
+    try {
+      await api.post('/auth/change-password', { currentPassword: creds.password, newPassword: pwd.newPassword });
+      toast.success(t('pwdChanged'));
+      setForcePwd(false); navigate('/');
+    } catch (err) { toast.error(err.response?.data?.error || t('error')); }
+    finally { setLoading(false); }
+  };
+
+  const onSubmit = e => { e.preventDefault(); if (loading) return; if (forcePwd) submitPwd(); else if (mfa) submitMfa(); else submit(); };
 
   return (
     <div style={{ minHeight:'100vh', background:BG, display:'flex', alignItems:'center', justifyContent:'center', fontFamily:FONT }}>
@@ -700,18 +740,39 @@ const Login = ({ lang, toggleLang }) => {
           <button onClick={toggleLang} style={{ background:'none', border:`1px solid ${BORDER}`, color:TEXT, padding:'5px 12px', borderRadius:20, cursor:'pointer', fontSize:12, fontFamily:FONT }}>🌐 {t('language')}</button>
         </div>
         <div style={{ textAlign:'center', marginBottom:24 }}>
-          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width:210, height:'auto', display:'block', margin:'0 auto 10px', objectFit:'contain' }} />
-          <div style={{ color:MUTED, fontSize:13 }}>Espace Porteur de Carte</div>
+          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:210, height:'auto', display:'block', margin:'0 auto 10px', objectFit:'contain' }} />
+          <div style={{ color:MUTED, fontSize:13 }}>C-Pay — Espace Porteur de Carte</div>
         </div>
         <PciSecurityBadge />
         <Box>
-          <Inp label={t('emailOrPhone')} value={creds.emailOrPhone} onChange={v=>setCreds(c=>({...c,emailOrPhone:v}))} placeholder="email@example.com" />
-          <Inp label={t('password')} value={creds.password} onChange={v=>setCreds(c=>({...c,password:v}))} type="password" placeholder="••••••••" />
-          <div style={{ fontSize:11, color:MUTED, marginBottom:12, fontFamily:FONT }}>
-            🔒 {lang==='fr'?'Votre session sera verrouillée après 5 tentatives échouées':'Your account will be locked after 5 failed attempts'}
-          </div>
-          <Btn onClick={submit} disabled={loading} style={{ width:'100%', marginTop:4 }}>{loading?t('loggingIn'):t('login')}</Btn>
+          <form onSubmit={onSubmit}>
+          {forcePwd ? (<>
+            <div style={{ fontSize:15, fontWeight:700, marginBottom:6, fontFamily:FONT }}>🔐 {lang==='fr'?'Nouveau mot de passe requis':'New password required'}</div>
+            <div style={{ fontSize:12, color:MUTED, marginBottom:14, fontFamily:FONT }}>
+              {lang==='fr'?'Pour continuer, vous devez définir un nouveau mot de passe (8 caractères minimum).':'To continue you must set a new password (min. 8 characters).'}
+            </div>
+            <Inp label={t('newPwd')} value={pwd.newPassword} onChange={v=>setPwd(p=>({...p,newPassword:v}))} type="password" placeholder="••••••••" autoComplete="new-password" required />
+            <Inp label={lang==='fr'?'Confirmer le mot de passe':'Confirm password'} value={pwd.confirm} onChange={v=>setPwd(p=>({...p,confirm:v}))} type="password" placeholder="••••••••" autoComplete="new-password" required />
+            <Btn disabled={loading} style={{ width:'100%', marginTop:4 }}>{loading?t('saving'):t('changePwd')}</Btn>
+          </>) : mfa ? (<>
+            <div style={{ fontSize:15, fontWeight:700, marginBottom:6, fontFamily:FONT }}>🔐 {lang==='fr'?'Vérification en deux étapes':'Two-step verification'}</div>
+            <div style={{ fontSize:12, color:MUTED, marginBottom:14, fontFamily:FONT }}>
+              {lang==='fr'?'Saisissez le code à 6 chiffres de votre application d’authentification.':'Enter the 6-digit code from your authenticator app.'}
+            </div>
+            <Inp label={lang==='fr'?'Code à 6 chiffres':'6-digit code'} value={code} onChange={v=>setCode(String(v).replace(/[^0-9]/g,'').slice(0,6))} placeholder="123456" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required />
+            <Btn disabled={loading || code.length!==6} style={{ width:'100%', marginTop:4 }}>{loading?t('loggingIn'):(lang==='fr'?'Valider':'Verify')}</Btn>
+            <button type="button" onClick={()=>{ setMfa(null); setCode(''); }} style={{ width:'100%', background:'none', border:'none', color:MUTED, cursor:'pointer', marginTop:10, fontSize:12, fontFamily:FONT }}>← {lang==='fr'?'Retour':'Back'}</button>
+          </>) : (<>
+            <Inp label={t('emailOrPhone')} value={creds.emailOrPhone} onChange={v=>setCreds(c=>({...c,emailOrPhone:v}))} placeholder="email@example.com" autoComplete="username" required />
+            <Inp label={t('password')} value={creds.password} onChange={v=>setCreds(c=>({...c,password:v}))} type="password" placeholder="••••••••" autoComplete="current-password" required />
+            <div style={{ fontSize:11, color:MUTED, marginBottom:12, fontFamily:FONT }}>
+              🔒 {lang==='fr'?'Votre session sera verrouillée après 5 tentatives échouées':'Your account will be locked after 5 failed attempts'}
+            </div>
+            <Btn disabled={loading} style={{ width:'100%', marginTop:4 }}>{loading?t('loggingIn'):t('login')}</Btn>
+          </>)}
+          </form>
 
+        {!mfa && !forcePwd && (
         <div style={{ textAlign:'center', marginTop:16 }} className="login-links-block">
           <div onClick={()=>navigate('/reset-password')} style={{ color:P, cursor:'pointer', fontSize:13, fontWeight:600, fontFamily:FONT, marginBottom:12 }}>
             {lang==='fr'?'Mot de passe oublié ?':'Forgot password?'}
@@ -723,7 +784,9 @@ const Login = ({ lang, toggleLang }) => {
             </span>
           </div>
         </div>
+        )}
         </Box>
+        <div style={{ textAlign:'center', marginTop:12, fontSize:11, color:MUTED, fontFamily:FONT }}>C-Pay est un produit de Calculus Plus SAS</div>
       </div>
     </div>
   );
@@ -736,9 +799,9 @@ const Dashboard = ({ lang }) => {
 
   // Cartes simulées (en prod: charger depuis API)
   const [cards] = useState([
-    { id:'card-001', type:'created', number:'4532 •••• •••• 7821', holder:'Boutique Test CPlus', balance:45750, currency:'XAF', status:'active',  network:'Visa',       color:'#1d4f92', expiry:'12/28' },
-    { id:'card-002', type:'created', number:'5412 •••• •••• 3309', holder:'Boutique Test CPlus', balance:12300, currency:'XAF', status:'frozen',  network:'Mastercard', color:'#9b59b6', expiry:'09/27' },
-    { id:'card-003', type:'enrolled', number:'6011 •••• •••• 5544', holder:'Boutique Test CPlus', balance:8900,  currency:'XAF', status:'active',  network:'Visa',       color:'#00c896', expiry:'06/26' },
+    { id:'card-001', type:'created', number:'4532 •••• •••• 7821', holder:'Boutique Test C-Pay', balance:45750, currency:'XAF', status:'active',  network:'Visa',       color:'#1d4f92', expiry:'12/28' },
+    { id:'card-002', type:'created', number:'5412 •••• •••• 3309', holder:'Boutique Test C-Pay', balance:12300, currency:'XAF', status:'frozen',  network:'Mastercard', color:'#9b59b6', expiry:'09/27' },
+    { id:'card-003', type:'enrolled', number:'6011 •••• •••• 5544', holder:'Boutique Test C-Pay', balance:8900,  currency:'XAF', status:'active',  network:'Visa',       color:'#00c896', expiry:'06/26' },
   ]);
   const [selectedCard, setSelectedCard] = useState(0);
   const [txns, setTxns] = useState([]);
@@ -1605,7 +1668,7 @@ const GtpCardPage = ({ lang }) => {
                   ))}
                 </div>
                 <div style={{ fontSize:11, color:MUTED, marginTop:6, fontFamily:FONT }}>
-                  {payForm.schema==='1' ? '→ Débite directement la carte GTP via GIMAC' : '→ Utilise votre token CPlus pour payer via GIMAC'}
+                  {payForm.schema==='1' ? '→ Débite directement la carte GTP via GIMAC' : '→ Utilise votre token C-Pay pour payer via GIMAC'}
                 </div>
               </div>
               <div style={{ marginBottom:12 }}>
@@ -1632,7 +1695,7 @@ const GtpCardPage = ({ lang }) => {
               <div style={{ fontSize:18, fontWeight:700, color:SUCCESS, marginBottom:8, fontFamily:FONT }}>Paiement approuvé</div>
               <div style={{ fontSize:28, fontWeight:800, color:TEXT, marginBottom:4, fontFamily:FONT }}>{fmtNum(payResult.amount)} XAF</div>
               <div style={{ fontSize:13, color:MUTED, marginBottom:4, fontFamily:FONT }}>Auth: {payResult.authCode} · RRN: {payResult.rrn}</div>
-              <div style={{ fontSize:12, color:BLUE, marginBottom:4, fontFamily:FONT }}>{payResult.schema==='TOKENIZED'?'🔐 Token CPlus → GIMAC':'🌍 Débit direct GIMAC'}</div>
+              <div style={{ fontSize:12, color:BLUE, marginBottom:4, fontFamily:FONT }}>{payResult.schema==='TOKENIZED'?'🔐 Token C-Pay → GIMAC':'🌍 Débit direct GIMAC'}</div>
               <div style={{ fontSize:11, color:MUTED, marginBottom:20, fontFamily:FONT }}>Réseau: {payResult.network}</div>
               <Btn onClick={()=>setPayResult(null)} color={P}>Nouveau paiement</Btn>
             </div>
@@ -1791,7 +1854,7 @@ const EnrollForm = ({ lang, onSuccess, onCancel }) => {
       {/* Prévisualisation carte */}
       <div style={{ background:network==='visa'?'linear-gradient(135deg,#1a1f71,#12b6c7)':network==='mastercard'?'linear-gradient(135deg,#eb001b,#f79e1b)':'linear-gradient(135deg,#1d4f92,#12b6c7)', borderRadius:14, padding:'20px 22px', marginBottom:20, color:'#fff', fontFamily:'monospace', boxShadow:'0 6px 24px rgba(0,0,0,0.2)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', marginBottom:16 }}>
-          <span style={{ fontSize:12, opacity:0.8, fontFamily:FONT }}>Calculus Plus</span>
+          <span style={{ fontSize:12, opacity:0.8, fontFamily:FONT }}>C-Pay</span>
           <span style={{ fontSize:18 }}>{NETWORK_ICONS[network]}</span>
         </div>
         <div style={{ fontSize:20, letterSpacing:3, marginBottom:16 }}>
@@ -1905,9 +1968,9 @@ const MyCards = ({ lang }) => {
 
   // Cartes simulées si API vide
   const displayCards = cards.length > 0 ? cards : [
-    { enrollmentId:'card-001', cardType:'created',  cardMasked:'4532 •••• •••• 7821', network:'visa',       isDefault:true,  status:'active',  currency:'XAF', expiryMonth:12, expiryYear:28, cardholderName:'Boutique Test CPlus', balance:45750 },
-    { enrollmentId:'card-002', cardType:'created',  cardMasked:'5412 •••• •••• 3309', network:'mastercard', isDefault:false, status:'frozen',  currency:'XAF', expiryMonth:9,  expiryYear:27, cardholderName:'Boutique Test CPlus', balance:12300 },
-    { enrollmentId:'card-003', cardType:'enrolled', cardMasked:'6011 •••• •••• 5544', network:'visa',       isDefault:false, status:'active',  currency:'XAF', expiryMonth:6,  expiryYear:26, cardholderName:'Boutique Test CPlus', balance:8900 },
+    { enrollmentId:'card-001', cardType:'created',  cardMasked:'4532 •••• •••• 7821', network:'visa',       isDefault:true,  status:'active',  currency:'XAF', expiryMonth:12, expiryYear:28, cardholderName:'Boutique Test C-Pay', balance:45750 },
+    { enrollmentId:'card-002', cardType:'created',  cardMasked:'5412 •••• •••• 3309', network:'mastercard', isDefault:false, status:'frozen',  currency:'XAF', expiryMonth:9,  expiryYear:27, cardholderName:'Boutique Test C-Pay', balance:12300 },
+    { enrollmentId:'card-003', cardType:'enrolled', cardMasked:'6011 •••• •••• 5544', network:'visa',       isDefault:false, status:'active',  currency:'XAF', expiryMonth:6,  expiryYear:26, cardholderName:'Boutique Test C-Pay', balance:8900 },
   ];
 
   return (
@@ -2522,7 +2585,7 @@ const PaymentForm = ({ lang }) => {
 
   const processQRResult = async (qrData) => {
     try {
-      // Format QR CPlus: https://pay.c-pay.global/SHORTID ou JSON
+      // Format QR C-Pay: https://pay.c-pay.global/SHORTID ou JSON
       let merchantId = qrData;
       let amount     = '';
       let description = '';

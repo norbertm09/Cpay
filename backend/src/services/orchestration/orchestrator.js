@@ -42,6 +42,13 @@ const PAYMENT_METHODS = {
   PAY_LINK:     'pay_link',
 };
 
+// Types reversés au marchand (encaissements). Les payouts n'entrent JAMAIS en settlement_queue.
+const SETTLEABLE_TYPES = new Set([
+  TRANSACTION_TYPES.COLLECT,
+  TRANSACTION_TYPES.QR_PAYMENT,
+  TRANSACTION_TYPES.PAY_LINK,
+]);
+
 // ─── Point d'entrée ───────────────────────────────────────────────
 
 /**
@@ -61,7 +68,7 @@ const PAYMENT_METHODS = {
  */
 const processTransaction = async (params) => {
   const txnId    = uuidv4();
-  const { merchantId, type, amount, customerPhone, emvPayload, aidDetected, description, deviceId } = params;
+  const { merchantId, type, amount, customerPhone, emvPayload, aidDetected, description, deviceId, payLinkId } = params;
 
   logger.info('Orchestrator: new transaction', { txnId, merchantId, type, amount });
 
@@ -69,6 +76,22 @@ const processTransaction = async (params) => {
   const validation = validateInput(params);
   if (!validation.valid) {
     return { success: false, error: validation.error, txnId };
+  }
+
+  // ── 1b. Un retrait (payout) ne peut pas passer par une carte ────
+  // Sans ce garde, POST /api/v1/payout avec emvPayload/aidDetected DÉBITAIT la
+  // carte du client (card.router → authorizeCard). Refus avant tout appel gateway.
+  if (type === TRANSACTION_TYPES.PAYOUT && !customerPhone && (emvPayload || aidDetected)) {
+    logger.warn('Orchestrator: card payout refused', { txnId, merchantId, amount });
+    return {
+      success:    false,
+      code:       'PAYOUT_CARD_UNSUPPORTED',
+      statusCode: 422,
+      error:      'Le retrait (payout) n\'est pas supporté par carte : utilisez un numéro Mobile Money',
+      message:    'Retrait par carte non supporté',
+      txnId,
+      amount,
+    };
   }
 
   const featureKey = customerPhone ? 'payment_mobile_money' : 'tap_to_phone';
@@ -127,6 +150,7 @@ const processTransaction = async (params) => {
     detectedInfo:   detection,
     description,
     deviceId,
+    payLinkId:      payLinkId || null,
     status:         'pending',
   });
 
@@ -184,7 +208,10 @@ const processTransaction = async (params) => {
   }
 
   // ── 6. Mettre à jour et répondre ───────────────────────────────
-  const finalStatus = gatewayResult.pending ? 'pending' : (gatewayResult.approved ? 'authorized' : 'failed');
+  // Un résultat provider "pending" (push accepté, PIN non encore saisi, timeout de
+  // polling…) reste `pending` : jamais `failed` — la réconciliation / le webhook finalisent.
+  const isPending   = gatewayResult.pending === true;
+  const finalStatus = isPending ? 'pending' : (gatewayResult.approved === true ? 'authorized' : 'failed');
   await updateTransactionStatus(txnId, finalStatus, gatewayResult);
   await addTransactionEvent({
     txnId,
@@ -193,10 +220,13 @@ const processTransaction = async (params) => {
     payload: { responseCode: gatewayResult.responseCode, gateway: gatewayResult._gateway || gatewayResult._operator, retryable: gatewayResult.retryable || false },
   });
 
-  if (gatewayResult.approved && !gatewayResult.pending) {
-    // Enqueue pour le settlement J+1
+  // Règlement J+1 : uniquement les ENCAISSEMENTS autorisés (jamais les payouts,
+  // qui étaient additionnés dans le net reversé au marchand).
+  if (finalStatus === 'authorized' && SETTLEABLE_TYPES.has(type)) {
     await settlementQueue.enqueue({ txnId, merchantId, amount, currency: detection.currency || merchantCheck.merchantCurrency });
     logger.info('Orchestrator: transaction approved', { txnId, amount });
+  } else if (finalStatus === 'authorized') {
+    logger.info('Orchestrator: payout approved (not settled to merchant)', { txnId, amount, type });
   }
 
   deliverEvent({
@@ -216,7 +246,11 @@ const processTransaction = async (params) => {
     _detectedBrand:  detection.brand || detection.name,
     _detectedCountry: detection.country,
     authCode:        gatewayResult.authCode || null,
-    message:         gatewayResult.approved ? 'Paiement accepté' : (gatewayResult.declineReason || 'Paiement refusé'),
+    message:         finalStatus === 'authorized'
+      ? 'Paiement accepté'
+      : (finalStatus === 'pending'
+        ? 'Paiement en attente de confirmation'
+        : (gatewayResult.declineReason || 'Paiement refusé')),
   };
 };
 
@@ -365,8 +399,8 @@ const createTransactionRecord = async (data) => {
       `INSERT INTO transactions
          (transaction_id, merchant_id, type, amount, currency,
           payment_method, detected_operator, detected_network,
-          detected_country, description, device_id, status, initiated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())`,
+          detected_country, description, device_id, status, pay_link_id, initiated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())`,
       [
         data.txnId, data.merchantId, data.type, data.amount, data.currency,
         data.paymentMethod,
@@ -376,6 +410,7 @@ const createTransactionRecord = async (data) => {
         data.description || null,
         data.deviceId    || null,
         data.status,
+        data.payLinkId   || null,
       ]
     );
   } catch (err) {

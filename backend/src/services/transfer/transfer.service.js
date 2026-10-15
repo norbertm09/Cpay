@@ -5,8 +5,13 @@ const { query } = require('../../config/database');
 const gtp   = require('../rails/gtp-card.service');
 const mtn   = require('../rails/mtn-momo.client');
 const email = require('../notifications/email.service');
+const logger = require('../../config/logger');
 
 const REF = () => 'TRF-' + Date.now().toString(36).toUpperCase();
+
+// Statut terminal "a compenser" : une jambe a deplace des fonds et une jambe
+// suivante a echoue → un operateur doit annuler/rembourser. Jamais 'completed'.
+const NEEDS_REVERSAL = 'needs_reversal';
 
 // ─── Etat d'un transfert ─────────────────────────────────────────
 const setStatus = async (id, status, extra = {}) => {
@@ -18,7 +23,7 @@ const setStatus = async (id, status, extra = {}) => {
   if (extra.momoReference)  { fields.push(`momo_reference=$${++n}`);     vals.push(extra.momoReference); }
   if (extra.gtpTxnId)       { fields.push(`gtp_transaction_id=$${++n}`); vals.push(extra.gtpTxnId); }
   if (extra.error)          { fields.push(`error_message=$${++n}`);      vals.push(extra.error); }
-  if (status === 'completed' || status === 'failed') fields.push('completed_at=NOW()');
+  if (status === 'completed' || status === 'failed' || status === NEEDS_REVERSAL) fields.push('completed_at=NOW()');
 
   await query(
     `UPDATE bank_transfers SET ${fields.join(', ')} WHERE transfer_id=$1`, vals);
@@ -195,13 +200,28 @@ const initiate = async ({ cardholderId, direction, sourceType, sourceId, account
                 description: `CPlus - Reception ${bank.inst_name}`,
                 externalId: ref + '-D',
               });
-              steps.push({ step: 'momo_disburse', status: 'pending', ref: disb.referenceId });
+              steps.push({ step: 'momo_disburse', status: 'pending', ref: disb.referenceId, at: new Date() });
             } catch (e) {
-              steps.push({ step: 'momo_disburse', status: 'failed', reason: e.message });
+              // Carte dechargee mais wallet NON credite : jamais 'completed'.
+              steps.push({ step: 'momo_disburse', status: 'failed', reason: e.message, at: new Date() });
+              logger.error('[transfer] from_bank: MoMo disbursement failed after card unload — needs reversal', {
+                transferId, reference: ref, cardholderId, amount: amt, gtpTxnId: b2c.transactionId, unloadTxnId: c2w.transactionId, err: e.message,
+              });
+              await setStatus(transferId, NEEDS_REVERSAL, {
+                steps, gtpTxnId: b2c.transactionId,
+                error: `Jambe MoMo echouee apres dechargement carte (${c2w.transactionId}) : ${e.message}`,
+              });
+              return;
             }
           }
         }
 
+        // Aucune etape en echec → completed (sinon on est deja sorti plus haut)
+        if (steps.some(s => s.status === 'failed')) {
+          logger.error('[transfer] from_bank: step failed — not marking completed', { transferId, steps });
+          await setStatus(transferId, NEEDS_REVERSAL, { steps, error: 'Une etape a echoue' });
+          return;
+        }
         await setStatus(transferId, 'completed', { steps });
 
         if (ch.email) {
@@ -216,9 +236,16 @@ const initiate = async ({ cardholderId, direction, sourceType, sourceId, account
         }
       }
     } catch (e) {
-      console.error('[transfer]', e.message);
-      steps.push({ step: 'error', status: 'failed', reason: e.message });
-      await setStatus(transferId, 'failed', { steps, error: e.message }).catch(() => {});
+      steps.push({ step: 'error', status: 'failed', reason: e.message, at: new Date() });
+      // Si une jambe a deja deplace des fonds (topUp, bankToCard, unload…), l'echec
+      // d'une jambe suivante exige une compensation : needs_reversal, pas failed.
+      const moved = steps.some(s => s.status === 'success' || s.step === 'momo_disburse');
+      const finalStatus = moved ? NEEDS_REVERSAL : 'failed';
+      logger.error('[transfer] execution failed', { transferId, reference: ref, direction, status: finalStatus, err: e.message, steps });
+      await setStatus(transferId, finalStatus, {
+        steps,
+        error: moved ? `Compensation requise — ${e.message}` : e.message,
+      }).catch((dbErr) => logger.error('[transfer] setStatus failed', { transferId, err: dbErr.message }));
     }
   })();
 
@@ -261,6 +288,7 @@ const getStatus = async (transferId, cardholderId) => {
     processing:                 'Traitement en cours',
     completed:                  'Transfert effectue',
     failed:                     'Transfert echoue',
+    needs_reversal:             'Incident en cours de traitement',
   };
 
   return {
@@ -279,4 +307,4 @@ const getStatus = async (transferId, cardholderId) => {
   };
 };
 
-module.exports = { initiate, getStatus, waitMomo };
+module.exports = { initiate, getStatus, waitMomo, NEEDS_REVERSAL };

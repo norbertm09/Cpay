@@ -1,4 +1,4 @@
-// CPlus 2.6.0 — Merchant Portal
+// C-Pay 2.6.0 — Merchant Portal
 import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -76,6 +76,8 @@ const refreshAccessToken = () => {
 api.interceptors.response.use(r => r, async err => {
   const original = err.config;
   const isAuthRoute = original?.url?.includes('/auth/');
+  // 403 : droits insuffisants -> simple toast, aucune redirection (la session reste valide)
+  if (err.response?.status === 403 && !isAuthRoute) toast.error('Accès refusé');
   if (err.response?.status === 401 && !original._retry && !isAuthRoute) {
     original._retry = true;
     try {
@@ -620,12 +622,6 @@ const Operations = ({ lang }) => {
   const [nfcStatus, setNfcStatus] = useState('idle'); // idle | waiting | processing | success
 
   // ── Disbursement state ────────────────────────────────────────
-  const [disForm, setDisForm] = useState({
-    recipientName: '', recipientPhone: '',
-    reference: 'DIS-' + Date.now().toString(36).toUpperCase(),
-    amount: '', operator: 'mtn',
-  });
-  const [disLoading, setDisLoading] = useState(false);
   const [disResult, setDisResult] = useState(null);
   useEffect(() => {
     window.__cpayTxnActive = polling;
@@ -644,7 +640,6 @@ const Operations = ({ lang }) => {
 
   const formatLocalPhone = (v) => { const d = String(v).replace(/[^0-9]/g, '').slice(0, 9); if (d.length <= 3) return d; if (d.length <= 6) return d.slice(0,3) + ' ' + d.slice(3); return d.slice(0,3) + ' ' + d.slice(3,6) + ' ' + d.slice(6); };
   const fc = k => v => setColForm(p => ({ ...p, [k]: v }));
-  const fd = k => v => setDisForm(p => ({ ...p, [k]: v }));
 
   const PSPs = [
     { v: 'cybersource', label: 'CyberSource', sublabel: 'Visa · Défaut', color: '#1d4f92' },
@@ -658,9 +653,10 @@ const Operations = ({ lang }) => {
 
   // ── Collection submit ─────────────────────────────────────────
   // ── Polling du statut d'encaissement ─────────────────────────
+  const POLL_MS = 3000, POLL_MAX_MS = 90000;
   const pollCollectStatus = async (txnId) => {
     setPolling(true);
-    setCountdown(180);
+    setCountdown(POLL_MAX_MS / 1000);
 
     const tick = setInterval(() => setCountdown((s) => (s > 0 ? s - 1 : 0)), 1000);
     let elapsed = 0;
@@ -668,7 +664,7 @@ const Operations = ({ lang }) => {
     const check = async () => {
       try {
         const { data } = await api.get(`/collect/${txnId}/status`);
-        if (data.status === 'authorized') {
+        if (data.status === 'authorized' || data.status === 'completed') {
           clearInterval(tick);
           setPolling(false);
           setColResult((r) => ({ ...r, status: 'authorized', authCode: data.authCode,
@@ -688,17 +684,19 @@ const Operations = ({ lang }) => {
       return false;
     };
 
-    while (elapsed < 180000) {
-      await new Promise((r) => setTimeout(r, 3000));
-      elapsed += 3000;
+    while (elapsed < POLL_MAX_MS) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      elapsed += POLL_MS;
       if (await check()) return;
     }
 
     clearInterval(tick);
     setPolling(false);
-    setColResult((r) => ({ ...r, status: 'timeout',
-      message: lang === 'fr' ? "Le client n'a pas confirmé dans le délai"
-                             : 'Client did not confirm in time' }));
+    // Pas d'echec declare : la transaction reste 'pending' cote serveur et sera
+    // reconciliee ; on invite a verifier dans Mes Transactions.
+    setColResult((r) => ({ ...r, status: 'pending_timeout',
+      message: lang === 'fr' ? "Toujours en attente de confirmation de l\u2019opérateur — vérifiez le statut dans Mes Transactions."
+                             : 'Still awaiting operator confirmation — check the status in My Transactions.' }));
   };
 
   // ── Collection submit ─────────────────────────────────────────
@@ -739,19 +737,22 @@ const Operations = ({ lang }) => {
           method: mobileOperator === 'airtel' ? 'airtel_money' : 'mtn_momo',
         });
 
+        const txnId = data.txnId || data.transactionId || data.transaction?.transaction_id;
         setColResult({
-          type: 'momo', txnId: data.txnId, ref, amount,
+          type: 'momo', txnId, ref, amount,
           operator: mobileOperator,
           status: data.status || 'pending',
           message: data.message,
           customerPhone,
         });
 
-        // Si confirmation requise, poller le statut
-        if (data.requiresConfirmation && data.txnId) {
+        // Hotfix v1 : l'operateur ne confirme plus de maniere synchrone. Toute reponse
+        // { pending:true } / status 'pending' / requiresConfirmation declenche le polling
+        // du statut (toutes les 3 s, 90 s max) ; l'ecran affiche "en attente de confirmation".
+        if ((data.requiresConfirmation || data.pending || data.status === 'pending') && txnId) {
           setStep(3);
           setColLoading(false);
-          pollCollectStatus(data.txnId);
+          pollCollectStatus(txnId);
           return;
         }
       } else {
@@ -770,59 +771,15 @@ const Operations = ({ lang }) => {
         }
       }
       setStep(3);
-    } catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
+    } catch (err) { toast.error(isFeatureDisabled(err) ? (lang === 'fr' ? 'Fonctionnalité en cours d\u2019intégration' : 'Feature being integrated') : (err.response?.data?.error || 'Erreur')); }
     finally { setColLoading(false); }
   };
 
-  // ── Disbursement submit ───────────────────────────────────────
-  const pollDisburseStatus = async (txnId) => {
-    setPolling(true);
-    setCountdown(180);
-    const tick = setInterval(() => setCountdown((s) => (s > 0 ? s - 1 : 0)), 1000);
-    let elapsed = 0;
-    const check = async () => {
-      try {
-        const { data } = await api.get(`/disburse/${txnId}/status`);
-        if (data.status === 'authorized') {
-          clearInterval(tick); setPolling(false);
-          setDisResult((r) => ({ ...r, status: 'authorized', message: data.message }));
-          toast.success(lang === 'fr' ? 'Transfert confirmé' : 'Transfer confirmed');
-          return true;
-        }
-        if (data.status === 'failed') {
-          clearInterval(tick); setPolling(false);
-          setDisResult((r) => ({ ...r, status: 'failed', message: data.message }));
-          toast.error(data.message || (lang === 'fr' ? 'Transfert refusé' : 'Transfer declined'));
-          return true;
-        }
-      } catch (e) { /* continue */ }
-      return false;
-    };
-    while (elapsed < 180000) {
-      await new Promise((r) => setTimeout(r, 3000));
-      elapsed += 3000;
-      if (await check()) return;
-    }
-    clearInterval(tick); setPolling(false);
-  };
-  const submitDisbursement = async () => {
-    const { recipientName, recipientPhone, amount, reference, operator } = disForm;
-    if (!recipientName || !recipientPhone || !amount) return toast.error(lang === 'fr' ? 'Champs requis manquants' : 'Required fields missing');
-    if (parseFloat(amount) < 500) return toast.error(lang === 'fr' ? 'Montant minimum 500 XAF' : 'Minimum 500 XAF');
-    setDisLoading(true);
-    try {
-      const { data } = await api.post('/withdraw', { amount: parseFloat(amount), operator, phone: recipientPhone, description: reference });
-      setDisResult({ txnId: data.txnId, ref: reference, amount, operator, recipientName, recipientPhone, status: 'pending' });
-      setStep(3);
-      if (data.txnId) pollDisburseStatus(data.txnId);
-    } catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
-    finally { setDisLoading(false); }
-  };
+  // Decaissement : desactive cote serveur (410 FEATURE_DISABLED, hotfix v1) — voir FeatureDisabled.
 
   const resetAll = () => {
     setStep(1); setColResult(null); setDisResult(null);
     setColForm({ customerName: '', customerPhone: '', amount: '', reference: 'COL-' + Date.now().toString(36).toUpperCase(), collectMode: '', cardMethod: '', psp: 'cybersource', mobileOperator: 'mtn', sendChannel: '', customerEmail: '' });
-    setDisForm({ recipientName: '', recipientPhone: '', reference: 'DIS-' + Date.now().toString(36).toUpperCase(), amount: '', operator: 'mtn' });
   };
 
   // ─── UI helpers ───────────────────────────────────────────────
@@ -840,7 +797,7 @@ const Operations = ({ lang }) => {
       style={{ border: `2px solid ${current === v ? color : BORDER}`, background: current === v ? `${color}12` : CARD, borderRadius: 12, padding: '14px 10px', cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'center', transition: 'all .2s', flex: 1, opacity: disabled ? 0.5 : 1 }}>
       <div style={{ fontSize: 26, marginBottom: 6 }}>{icon}</div>
       <div style={{ fontSize: 12, fontWeight: 700, color: current === v ? color : MUTED, fontFamily: FONT }}>{label}</div>
-      {disabled && <div style={{ fontSize: 10, color: MUTED, marginTop: 4, fontFamily: FONT }}>Bientôt disponible</div>}
+      {disabled && <div style={{ fontSize: 10, color: MUTED, marginTop: 4, fontFamily: FONT }}>{lang === 'fr' ? 'En cours d\u2019intégration' : 'Being integrated'}</div>}
     </button>
   );
 
@@ -905,7 +862,7 @@ const Operations = ({ lang }) => {
                       {lang === 'fr' ? 'Méthode de paiement carte' : 'Card payment method'}
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                      {methodCard('contactless', lang === 'fr' ? 'Sans contact' : 'Contactless', '📡', BLUE, colForm.cardMethod, fc('cardMethod'))}
+                      {methodCard('contactless', lang === 'fr' ? 'Sans contact' : 'Contactless', '📡', BLUE, colForm.cardMethod, fc('cardMethod'), true)}
                       {methodCard('paylink', lang === 'fr' ? 'Lien de paiement' : 'Payment link', '🔗', P, colForm.cardMethod, fc('cardMethod'))}
                       {methodCard('qr', 'QR Code', '📷', G, colForm.cardMethod, fc('cardMethod'))}
                     </div>
@@ -1025,7 +982,7 @@ const Operations = ({ lang }) => {
                         });
                         setNfcStatus('success');
                       } catch(err) {
-                        toast.error(err.response?.data?.error || 'Paiement refusé');
+                        toast.error(isFeatureDisabled(err) ? (lang === 'fr' ? 'Fonctionnalité en cours d\u2019intégration' : 'Feature being integrated') : (err.response?.data?.error || 'Paiement refusé'));
                         setNfcStatus('idle');
                       }
                     }}
@@ -1081,7 +1038,7 @@ const Operations = ({ lang }) => {
                           )}
                         </div>
                       </>
-                    ) : colResult.status === 'failed' || colResult.status === 'timeout' ? (
+                    ) : colResult.status === 'failed' ? (
                       <>
                         <div style={{ fontSize: 64, marginBottom: 12 }}>❌</div>
                         <div style={{ fontSize: 20, fontWeight: 700, color: '#e5484d', marginBottom: 8, fontFamily: FONT }}>
@@ -1093,9 +1050,11 @@ const Operations = ({ lang }) => {
                       </>
                     ) : (
                       <>
-                        <div style={{ fontSize: 64, marginBottom: 12 }}>📲</div>
-                        <div style={{ fontSize: 20, fontWeight: 700, color: P, marginBottom: 8, fontFamily: FONT }}>
-                          {lang === 'fr' ? 'En attente du client' : 'Waiting for customer'}
+                        <div style={{ fontSize: 64, marginBottom: 12 }}>{colResult.status === 'pending_timeout' ? '⏳' : '📲'}</div>
+                        <div style={{ fontSize: 20, fontWeight: 700, color: colResult.status === 'pending_timeout' ? O : P, marginBottom: 8, fontFamily: FONT }}>
+                          {colResult.status === 'pending_timeout'
+                            ? (lang === 'fr' ? 'En attente de confirmation' : 'Awaiting confirmation')
+                            : (lang === 'fr' ? 'En attente du client' : 'Waiting for customer')}
                         </div>
                         <div style={{ fontSize: 28, fontWeight: 700, color: P, marginBottom: 4, fontFamily: FONT }}>
                           {Number(colResult.amount).toLocaleString('fr-FR')} XAF
@@ -1104,9 +1063,11 @@ const Operations = ({ lang }) => {
                           {colResult.customerPhone}
                         </div>
                         <div style={{ fontSize: 13, color: MUTED, marginBottom: 18, fontFamily: FONT, lineHeight: 1.6 }}>
-                          {lang === 'fr'
-                            ? 'Le client doit saisir son code PIN Mobile Money sur son téléphone'
-                            : 'The customer must enter their Mobile Money PIN on their phone'}
+                          {colResult.status === 'pending_timeout'
+                            ? colResult.message
+                            : (lang === 'fr'
+                              ? 'Le client doit saisir son code PIN Mobile Money sur son téléphone. Le paiement est en attente de confirmation de l\u2019opérateur.'
+                              : 'The customer must enter their Mobile Money PIN on their phone. The payment is awaiting operator confirmation.')}
                         </div>
                         {polling && (
                           <>
@@ -1173,80 +1134,7 @@ const Operations = ({ lang }) => {
 
       {/* ── DÉCAISSEMENT ─────────────────────────────────────── */}
       {tab === 'disbursement' && (
-        <>
-          {step === 1 && (
-            <div style={{ maxWidth: 560, margin: '0 auto' }}>
-              <Card>
-                <div style={{ fontSize: 14, fontWeight: 700, color: O, marginBottom: 16, fontFamily: FONT }}>
-                  👤 {lang === 'fr' ? 'Informations bénéficiaire' : 'Recipient information'}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {inp(lang === 'fr' ? 'Nom du bénéficiaire *' : 'Recipient name *', disForm.recipientName, fd('recipientName'), { placeholder: 'Jean Dupont' })}
-                  {inp(lang === 'fr' ? 'Numéro Mobile Money *' : 'Mobile Money number *', disForm.recipientPhone, v => fd('recipientPhone')(formatLocalPhone(v)), { placeholder: '044 797 873', type: 'tel' })}
-                  {inp('Référence', disForm.reference, fd('reference'), { readOnly: true })}
-                  {inp(lang === 'fr' ? 'Montant (XAF) *' : 'Amount (XAF) *', disForm.amount, fd('amount'), { placeholder: '10000', type: 'number' })}
-                </div>
-
-                <div style={{ fontSize: 14, fontWeight: 700, color: TEXT, marginBottom: 12, fontFamily: FONT }}>
-                  📱 {lang === 'fr' ? 'Opérateur Mobile Money' : 'Mobile Money Operator'}
-                </div>
-                <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-                  {OPERATORS_CG.map(op => (
-                    <button key={op.v} disabled={op.enabled === false} onClick={() => op.enabled !== false && fd('operator')(op.v)}
-                      style={{ flex: 1, border: `2px solid ${disForm.operator === op.v ? op.color : BORDER}`, background: disForm.operator === op.v ? `${op.color}10` : CARD, borderRadius: 12, padding: '14px 10px', cursor: op.enabled === false ? 'not-allowed' : 'pointer', textAlign: 'center', opacity: op.enabled === false ? 0.45 : 1 }}>
-                      <div style={{ fontSize: 28, marginBottom: 6 }}>{op.flag}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: disForm.operator === op.v ? op.color : TEXT, fontFamily: FONT }}>{op.label}</div>
-                      {op.enabled === false && <div style={{ fontSize: 10, color: MUTED, marginTop: 4, fontFamily: FONT }}>Bientôt</div>}
-                    </button>
-                  ))}
-                </div>
-
-                {disForm.amount && parseFloat(disForm.amount) >= 500 && (
-                  <div style={{ background: `${O}10`, border: `1px solid ${O}30`, borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 12, color: TEXT, fontFamily: FONT }}>
-                    ⚠️ {lang === 'fr' ? 'Frais : 1.5% déduits du montant. Bénéficiaire recevra :' : 'Fee: 1.5% deducted. Recipient will receive:'}{' '}
-                    <strong>{fmtNum(Math.round(parseFloat(disForm.amount) * 0.985))} XAF</strong>
-                  </div>
-                )}
-
-                <div style={{ background: `${R}08`, border: `1px solid ${R}20`, borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12, color: TEXT, fontFamily: FONT }}>
-                  🔐 {lang === 'fr' ? 'Cette opération sera enregistrée dans votre journal d’audit.' : 'This operation will be recorded in your audit log.'}
-                </div>
-
-                <Btn onClick={submitDisbursement} disabled={disLoading} color={O} style={{ width: '100%', fontSize: 15 }}>
-                  {disLoading ? (lang === 'fr' ? 'Traitement…' : 'Processing…') : (lang === 'fr' ? '💸 Effectuer le décaissement' : '💸 Perform disbursement')}
-                </Btn>
-              </Card>
-            </div>
-          )}
-
-          {step === 3 && disResult && (
-            <div style={{ maxWidth: 480, margin: '0 auto' }}>
-              <Card style={{ border: `2px solid ${O}`, textAlign: 'center' }}>
-                <div style={{ fontSize: 64, marginBottom: 12 }}>✅</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: O, marginBottom: 4, fontFamily: FONT }}>
-                  {lang === 'fr' ? 'Décaissement effectué !' : 'Disbursement done!'}
-                </div>
-                <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4 }}>{fmtNum(disResult.amount)} XAF</div>
-                <div style={{ fontSize: 14, color: MUTED, marginBottom: 20 }}>→ {disResult.recipientName} · {disResult.recipientPhone}</div>
-
-                <div style={{ background: BG, borderRadius: 8, padding: 12, marginBottom: 16, textAlign: 'left' }}>
-                  {[[lang === 'fr' ? 'Référence' : 'Reference', disResult.ref],
-                    [lang === 'fr' ? 'Opérateur' : 'Operator', OPERATORS_CG.find(o => o.v === disResult.operator)?.label],                    ['Transaction ID', disResult.txnId],
-
-                    ['Statut', disResult.status]].map(([l, v]) => (
-                    <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px solid ${BORDER}`, fontSize: 13, fontFamily: FONT }}>
-                      <span style={{ color: MUTED }}>{l}</span><span style={{ fontWeight: 600 }}>{v}</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-                  <Btn onClick={() => setReceipt({ txn_id: disResult.txnId, amount: disResult.amount, status: disResult.status, initiated_at: new Date().toISOString(), auth_code: disResult.ref })} color={O}>🧾 Ticket</Btn>
-                  <Btn outline onClick={resetAll}>{lang === 'fr' ? '+ Nouveau décaissement' : '+ New disbursement'}</Btn>
-                </div>
-              </Card>
-            </div>
-          )}
-        </>
+        <FeatureDisabled lang={lang} title={lang === 'fr' ? 'Décaissement Mobile Money' : 'Mobile Money disbursement'} />
       )}
     </div>
   );
@@ -1317,6 +1205,15 @@ const Layout = ({ children, lang, toggleLang }) => {
   }, []);
   const { pathname } = window.location;
   useEffect(() => { api.get('/account').then(r => setBizName(r.data.business_name)).catch(() => {}); }, []);
+  // Deconnexion reelle : revocation du refresh cote serveur + cookie efface,
+  // puis purge memoire et rechargement complet. Utilisee par les deux boutons.
+  const doLogout = () => {
+    api.post('/auth/logout').catch(() => {}).finally(() => {
+      setAccessToken(null);
+      try { localStorage.removeItem('merchant_user'); } catch (e) {}
+      window.location.href = '/login';
+    });
+  };
 
   const nav = [
     { path: '/', label: t('dashboard') },
@@ -1335,14 +1232,14 @@ const Layout = ({ children, lang, toggleLang }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: CARD, borderBottom: `1px solid ${BORDER}`, padding: '10px 16px', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 200, height: 52 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => setMenuOpen(m => !m)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: TEXT, lineHeight: 1, padding: '2px 6px' }}>☰</button>
-          <img src="/logo-calculus.png" alt="C-Pay" style={{ height: 32, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
+          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 32, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: MUTED, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bizName}</span>
           <TwoFABannerInline lang={lang} onSetup={()=>setShow2FA(true)} />
           <button onClick={() => { if (!document.fullscreenElement) { document.documentElement.requestFullscreen?.(); } else { document.exitFullscreen?.(); } }} title={lang === 'fr' ? 'Plein écran' : 'Fullscreen'} style={{ background: 'none', border: `1px solid ${BORDER}`, color: TEXT, padding: '4px 10px', borderRadius: 20, cursor: 'pointer', fontSize: 13, fontFamily: FONT }}>⛶</button>
           <button onClick={toggleLang} style={{ background: 'none', border: `1px solid ${BORDER}`, color: TEXT, padding: '4px 10px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontFamily: FONT }}>🌐 {lang === 'fr' ? 'EN' : 'FR'}</button>
-          <button onClick={() => { localStorage.removeItem('merchant_token'); navigate('/login'); }} style={{ background: 'none', border: `1px solid ${BORDER}`, color: MUTED, padding: '4px 10px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontFamily: FONT }}>⏻</button>
+          <button onClick={doLogout} title={t('logout')} style={{ background: 'none', border: `1px solid ${BORDER}`, color: MUTED, padding: '4px 10px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontFamily: FONT }}>⏻</button>
         </div>
       </div>
 
@@ -1376,20 +1273,7 @@ const Layout = ({ children, lang, toggleLang }) => {
             📱 {lang === 'fr' ? 'App mobile — Bientôt disponible' : 'Mobile app — Coming soon'}
           </div>
           <button onClick={toggleLang} style={{ background: 'none', border: `1px solid ${BORDER}`, color: TEXT, padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, marginBottom: 8, width: '100%', fontFamily: FONT }}>{t('language')}</button>
-          <button onClick={() => {
-            // Appel serveur indispensable : il revoque le refresh en base et
-            // efface le cookie cp_rt_merchant. Sans lui le cookie survit a la
-            // deconnexion, et le refresh silencieux d'AuthProvider reconnecte
-            // l'utilisateur des le retour sur /login.
-            // .catch ignore : une API injoignable ne doit pas empecher de se
-            // deconnecter. window.location force un rechargement complet, qui
-            // vide l'etat memoire de facon certaine.
-            api.post('/auth/logout').catch(() => {}).finally(() => {
-              setAccessToken(null);
-              try { localStorage.removeItem('merchant_user'); } catch (e) {}
-              window.location.href = '/login';
-            });
-          }} style={{ background: 'none', border: `1px solid ${BORDER}`, color: MUTED, padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, width: '100%', fontFamily: FONT }}>{t('logout')}</button>
+          <button onClick={doLogout} style={{ background: 'none', border: `1px solid ${BORDER}`, color: MUTED, padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, width: '100%', fontFamily: FONT }}>{t('logout')}</button>
         </div>
       </aside>
       {pendingNav && (
@@ -1460,7 +1344,7 @@ const ConsentModal = ({ userId, userType, portal, lang, onAccepted }) => {
         <div style={{ background:'#f0f4f8', borderRadius:10, padding:16, marginBottom:16, fontSize:13, color:'#2a3a4a', maxHeight:200, overflowY:'auto' }}>
           <strong style={{ color:'#1d4f92' }}>Résumé des Conditions Générales d\'Utilisation</strong>
           <ul style={{ marginTop:8, paddingLeft:16 }}>
-            <li>La plateforme CPlus est opérée par <strong>Calculus Plus SAS</strong></li>
+            <li>La plateforme C-Pay est opérée par <strong>Calculus Plus SAS</strong></li>
             <li>Vous devez avoir 18 ans ou plus pour utiliser nos services</li>
             <li>Vous vous engagez à ne pas utiliser la plateforme à des fins illicites</li>
             <li>Vos transactions sont soumises aux frais communiqués avant validation</li>
@@ -1483,7 +1367,7 @@ const ConsentModal = ({ userId, userType, portal, lang, onAccepted }) => {
             <li>Vous disposez de droits d\'accès, rectification et suppression de vos données</li>
             <li>Contact : <a href="mailto:legal@c-pay.global" style={{ color:'#12b6c7' }}>legal@c-pay.global</a></li>
           </ul>
-          <a href="https://c-pay.global/legal/privacy.html" target="_blank" rel="noreferrer"
+          <a href="https://c-pay.global/legal/confidentialite.html" target="_blank" rel="noreferrer"
             style={{ color:'#12b6c7', fontSize:12, display:'block', marginTop:8 }}>
             📖 Lire la politique complète →
           </a>
@@ -1495,14 +1379,14 @@ const ConsentModal = ({ userId, userType, portal, lang, onAccepted }) => {
             <input type="checkbox" checked={cgu} onChange={e=>setCgu(e.target.checked)}
               style={{ width:18, height:18, marginTop:2, flexShrink:0, cursor:'pointer' }} />
             <span style={{ fontSize:13, color:'#1e2d3d' }}>
-              J\'ai lu et j\'accepte les <a href="https://c-pay.global/legal/cgu.html" target="_blank" rel="noreferrer" style={{ color:'#12b6c7' }}>Conditions Générales d\'Utilisation</a> de CPlus *
+              J\'ai lu et j\'accepte les <a href="https://c-pay.global/legal/cgu.html" target="_blank" rel="noreferrer" style={{ color:'#12b6c7' }}>Conditions Générales d\'Utilisation</a> de C-Pay *
             </span>
           </label>
           <label style={{ display:'flex', alignItems:'flex-start', gap:10, cursor:'pointer' }}>
             <input type="checkbox" checked={privacy} onChange={e=>setPrivacy(e.target.checked)}
               style={{ width:18, height:18, marginTop:2, flexShrink:0, cursor:'pointer' }} />
             <span style={{ fontSize:13, color:'#1e2d3d' }}>
-              J\'accepte la <a href="https://c-pay.global/legal/privacy.html" target="_blank" rel="noreferrer" style={{ color:'#12b6c7' }}>Politique de Confidentialité</a> et consens au traitement de mes données personnelles *
+              J\'accepte la <a href="https://c-pay.global/legal/confidentialite.html" target="_blank" rel="noreferrer" style={{ color:'#12b6c7' }}>Politique de Confidentialité</a> et consens au traitement de mes données personnelles *
             </span>
           </label>
         </div>
@@ -1526,22 +1410,58 @@ const Login = ({ lang, toggleLang }) => {
   const t = useT(lang);
   const [creds, setCreds] = useState({ emailOrPhone: '', password: '' });
   const [loading, setLoading] = useState(false);
+  // Etapes supplementaires renvoyees par /auth/login (hotfix v1) :
+  //   { mfaRequired:true, mfaToken } -> code TOTP 6 chiffres via /auth/2fa/validate
+  //   { mustChangePassword:true }    -> changement de mot de passe force
+  const [mfa, setMfa] = useState(null);
+  const [code, setCode] = useState('');
+  const [forcePwd, setForcePwd] = useState(false);
+  const [pwd, setPwd] = useState({ newPassword: '', confirm: '' });
   const navigate = useNavigate();
   const { isAuth } = useAuth();
-  useEffect(() => { if (isAuth) navigate('/'); }, [isAuth, navigate]);
+  useEffect(() => { if (isAuth && !forcePwd) navigate('/'); }, [isAuth, forcePwd, navigate]);
+
+  const finishLogin = (data) => {
+    if (data.mfaRequired && data.mfaToken) { setMfa({ mfaToken: data.mfaToken }); return; }
+    // Le refresh token arrive en cookie HttpOnly ; l'access token reste en memoire.
+    if (data.user) localStorage.setItem('merchant_user', JSON.stringify(data.user));
+    if (data.mustChangePassword) { setForcePwd(true); setAccessToken(data.access_token); return; }
+    setAccessToken(data.access_token);
+    navigate('/');
+  };
 
   const submit = async () => {
     setLoading(true);
     try {
       const { data } = await api.post('/auth/login', creds);
-      // Le refresh token n'est plus lu ici : il arrive en cookie HttpOnly
-      // pose par le serveur. L'access token reste en memoire.
-      setAccessToken(data.access_token);
-      if (data.user) localStorage.setItem('merchant_user', JSON.stringify(data.user));
-      navigate('/');
-    } catch { toast.error(t('loginError')); }
+      finishLogin(data);
+    } catch (err) { toast.error(err.response?.data?.error || t('loginError')); }
     finally { setLoading(false); }
   };
+
+  const submitMfa = async () => {
+    if (code.length !== 6) return toast.error(lang === 'fr' ? 'Code à 6 chiffres requis' : '6-digit code required');
+    setLoading(true);
+    try {
+      const { data } = await api.post('/auth/2fa/validate', { mfaToken: mfa.mfaToken, code, tempToken: mfa.mfaToken, totpCode: code });
+      finishLogin({ ...data, mfaRequired: false });
+    } catch (err) { toast.error(err.response?.data?.error || (lang === 'fr' ? 'Code invalide' : 'Invalid code')); }
+    finally { setLoading(false); }
+  };
+
+  const submitPwd = async () => {
+    if (pwd.newPassword.length < 8) return toast.error(lang === 'fr' ? '8 caractères minimum' : '8 characters minimum');
+    if (pwd.newPassword !== pwd.confirm) return toast.error(lang === 'fr' ? 'Les mots de passe ne correspondent pas' : 'Passwords do not match');
+    setLoading(true);
+    try {
+      await api.post('/auth/change-password', { currentPassword: creds.password, newPassword: pwd.newPassword });
+      toast.success(lang === 'fr' ? 'Mot de passe modifié' : 'Password changed');
+      setForcePwd(false); navigate('/');
+    } catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
+    finally { setLoading(false); }
+  };
+
+  const onSubmit = e => { e.preventDefault(); if (loading) return; if (forcePwd) submitPwd(); else if (mfa) submitMfa(); else submit(); };
 
   return (
     <div style={{ minHeight: '100vh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
@@ -1551,28 +1471,41 @@ const Login = ({ lang, toggleLang }) => {
         </div>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 180, height: 'auto', display: 'block', margin: '0 auto 12px', objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
-            <div style={{ color: MUTED, fontSize: 13 }}>Espace Marchand</div>
+            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 180, height: 'auto', display: 'block', margin: '0 auto 12px', objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
+            <div style={{ color: MUTED, fontSize: 13 }}>C-Pay — Espace Marchand</div>
           </div>
-          <form onSubmit={e => { e.preventDefault(); if (!loading) submit(); }}>
-            <Inp id="identifier" name="identifier" label={t('emailOrPhone')} value={creds.emailOrPhone} onChange={v => setCreds(c => ({ ...c, emailOrPhone: v }))} placeholder="email@example.com" autoComplete="username" inputMode="email" required />
-            <Inp id="password" name="password" label={t('password')} value={creds.password} onChange={v => setCreds(c => ({ ...c, password: v }))} type="password" placeholder="" autoComplete="current-password" required />
-            {/* Bouton natif masque : rend la touche Entree fonctionnelle et
-                permet aux gestionnaires de mots de passe de detecter le
-                formulaire. Btn est un composant maison sans prop type. */}
-            <button type="submit" style={{ display: 'none' }} aria-hidden="true" tabIndex={-1} />
-            <Btn onClick={submit} disabled={loading} style={{ width: '100%', display: 'block', textAlign: 'center', marginTop: 8 }}>
-              {loading ? t('loggingIn') : t('login')}
-            </Btn>
+          <form onSubmit={onSubmit}>
+            {forcePwd ? (<>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>🔐 {lang === 'fr' ? 'Nouveau mot de passe requis' : 'New password required'}</div>
+              <div style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>{lang === 'fr' ? 'Pour continuer, définissez un nouveau mot de passe (8 caractères minimum).' : 'To continue, set a new password (min. 8 characters).'}</div>
+              <Inp id="new-password" name="new-password" label={lang === 'fr' ? 'Nouveau mot de passe' : 'New password'} value={pwd.newPassword} onChange={v => setPwd(p => ({ ...p, newPassword: v }))} type="password" autoComplete="new-password" required />
+              <Inp id="confirm-password" name="confirm-password" label={lang === 'fr' ? 'Confirmer' : 'Confirm'} value={pwd.confirm} onChange={v => setPwd(p => ({ ...p, confirm: v }))} type="password" autoComplete="new-password" required />
+              <Btn type="submit" disabled={loading} style={{ width: '100%', display: 'block', textAlign: 'center', marginTop: 8 }}>{loading ? '…' : (lang === 'fr' ? 'Enregistrer' : 'Save')}</Btn>
+            </>) : mfa ? (<>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>🔐 {lang === 'fr' ? 'Vérification en deux étapes' : 'Two-step verification'}</div>
+              <div style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>{lang === 'fr' ? 'Saisissez le code à 6 chiffres de votre application d’authentification.' : 'Enter the 6-digit code from your authenticator app.'}</div>
+              <Inp id="otp" name="otp" label={lang === 'fr' ? 'Code à 6 chiffres' : '6-digit code'} value={code} onChange={v => setCode(String(v).replace(/[^0-9]/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" autoComplete="one-time-code" required />
+              <Btn type="submit" disabled={loading || code.length !== 6} style={{ width: '100%', display: 'block', textAlign: 'center', marginTop: 8 }}>{loading ? t('loggingIn') : (lang === 'fr' ? 'Valider' : 'Verify')}</Btn>
+              <button type="button" onClick={() => { setMfa(null); setCode(''); }} style={{ width: '100%', background: 'none', border: 'none', color: MUTED, cursor: 'pointer', marginTop: 10, fontSize: 12, fontFamily: FONT }}>← {lang === 'fr' ? 'Retour' : 'Back'}</button>
+            </>) : (<>
+              <Inp id="identifier" name="identifier" label={t('emailOrPhone')} value={creds.emailOrPhone} onChange={v => setCreds(c => ({ ...c, emailOrPhone: v }))} placeholder="email@example.com" autoComplete="username" inputMode="email" required />
+              <Inp id="password" name="password" label={t('password')} value={creds.password} onChange={v => setCreds(c => ({ ...c, password: v }))} type="password" placeholder="" autoComplete="current-password" required />
+              <Btn type="submit" disabled={loading} style={{ width: '100%', display: 'block', textAlign: 'center', marginTop: 8 }}>
+                {loading ? t('loggingIn') : t('login')}
+              </Btn>
+            </>)}
           </form>
-          <div style={{ textAlign: 'center', marginTop: 10 }}>
-            <Link to="/forgot-password" style={{ color: MUTED, textDecoration: 'none', fontSize: 12, fontFamily: FONT }}>{lang === 'fr' ? 'Mot de passe oublié ?' : 'Forgot password?'}</Link>
-          </div>
-          <div style={{ textAlign: 'center', marginTop: 12, fontSize: 13, color: MUTED, fontFamily: FONT }}>
-            {lang === 'fr' ? 'Pas encore de compte ?' : 'No account yet?'}{' '}
-            <Link to="/register" style={{ color: G, fontWeight: 600, textDecoration: 'none' }}>{lang === 'fr' ? 'Créer un compte' : 'Sign up'}</Link>
-          </div>
+          {!mfa && !forcePwd && (<>
+            <div style={{ textAlign: 'center', marginTop: 10 }}>
+              <Link to="/forgot-password" style={{ color: MUTED, textDecoration: 'none', fontSize: 12, fontFamily: FONT }}>{lang === 'fr' ? 'Mot de passe oublié ?' : 'Forgot password?'}</Link>
+            </div>
+            <div style={{ textAlign: 'center', marginTop: 12, fontSize: 13, color: MUTED, fontFamily: FONT }}>
+              {lang === 'fr' ? 'Pas encore de compte ?' : 'No account yet?'}{' '}
+              <Link to="/register" style={{ color: G, fontWeight: 600, textDecoration: 'none' }}>{lang === 'fr' ? 'Créer un compte' : 'Sign up'}</Link>
+            </div>
+          </>)}
         </Card>
+        <div style={{ textAlign: 'center', marginTop: 12, fontSize: 11, color: MUTED }}>C-Pay est un produit de Calculus Plus SAS</div>
       </div>
     </div>
   );
@@ -1595,7 +1528,7 @@ const ForgotPassword = ({ lang, toggleLang }) => {
       <div style={{ width: '100%', maxWidth: 420, padding: 20 }}>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <img src="/logo-calculus.png" alt="" style={{ height: 48, marginBottom: 12 }} onError={e => e.target.style.display = 'none'} />
+            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 48, marginBottom: 12 }} onError={e => e.target.style.display = 'none'} />
             <div style={{ fontSize: 18, fontWeight: 700 }}>{lang === 'fr' ? 'Réinitialiser le mot de passe' : 'Reset password'}</div>
           </div>
           {sent ? (
@@ -1650,7 +1583,8 @@ const Register = ({ lang, toggleLang }) => {
     setLoading(true);
     try {
       const { data } = await api.post('/auth/register', form);
-      localStorage.setItem('merchant_token', data.access_token);
+      // Meme modele que Login : access token en memoire, jamais dans localStorage.
+      setAccessToken(data.access_token);
       if (data.user) localStorage.setItem('merchant_user', JSON.stringify(data.user));
       toast.success(lang === 'fr' ? 'Compte créé !' : 'Account created!');
       navigate('/');
@@ -1665,7 +1599,7 @@ const Register = ({ lang, toggleLang }) => {
       <div style={{ width: '100%', maxWidth: 480 }}>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <img src="/logo-calculus.png" alt="" style={{ height: 48, marginBottom: 10 }} onError={e => e.target.style.display = 'none'} />
+            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 48, marginBottom: 10 }} onError={e => e.target.style.display = 'none'} />
             <div style={{ fontSize: 18, fontWeight: 700 }}>{t('registerTitle') || 'Créer un compte marchand'}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
@@ -1895,7 +1829,7 @@ const Transactions = ({ lang }) => {
     ]);
     const headers = ['Date','Type','Montant','Méthode','Statut','Auth'];
     const now = new Date().toLocaleDateString(lang==='fr'?'fr-FR':'en-US');
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;padding:20px}h1{color:#12b6c7}table{width:100%;border-collapse:collapse;font-size:11px}th{background:#12b6c7;color:#fff;padding:8px;text-align:left}td{padding:6px 8px;border-bottom:1px solid #dce3ed}</style></head><body><h1>Calculus Plus — Transactions</h1><p>Généré le ${now} | Total: ${total}</p><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;padding:20px}h1{color:#12b6c7}table{width:100%;border-collapse:collapse;font-size:11px}th{background:#12b6c7;color:#fff;padding:8px;text-align:left}td{padding:6px 8px;border-bottom:1px solid #dce3ed}</style></head><body><h1>C-Pay — Transactions</h1><p>Généré le ${now} | Total: ${total}</p><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
     const win = window.open('','_blank');
     win.document.write(html);
     win.document.close();
@@ -2132,7 +2066,7 @@ const Settlements = ({ lang }) => {
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <style>body{font-family:Arial;padding:20px}h1{color:#1d4f92}table{width:100%;border-collapse:collapse;font-size:11px}
     th{background:#1d4f92;color:#fff;padding:8px;text-align:left}td{padding:6px 8px;border-bottom:1px solid #dce3ed}</style></head>
-    <body><h1>Calculus Plus - Reglements</h1>
+    <body><h1>C-Pay - Règlements</h1>
     <p>Genere le ${new Date().toLocaleDateString('fr-FR')}</p>
     <table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
     <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
@@ -3443,105 +3377,132 @@ const TapToPhone = ({ lang }) => {
 };
 
 // ─── Withdraw ─────────────────────────────────────────────────────
-const Withdraw = ({ lang }) => {
-  const [form, setForm] = useState({ amount: '', operator: 'mtn', phone: '' });
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const f = k => v => setForm(p => ({ ...p, [k]: v }));
-  const submit = async () => {
-    if (!form.amount || parseFloat(form.amount) < 500) return toast.error(lang === 'fr' ? 'Montant minimum 500 XAF' : 'Minimum 500 XAF');
-    if (!form.phone) return toast.error(lang === 'fr' ? 'Numéro requis' : 'Phone required');
-    setLoading(true);
-    try { const { data } = await api.post('/withdraw', form); setResult(data); toast.success(lang === 'fr' ? 'Retrait effectué' : 'Withdrawal done'); }
-    catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
-    finally { setLoading(false); }
-  };
-  return (
-    <div>
-      <BackBtn lang={lang} />
-      {!result ? (
-        <Card style={{ maxWidth: 480 }}>
-          <Inp label={lang === 'fr' ? 'Montant (min. 500 XAF)' : 'Amount (min. 500 XAF)'} value={form.amount} onChange={f('amount')} type="number" min="500" placeholder="10000" />
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ display: 'block', fontSize: 12, color: MUTED, marginBottom: 4 }}>{lang === 'fr' ? 'Opérateur' : 'Operator'}</label>
-            <select value={form.operator} onChange={e => f('operator')(e.target.value)} style={{ width: '100%', background: BG, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '10px 12px', fontSize: 14, color: TEXT, fontFamily: FONT }}>
-              {[['mtn', 'MTN MoMo'], ['orange', 'Orange Money'], ['airtel', 'Airtel Money']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          <Inp label={lang === 'fr' ? 'Numéro Mobile Money *' : 'Mobile Money number *'} value={form.phone} onChange={f('phone')} placeholder="+237XXXXXXXXX" />
-          <Btn onClick={submit} disabled={loading} color={O} style={{ width: '100%' }}>{loading ? (lang === 'fr' ? 'Traitement…' : 'Processing…') : (lang === 'fr' ? 'Effectuer le retrait' : 'Perform withdrawal')}</Btn>
-        </Card>
-      ) : (
-        <Card style={{ maxWidth: 480, textAlign: 'center' }}>
-          <div style={{ fontSize: 56, marginBottom: 12 }}>✅</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: G, marginBottom: 8, fontFamily: FONT }}>{lang === 'fr' ? 'Retrait effectué !' : 'Withdrawal done!'}</div>
-          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 20 }}>{fmtNum(result.amount || form.amount)} XAF</div>
-          <Btn onClick={() => { setResult(null); setForm({ amount: '', operator: 'mtn', phone: '' }); }} style={{ width: '100%' }}>
-            {lang === 'fr' ? '+ Nouveau retrait' : '+ New withdrawal'}
-          </Btn>
-        </Card>
-      )}
+// Fonctionnalites desactivees cote serveur (hotfix v1 : 410 FEATURE_DISABLED)
+const FeatureDisabled = ({ lang, title }) => (
+  <Card style={{ maxWidth: 520, margin: '0 auto', textAlign: 'center', border: `1px solid ${O}40`, background: `${O}08` }}>
+    <div style={{ fontSize: 44, marginBottom: 10 }}>🛠️</div>
+    <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6, fontFamily: FONT }}>{title}</div>
+    <div style={{ fontSize: 14, color: MUTED, fontFamily: FONT, lineHeight: 1.6 }}>
+      {lang === 'fr'
+        ? 'Fonctionnalité en cours d’intégration. Elle sera réactivée après validation des opérateurs. Pour un décaissement, contactez le support.'
+        : 'Feature being integrated. It will be re-enabled after operator validation. For a payout, please contact support.'}
     </div>
-  );
-};
+  </Card>
+);
+const isFeatureDisabled = err => err?.response?.status === 410 || err?.response?.data?.code === 'FEATURE_DISABLED';
+
+const Withdraw = ({ lang }) => (
+  <div>
+    <BackBtn lang={lang} />
+    <FeatureDisabled lang={lang} title={lang === 'fr' ? 'Retrait Mobile Money' : 'Mobile Money withdrawal'} />
+  </div>
+);
 
 // ─── App ──────────────────────────────────────────────────────────
 // ─── API KEYS ─────────────────────────────────────────────────────
 // ─── WEBHOOK CONFIG ───────────────────────────────────────────────
 const WebhookConfig = ({ lang }) => {
-  const [cfg, setCfg]       = useState({ webhookUrl:'', webhookSecret:'' });
+  // Contrat hotfix v1 : GET renvoie { webhook_url, webhook_secret:{ configured } } ;
+  // PATCH renvoie webhook_secret.value UNE SEULE FOIS (creation ou rotation).
+  const [cfg, setCfg]         = useState({ webhookUrl:'', secretConfigured:false });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
   const [testing, setTesting] = useState(false);
+  const [newSecret, setNewSecret] = useState(null);
+  const [copied, setCopied]   = useState(false);
 
   useEffect(() => {
-    api.get('/webhook-config').then(r=>setCfg(r.data||{})).catch(()=>{}).finally(()=>setLoading(false));
+    api.get('/webhook-config')
+      .then(r => { const d = r.data || {}; setCfg({ webhookUrl: d.webhook_url || d.webhookUrl || '', secretConfigured: !!(d.webhook_secret && d.webhook_secret.configured) }); })
+      .catch(()=>{}).finally(()=>setLoading(false));
   }, []);
 
-  const save = async () => {
+  const save = async (rotateSecret = false) => {
+    if (!cfg.webhookUrl) return toast.error(lang==='fr'?'URL webhook requise (https://)':'Webhook URL required (https://)');
+    if (rotateSecret && !window.confirm(lang==='fr'?'Régénérer le secret ? L’ancien secret cessera de fonctionner immédiatement.':'Rotate the secret? The old secret stops working immediately.')) return;
     setSaving(true);
-    try { await api.patch('/webhook-config', cfg); toast.success(lang==='fr'?'Webhook sauvegarde':'Webhook saved'); }
+    try {
+      const { data } = await api.patch('/webhook-config', { webhookUrl: cfg.webhookUrl, rotateSecret });
+      setCfg(p => ({ ...p, webhookUrl: data.webhook_url || p.webhookUrl, secretConfigured: !!(data.webhook_secret && data.webhook_secret.configured) }));
+      if (data.webhook_secret && data.webhook_secret.value) { setNewSecret(data.webhook_secret.value); setCopied(false); }
+      toast.success(lang==='fr'?'Webhook sauvegardé':'Webhook saved');
+    }
     catch(err){ toast.error(err.response?.data?.error||'Erreur'); }
     finally { setSaving(false); }
   };
 
   const test = async () => {
     setTesting(true);
-    try { await api.post('/webhook-config/test'); toast.success(lang==='fr'?'Test envoye':'Test sent'); }
+    try { await api.post('/webhook-config/test'); toast.success(lang==='fr'?'Test envoyé':'Test sent'); }
     catch(err){ toast.error(err.response?.data?.error||'Erreur'); }
     finally { setTesting(false); }
+  };
+
+  const copySecret = () => {
+    try { navigator.clipboard.writeText(newSecret); setCopied(true); toast.success(lang==='fr'?'Secret copié':'Secret copied'); } catch (e) { /* clipboard indisponible */ }
   };
 
   if (loading) return <Spin />;
 
   return (
     <div>
+      {newSecret && (
+        <Card style={{ marginBottom:16, border:`2px solid ${O}`, background:`${O}08` }}>
+          <div style={{ fontSize:14, fontWeight:700, color:O, marginBottom:6, fontFamily:FONT }}>
+            ⚠️ {lang==='fr'?'Secret de signature — affiché une seule fois':'Signing secret — shown only once'}
+          </div>
+          <div style={{ fontSize:12, color:MUTED, marginBottom:10, fontFamily:FONT }}>
+            {lang==='fr'
+              ? 'Copiez ce secret maintenant et stockez-le côté serveur. Il ne sera plus jamais affiché ; en cas de perte il faudra le régénérer.'
+              : 'Copy this secret now and store it server-side. It will never be shown again; if lost, you will need to rotate it.'}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <input readOnly value={newSecret} onFocus={e=>e.target.select()}
+              style={{ flex:1, background:CARD, border:`1px solid ${BORDER}`, borderRadius:8, padding:'10px 12px', fontSize:12, fontFamily:'monospace', color:TEXT }} />
+            <button onClick={copySecret} style={{ background:copied?G:P, color:'#fff', border:'none', borderRadius:8, padding:'10px 14px', cursor:'pointer', fontWeight:700, fontSize:12, fontFamily:FONT, whiteSpace:'nowrap' }}>
+              {copied ? '✅ ' + (lang==='fr'?'Copié':'Copied') : '📋 ' + (lang==='fr'?'Copier':'Copy')}
+            </button>
+          </div>
+          <button onClick={()=>setNewSecret(null)} style={{ marginTop:10, background:'none', border:`1px solid ${BORDER}`, borderRadius:8, padding:'8px 12px', cursor:'pointer', fontSize:12, fontFamily:FONT, color:MUTED }}>
+            ✅ {lang==='fr'?'J’ai sauvegardé le secret':'I have saved the secret'}
+          </button>
+        </Card>
+      )}
+
       <Card style={{ marginBottom:16 }}>
         <div style={{ fontSize:15, fontWeight:700, marginBottom:16, fontFamily:FONT }}>
           🔔 {lang==='fr'?'Configuration Webhook':'Webhook Configuration'}
         </div>
         <div style={{ marginBottom:12 }}>
           <label style={{ display:'block', fontSize:12, color:MUTED, marginBottom:4 }}>
-            {lang==='fr'?'URL Webhook':'Webhook URL'}
+            {lang==='fr'?'URL Webhook (https:// obligatoire)':'Webhook URL (https:// required)'}
           </label>
           <input value={cfg.webhookUrl||''} onChange={e=>setCfg(p=>({...p,webhookUrl:e.target.value}))}
-            placeholder="https://votresite.com/webhooks/cplus"
+            placeholder="https://votresite.com/webhooks/c-pay"
             style={{ width:'100%', background:BG, border:`1px solid ${BORDER}`, borderRadius:8, padding:'10px 12px', fontSize:13, color:TEXT, fontFamily:FONT, boxSizing:'border-box' }} />
         </div>
         <div style={{ marginBottom:16 }}>
           <label style={{ display:'block', fontSize:12, color:MUTED, marginBottom:4 }}>
-            {lang==='fr'?'Secret de signature':'Signing Secret'}
+            {lang==='fr'?'Secret de signature (HMAC-SHA256)':'Signing secret (HMAC-SHA256)'}
           </label>
-          <input value={cfg.webhookSecret||''} onChange={e=>setCfg(p=>({...p,webhookSecret:e.target.value}))}
-            placeholder="whsec_xxxxxxxx"
-            style={{ width:'100%', background:BG, border:`1px solid ${BORDER}`, borderRadius:8, padding:'10px 12px', fontSize:13, color:TEXT, fontFamily:FONT, boxSizing:'border-box' }} />
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, background:BG, border:`1px solid ${BORDER}`, borderRadius:8, padding:'10px 12px', fontSize:13, fontFamily:FONT }}>
+            {cfg.secretConfigured
+              ? <span style={{ color:G, fontWeight:700 }}>✅ {lang==='fr'?'Configuré — jamais affiché après création':'Configured — never shown after creation'}</span>
+              : <span style={{ color:MUTED }}>{lang==='fr'?'Aucun secret : il sera généré à la première sauvegarde.':'No secret yet: it will be generated on first save.'}</span>}
+            {cfg.secretConfigured && (
+              <button onClick={()=>save(true)} disabled={saving}
+                style={{ background:'none', border:`1px solid ${O}`, color:O, borderRadius:8, padding:'6px 10px', cursor:'pointer', fontSize:12, fontWeight:700, fontFamily:FONT, whiteSpace:'nowrap' }}>
+                🔄 {lang==='fr'?'Régénérer':'Rotate'}
+              </button>
+            )}
+          </div>
         </div>
         <div style={{ display:'flex', gap:10 }}>
-          <button onClick={save} disabled={saving}
+          <button onClick={()=>save(false)} disabled={saving}
             style={{ flex:1, background:P, color:'#fff', border:'none', borderRadius:8, padding:'10px', cursor:'pointer', fontWeight:700, fontSize:13, fontFamily:FONT }}>
             {saving?'...':(lang==='fr'?'Sauvegarder':'Save')}
           </button>
-          <button onClick={test} disabled={testing||!cfg.webhookUrl}
+          <button onClick={test} disabled={testing||!cfg.webhookUrl||!cfg.secretConfigured}
             style={{ flex:1, background:'none', border:`1px solid ${BORDER}`, borderRadius:8, padding:'10px', cursor:'pointer', fontSize:13, fontFamily:FONT, color:MUTED }}>
             {testing?'...':(lang==='fr'?'Tester':'Test')}
           </button>
@@ -3625,7 +3586,7 @@ const ApiKeys = ({ lang }) => {
       <div style={{ background:`${BLUE}08`, border:`1px solid ${BLUE}20`, borderRadius:10, padding:14, marginBottom:20, fontSize:13 }}>
         <div style={{ fontWeight:700, marginBottom:6, fontFamily:FONT }}>🔌 {lang==='fr'?'Intégration API REST':'REST API Integration'}</div>
         <div style={{ color:MUTED, marginBottom:8 }}>
-          {lang==='fr'?'Utilisez ces clés pour intégrer CPlus dans vos applications tierces.':'Use these keys to integrate CPlus into your third-party applications.'}
+          {lang==='fr'?'Utilisez ces clés pour intégrer C-Pay dans vos applications tierces. La clé et le secret ne sont affichés qu\u2019une seule fois, à la création.':'Use these keys to integrate C-Pay into your third-party applications. The key and secret are shown only once, at creation.'}
         </div>
         <div style={{ background:'#1e2d3d', borderRadius:8, padding:12, fontFamily:'monospace', fontSize:12, color:'#00c896' }}>
           curl -X POST https://api.c-pay.global/api/v1/merchant/public/collect \<br/>
@@ -3718,7 +3679,15 @@ const ApiKeys = ({ lang }) => {
                       {k.is_active?(lang==='fr'?'Active':'Active'):(lang==='fr'?'Révoquée':'Revoked')}
                     </span>
                   </div>
-                  <div style={{ fontFamily:'monospace', fontSize:12, color:MUTED, marginBottom:6 }}>{k.api_key}</div>
+                  <div style={{ fontFamily:'monospace', fontSize:12, color:MUTED, marginBottom:6 }}>
+                    {(k.key_prefix || k.api_key || '').replace(/\*+$/, '')}••••••••
+                    {k.legacy_plaintext && (
+                      <span title={lang==='fr'?'Clé créée avant le hachage des clés : révoquez-la et créez-en une nouvelle.':'Key created before key hashing: revoke it and create a new one.'}
+                        style={{ marginLeft:8, background:`${O}20`, color:O, borderRadius:20, padding:'2px 8px', fontSize:10, fontWeight:700, fontFamily:FONT }}>
+                        ⚠️ {lang==='fr'?'Ancienne génération — à renouveler':'Legacy — please rotate'}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                     {(k.permissions||[]).map(p=>(
                       <span key={p} style={{ background:`${BLUE}10`, color:BLUE, borderRadius:20, padding:'2px 8px', fontSize:10, fontWeight:700 }}>
@@ -3750,7 +3719,7 @@ const Integrations = ({ lang, t }) => {
   const plugins = [
     {
       id: 'android-app',
-      name: 'CPlus App Android',
+      name: 'C-Pay App Android',
       platform: 'Android',
       icon: '📱',
       version: '2.6.0',
@@ -3769,13 +3738,13 @@ const Integrations = ({ lang, t }) => {
     },
     {
       id: 'android-sdk',
-      name: 'CPlus Android SDK',
+      name: 'C-Pay Android SDK',
       platform: 'Android',
       icon: '📱',
       version: '2.6.0',
       desc: lang==='fr'
-        ? 'SDK natif Kotlin/Java pour intégrer CPlus dans vos applications Android. Paiement Mobile Money, QR Code et NFC.'
-        : 'Native Kotlin/Java SDK to integrate CPlus in your Android apps. Mobile Money, QR Code and NFC payments.',
+        ? 'SDK natif Kotlin/Java pour intégrer C-Pay dans vos applications Android. Paiement Mobile Money, QR Code et NFC.'
+        : 'Native Kotlin/Java SDK to integrate C-Pay in your Android apps. Mobile Money, QR Code and NFC payments.',
       tags: ['Kotlin', 'Java', 'Android 5.0+'],
       tagColors: ['#e8f0fe', '#f0fff4', '#fff3e0'],
       tagTextColors: ['#1d4f92', '#00c896', '#ff9500'],
@@ -3787,18 +3756,18 @@ const Integrations = ({ lang, t }) => {
         'Copiez le .aar dans votre dossier app/libs/',
         'Ajoutez la dépendance dans build.gradle',
         'Initialisez avec votre API Key dans Application.onCreate()',
-        'Appelez CPlus.collect() pour encaisser'
+        'Appelez CPay.collect() pour encaisser'
       ] : [
         'Download the SDK (ZIP) below',
         'Copy .aar to your app/libs/ folder',
         'Add dependency in build.gradle',
         'Initialize with your API Key in Application.onCreate()',
-        'Call CPlus.collect() to accept payment'
+        'Call CPay.collect() to accept payment'
       ],
     },
     {
       id: 'woocommerce',
-      name: 'CPlus Payment Gateway',
+      name: 'C-Pay Payment Gateway',
       platform: 'WooCommerce',
       icon: '🛒',
       version: '2.6.0',
@@ -3814,15 +3783,15 @@ const Integrations = ({ lang, t }) => {
       steps: lang==='fr' ? [
         'Téléchargez le fichier ZIP ci-dessous',
         'WP Admin → Extensions → Ajouter → Téléverser le plugin',
-        'Activez le plugin CPlus Payment Gateway',
-        'WooCommerce → Réglages → Paiements → CPlus',
+        'Activez le plugin C-Pay Payment Gateway',
+        'WooCommerce → Réglages → Paiements → C-Pay',
         'Entrez votre API Key et API Secret',
         'Configurez l\'URL Webhook dans Merchant Portal'
       ] : [
         'Download the ZIP file below',
         'WP Admin → Plugins → Add New → Upload Plugin',
-        'Activate CPlus Payment Gateway',
-        'WooCommerce → Settings → Payments → CPlus',
+        'Activate C-Pay Payment Gateway',
+        'WooCommerce → Settings → Payments → C-Pay',
         'Enter your API Key and API Secret',
         'Configure Webhook URL in Merchant Portal'
       ],
@@ -3835,7 +3804,7 @@ const Integrations = ({ lang, t }) => {
         🛒 {lang==='fr'?'Intégrations':'Integrations'}
       </h1>
       <p style={{ color:MUTED, fontSize:13, marginBottom:24 }}>
-        {lang==='fr'?'Plugins et extensions pour connecter CPlus à vos plateformes e-commerce.':'Plugins and extensions to connect CPlus to your e-commerce platforms.'}
+        {lang==='fr'?'Plugins et extensions pour connecter C-Pay à vos plateformes e-commerce.':'Plugins and extensions to connect C-Pay to your e-commerce platforms.'}
       </p>
 
       {plugins.map(plugin => (
@@ -3926,7 +3895,7 @@ const PluginsTab = ({ lang }) => {
   const plugins = [
     {
       id: 'android-sdk',
-      name: 'CPlus Android SDK',
+      name: 'C-Pay Android SDK',
       platform: 'Android',
       icon: '📱',
       version: '2.6.0',
@@ -3943,7 +3912,7 @@ const PluginsTab = ({ lang }) => {
     },
     {
       id: 'woocommerce',
-      name: 'CPlus WooCommerce',
+      name: 'C-Pay WooCommerce',
       platform: 'WooCommerce',
       icon: '🛒',
       version: '2.6.0',
@@ -3955,8 +3924,8 @@ const PluginsTab = ({ lang }) => {
       docsUrl: 'https://c-pay.global/developers',
       requires: 'WooCommerce 6.0+ · PHP 7.4+',
       steps: lang==='fr'
-        ? ['Telechargez le fichier ZIP', 'WP Admin Extensions Telecharger', 'Activez le plugin', 'WooCommerce Reglages Paiements CPlus', 'Entrez API Key et Secret']
-        : ['Download the ZIP file', 'WP Admin Plugins Upload', 'Activate the plugin', 'WooCommerce Settings Payments CPlus', 'Enter API Key and Secret'],
+        ? ['Telechargez le fichier ZIP', 'WP Admin Extensions Telecharger', 'Activez le plugin', 'WooCommerce Reglages Paiements C-Pay', 'Entrez API Key et Secret']
+        : ['Download the ZIP file', 'WP Admin Plugins Upload', 'Activate the plugin', 'WooCommerce Settings Payments C-Pay', 'Enter API Key and Secret'],
     },
   ];
 
@@ -4073,4 +4042,4 @@ export default function App() {
     </BrowserRouter>
   );
 }
-// CPlus 2.6.0 build 1783884376
+// C-Pay 2.6.0 build 1783884376

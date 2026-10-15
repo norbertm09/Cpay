@@ -33,6 +33,13 @@ const CONFIG = {
 
 const tokenCache = {};
 
+// TLS : verification du certificat TOUJOURS active. Desactivable uniquement de
+// facon explicite pour un bac a sable (MTN_TLS_INSECURE=true), jamais par defaut.
+const TLS_INSECURE = String(process.env.MTN_TLS_INSECURE || '').toLowerCase() === 'true';
+if (TLS_INSECURE) {
+  console.error('[MTN-MOMO] MTN_TLS_INSECURE=true : verification TLS desactivee (sandbox uniquement)');
+}
+
 // Raw HTTPS request
 const rawRequest = (opts, body) => new Promise((resolve, reject) => {
   const finalOpts = {
@@ -41,8 +48,9 @@ const rawRequest = (opts, body) => new Promise((resolve, reject) => {
     path:     opts.path,
     method:   opts.method || 'GET',
     headers:  opts.headers || {},
-    rejectUnauthorized: false,
+    timeout:  opts.timeout || CONFIG.timeout || 30000,
   };
+  if (TLS_INSECURE) finalOpts.rejectUnauthorized = false;
   const req = https.request(finalOpts, res => {
     let d = '';
     res.on('data', c => d += c);
@@ -53,6 +61,9 @@ const rawRequest = (opts, body) => new Promise((resolve, reject) => {
     });
   });
   req.on('error', reject);
+  req.on('timeout', () => {
+    req.destroy(new Error(`MTN timeout after ${finalOpts.timeout}ms`));
+  });
   if (body) req.write(body);
   req.end();
 });

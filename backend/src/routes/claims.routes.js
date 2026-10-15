@@ -1,27 +1,12 @@
 'use strict';
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const { query, withTransaction } = require('../config/database');
+// WAVE-2 : auth unique (audit §1.1) — cardholderAuth pose req.cardholder,
+// adminAuth + aliasUser('admin') conserve req.admin pour les routes existantes.
+const { cardholderAuth, adminAuth: adminJwt, aliasUser } = require('../middleware/auth');
 
-const cardAuth = async (req, res, next) => {
-  try {
-    const h = req.headers.authorization;
-    if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const d = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-    if (d.type !== 'cardholder') return res.status(403).json({ error: 'Accès refusé' });
-    req.cardholder = d; next();
-  } catch { res.status(401).json({ error: 'Token invalide' }); }
-};
-
-const adminAuth = async (req, res, next) => {
-  try {
-    const h = req.headers.authorization;
-    if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const d = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-    if (d.type !== 'admin') return res.status(403).json({ error: 'Accès refusé' });
-    req.admin = d; next();
-  } catch { res.status(401).json({ error: 'Token invalide' }); }
-};
+const cardAuth  = cardholderAuth;
+const adminAuth = [adminJwt, aliasUser('admin')];
 
 const cardholderRouter = express.Router();
 const adminRouter = express.Router();

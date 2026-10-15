@@ -4,11 +4,7 @@ require('dotenv').config();
 
 const express = require('express');
 const helmet = require('helmet');
-const {
-  pciSecurityHeaders, pciInputValidation, pciSessionCheck,
-  pciAuditRequest, pciAnomalyDetection, pciResponseSanitizer,
-  pciErrorHandler, pciContentTypeCheck,
-} = require('./middleware/pci.middleware');
+const { pciSecurityHeaders } = require('./middleware/pci.middleware');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
@@ -16,6 +12,16 @@ const logger = require('./config/logger');
 const { validateEnv } = require('./config/env');
 const { requestContext } = require('./middleware/request-context');
 const { asyncHandler, notFound, errorHandler } = require('./middleware/errors');
+const { wrapRouterAsync } = require('./middleware/async-wrap');
+const crypto = require('crypto');
+const { verifyToken } = require('./middleware/auth');
+
+// Échappement HTML pour les pages publiques (pay.c-pay.global)
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const timingSafeEqualStr = (a, b) => {
+  const ba = Buffer.from(String(a || '')); const bb = Buffer.from(String(b || ''));
+  return ba.length === bb.length && ba.length > 0 && crypto.timingSafeEqual(ba, bb);
+};
 
 const adminRoutes = require('./routes/admin.routes');
 const merchantRoutes    = require('./routes/merchant.routes');
@@ -24,6 +30,7 @@ const gtpCardRoutes     = require('./routes/gtp-card.routes');
 const mtnMomoRoutes     = require('./routes/mtn-momo.routes');
 const card2momoRoutes   = require('./routes/card2momo.routes');
 const railsRoutes = require('./routes/rails.routes');
+const { secretRouter: webhooksMmSecretRouter, legacyRouter: webhooksMmLegacyRouter } = require('./routes/webhooks-mm.routes');
 const { cardholderResetRouter, merchantResetRouter, distributionAdminRouter, agentRouter } = require('./routes/password_reset_distribution.routes');
 const { cardholderRouter: claimsChRouter, adminRouter: claimsAdminRouter } = require('./routes/claims.routes');
 const { adminRouter: distAdminRouter, bankRouter, agencyRouter, agentPortalRouter } = require('./routes/distribution.routes');
@@ -55,16 +62,11 @@ app.use(helmet({
   contentSecurityPolicy: false, // Géré par pciSecurityHeaders
 }));
 
-// ─── PCI-DSS Middleware Stack ─────────────────────────────────────
-app.use(pciSecurityHeaders);       // REQ 4+12 : HSTS, CSP, headers
-app.use(pciContentTypeCheck);      // REQ 2   : Content-Type enforcement
-app.use(pciInputValidation);       // REQ 6   : Input sanitization + XSS
-app.use(pciSessionCheck);          // REQ 8   : Session timeout 30 min
-app.use(pciAnomalyDetection);      // REQ 11  : Anomaly detection
-app.use('/api/v1/cardholder', pciAuditRequest);  // REQ 10 : Audit trail
-app.use('/api/v1/cardholder', pciResponseSanitizer); // REQ 3 : Masquage PAN
+// En-têtes de sécurité (HSTS, X-Frame-Options, nosniff, no-store sur les parcours sensibles).
+// WAVE-2 : les middlewares PCI cosmétiques (no-op) et pciErrorHandler ont été supprimés.
+app.use(pciSecurityHeaders);
 app.use(cors({
-  origin: (process.env.ALLOWED_ORIGINS || 'https://admin.c-pay.global,https://merchant.c-pay.global,https://card.c-pay.global,https://app.c-pay.global,https://bank.c-pay.global,https://agency.c-pay.global,https://agent.c-pay.global,http://localhost:3001,http://localhost:3002')
+  origin: (process.env.ALLOWED_ORIGINS || 'https://c-pay.global,https://www.c-pay.global,https://admin.c-pay.global,https://merchant.c-pay.global,https://card.c-pay.global,https://app.c-pay.global,https://bank.c-pay.global,https://agency.c-pay.global,https://agent.c-pay.global,http://localhost:3001,http://localhost:3002')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
@@ -73,7 +75,7 @@ app.use(cors({
 // cookie-parser doit preceder les routes : les refresh tokens transitent
 // desormais en cookie HttpOnly (voir middleware/auth.js).
 app.use(cookieParser());
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '5mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestContext);
 app.use(httpMetrics);
@@ -101,7 +103,344 @@ app.get('/health', asyncHandler(async (_req, res) => {
 }));
 
 
-// ─── PAY LINK PUBLIC — Redirection vers page de paiement ─────────
+const publicPayLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
+app.post('/api/v1/pay/:shortId', publicPayLimiter, asyncHandler(async (req, res) => {
+  const { phone, method } = req.body || {};
+  const { shortId } = req.params;
+  if (method === 'card' || req.body?.cardNum || req.body?.cvv) {
+    // Jamais de PAN/CVV côté serveur sur la page publique : champ hébergé PSP à venir
+    return res.status(410).json({ error: 'Paiement par carte indisponible sur la page publique', code: 'CARD_PAYMENT_DISABLED' });
+  }
+  const normalized = detectFromPhone(String(phone || ''));
+  if (!normalized.success) return res.status(422).json({ error: normalized.error || 'Numéro invalide', code: 'PHONE_INVALID' });
+  const { query } = require('./config/database');
+  const r = await query(
+    `SELECT * FROM pay_links WHERE short_id=$1 AND status='pending' AND expires_at>NOW()`,
+    [shortId]
+  );
+  if (!r.rows.length) return res.status(404).json({ error: 'Lien invalide ou expiré' });
+  const link = r.rows[0];
+  const result = await orchestrator.processTransaction({
+    merchantId:    link.merchant_id,
+    type:          'collect',
+    amount:        Number(link.amount),
+    customerPhone: normalized.phone,
+    description:   link.description || 'Paiement C-Pay',
+    payLinkId:     link.pay_link_id,
+  });
+  if (result.success) {
+    await query(
+      `UPDATE pay_links SET status='paid', paid_at=NOW(), paid_amount=$1 WHERE pay_link_id=$2 AND status='pending'`,
+      [link.amount, link.pay_link_id]
+    );
+  }
+  res.status(result.success || result.pending ? 200 : 402).json({
+    success: !!result.success, pending: !!result.pending, txnId: result.txnId, message: result.message, error: result.error || null,
+  });
+}));
+
+// ─── Swagger UI ───────────────────────────────────────────────────
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./swagger');
+app.use('/api/v1/docs', swaggerUi.serve);
+app.get('/api/v1/docs/', swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { background: #1d4f92; }',
+  customSiteTitle: 'CPlus API Documentation',
+  swaggerOptions: {
+    url: '/api/v1/docs.json',
+    persistAuthorization: true,
+    displayRequestDuration: true,
+    filter: true,
+    tryItOutEnabled: true,
+    defaultModelsExpandDepth: 1,
+    defaultModelExpandDepth: 1,
+  }
+}));
+app.get('/api/v1/docs.json', (req, res) => { res.json(swaggerSpec); });
+
+// Route upgrade compte développeur → merchant production
+app.post('/api/v1/developer/upgrade', async (req, res) => {
+  const { email, businessName, phone, country, rccm, nif } = req.body;
+  if (!email || !businessName) return res.status(422).json({error:'email et businessName requis'});
+  try {
+    const { query } = require('./config/database');
+    // Vérifier si compte développeur existe
+    const dev = await query(
+      `SELECT * FROM admin_notifications WHERE type='developer_registration' AND message LIKE $1 LIMIT 1`,
+      [`%${email}%`]
+    );
+    if (!dev.rows.length) return res.status(404).json({error:'Compte développeur introuvable'});
+
+    // Notifier l'admin pour validation manuelle
+    await query(
+      `INSERT INTO admin_notifications (type, title, message, metadata)
+       VALUES ('developer_upgrade_request', 'Demande upgrade Développeur → Merchant', $1, $2)`,
+      [`${email} demande un accès production pour: ${businessName}`,
+       JSON.stringify({ email, businessName, phone, country, rccm, nif })]
+    );
+    res.json({ success: true, message: 'Demande reçue — notre équipe validera votre compte production sous 48h.' });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+app.post('/api/v1/developer/register', async (req, res) => {
+  const { name, email, phone, appName, integrationType, country } = req.body;
+  if (!name || !email || !phone || !appName) return res.status(422).json({error:'Champs requis'});
+  try {
+    const { query } = require('./config/database');
+    await query(
+      `INSERT INTO admin_notifications (type, title, message, metadata)
+       VALUES ('developer_registration', 'Nouveau développeur inscrit', $1, $2)`,
+      [`${name} (${email}) — App: ${appName} — Pays: ${country||'CG'}`,
+       JSON.stringify({ name, email, phone, appName, integrationType, country })]
+    );
+    res.json({ success: true, message: 'Compte sandbox en cours de création — credentials par email sous 24h.' });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+app.use('/api/v1/partners', wrapRouterAsync(require('./routes/partners.routes')));
+// ─── CONSENTEMENTS ────────────────────────────────────────────────
+app.get('/api/v1/consent/check', verifyToken, asyncHandler(async (req, res) => {
+  const { portal } = req.query;
+  if (!portal) return res.status(422).json({ error: 'portal requis' });
+  const { query } = require('./config/database');
+  const r = await query(`SELECT * FROM consents WHERE user_id=$1 AND user_type=$2 AND portal=$3`, [String(req.user.sub), String(req.user.type), String(portal).slice(0, 32)]);
+  res.json({ hasConsented: r.rows.length > 0, consent: r.rows[0] || null });
+}));
+
+app.post('/api/v1/consent/accept', verifyToken, asyncHandler(async (req, res) => {
+  const { portal, cguAccepted, privacyAccepted, contractAccepted } = req.body || {};
+  if (!portal) return res.status(422).json({ error: 'portal requis' });
+  const { query } = require('./config/database');
+  await query(`INSERT INTO consents (user_id, user_type, portal, cgu_accepted, privacy_accepted, contract_accepted, ip_address, user_agent)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    ON CONFLICT (user_id, user_type, portal)
+    DO UPDATE SET cgu_accepted=$4, privacy_accepted=$5, contract_accepted=$6, accepted_at=NOW()`,
+    [String(req.user.sub), String(req.user.type), String(portal).slice(0, 32), !!cguAccepted, !!privacyAccepted, !!contractAccepted,
+     req.ip, (req.headers['user-agent'] || '').slice(0, 512)]
+  );
+  res.json({ success: true });
+}));
+
+app.use('/api/v1/admin', wrapRouterAsync(adminRoutes));
+app.use('/api/v1/merchant', wrapRouterAsync(merchantRoutes));
+app.use('/api/v1/cardholder', wrapRouterAsync(cardholderRoutes));
+app.use('/api/v1/cardholder/gtp', wrapRouterAsync(gtpCardRoutes));
+app.use('/api/v1/momo', wrapRouterAsync(mtnMomoRoutes));
+app.use('/api/v1', wrapRouterAsync(card2momoRoutes));
+// Webhooks Mobile Money
+const { handleMtnWebhook, handleAirtelWebhook, handleCyberSourceWebhook, handleMigsWebhook } = require('./routes/webhook-handlers');
+app.post('/api/v1/webhooks/mtn',         handleMtnWebhook);
+app.post('/api/v1/webhooks/airtel',      handleAirtelWebhook);
+app.post('/api/v1/webhooks/cybersource', handleCyberSourceWebhook);
+app.post('/api/v1/webhooks/migs',        handleMigsWebhook);
+app.use('/api/v1/rails', wrapRouterAsync(railsRoutes));
+// WAVE-2 : webhooks Mobile Money (Orange, Wave, Africell, Express Union, Free Money, Moov)
+//   - chemin secret : POST /api/v1/webhooks/<WEBHOOK_PATH_SECRET>/:provider
+//   - chemins publics historiques donnés aux opérateurs : /webhooks/orange, /webhooks/wave/…, /webhooks/<provider>/:txnId
+app.use('/api/v1/webhooks', webhooksMmSecretRouter);
+app.use('/webhooks', webhooksMmLegacyRouter);
+
+// ─── Reset mot de passe ───────────────────────────────────────────
+app.use('/api/v1/cardholder', wrapRouterAsync(cardholderResetRouter));
+app.use('/api/v1/merchant',   wrapRouterAsync(merchantResetRouter));
+
+// ─── Réclamations & Incidents ─────────────────────────────────────
+app.use('/api/v1/cardholder', wrapRouterAsync(claimsChRouter));
+app.use('/api/v1/admin',      wrapRouterAsync(claimsAdminRouter));
+
+// ─── WAVE-2 : vitrine (assistant, leads, réclamations) + CRM admin ───
+app.use('/api/v1/public',    wrapRouterAsync(require('./routes/public-crm.routes')));
+app.use('/api/v1/admin/crm', wrapRouterAsync(require('./routes/crm-admin.routes')));
+
+// ─── Distribution ─────────────────────────────────────────────────
+app.use('/api/v1/admin/distribution', wrapRouterAsync(distAdminRouter));
+app.use('/api/v1/bank',               wrapRouterAsync(bankRouter));
+app.use('/api/v1/agency',             wrapRouterAsync(agencyRouter));
+app.use('/api/v1/agent',              wrapRouterAsync(agentPortalRouter));
+
+app.post('/api/v1/collect', merchantAuth, validatePaymentRequest, idempotency, asyncHandler(async (req, res) => {
+  const { amount, customerPhone, emvPayload, aidDetected, description, deviceId } = req.body;
+  const result = await orchestrator.processTransaction({
+    merchantId: req.user.merchantId,
+    type: 'collect',
+    amount,
+    customerPhone,
+    emvPayload,
+    aidDetected,
+    description,
+    deviceId,
+  });
+
+  res.status(result.statusCode || (result.success || result.pending ? 200 : 402)).json({
+    success: !!result.success,
+    pending: !!result.pending,
+    txnId: result.txnId,
+    message: result.message,
+    amount: result.amount,
+    currency: result.currency,
+    authCode: result.authCode,
+    error: result.error || null,
+    code: result.code || undefined,
+  });
+}));
+
+app.post('/api/v1/payout', merchantAuth, validatePaymentRequest, idempotency, asyncHandler(async (req, res) => {
+  const { amount, customerPhone, emvPayload, aidDetected, description, deviceId } = req.body;
+  const result = await orchestrator.processTransaction({
+    merchantId: req.user.merchantId,
+    type: 'payout',
+    amount,
+    customerPhone,
+    emvPayload,
+    aidDetected,
+    description,
+    deviceId,
+  });
+
+  res.status(result.statusCode || (result.success || result.pending ? 200 : 402)).json({
+    success: !!result.success,
+    pending: !!result.pending,
+    txnId: result.txnId,
+    message: result.message,
+    amount: result.amount,
+    currency: result.currency,
+    error: result.error || null,
+    code: result.code || undefined,
+  });
+}));
+
+app.post('/api/v1/qr-code', merchantAuth, validateLinkRequest, idempotency, asyncHandler(async (req, res) => {
+  const { amount, description } = req.body;
+  const { query } = require('./config/database');
+  const merchant = await query('SELECT currency FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
+  const result = await orchestrator.generateQRPayload({
+    merchantId: req.user.merchantId,
+    amount,
+    currency: merchant.rows[0]?.currency || 'XOF',
+    description,
+  });
+  res.json(result);
+}));
+
+app.post('/api/v1/pay-link', merchantAuth, validateLinkRequest, idempotency, asyncHandler(async (req, res) => {
+  const { amount, description } = req.body;
+  const { query } = require('./config/database');
+  const merchant = await query('SELECT currency FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
+  const result = await orchestrator.generatePayLink({
+    merchantId: req.user.merchantId,
+    amount,
+    currency: merchant.rows[0]?.currency || 'XOF',
+    description,
+  });
+  res.json(result);
+}));
+
+app.post('/api/v1/pay-link/:id/send', merchantAuth, validatePayLinkSendRequest, asyncHandler(async (req, res) => {
+  const { channel, phone } = req.body;
+  const { query } = require('./config/database');
+  const result = await query(
+    `SELECT pay_link_id, short_id, amount, currency, description, short_url
+     FROM pay_links
+     WHERE merchant_id = $1 AND (pay_link_id::text = $2 OR short_id = $2)
+     LIMIT 1`,
+    [req.user.merchantId, req.params.id]
+  );
+
+  if (!result.rows.length) {
+    return res.status(404).json({ error: 'Lien de paiement introuvable', code: 'PAY_LINK_NOT_FOUND' });
+  }
+
+  const link = result.rows[0];
+  const url = link.short_url || `${process.env.PAY_LINK_BASE_URL || 'https://pay.c-pay.global'}/${link.short_id}`;
+  const text = `Paiement ${link.description || ''} ${link.amount} ${link.currency}: ${url}`.replace(/\s+/g, ' ').trim();
+  const providerResult = channel === 'whatsapp'
+    ? await sendWhatsAppText({ to: phone, text })
+    : await sendSmsSmpp({ to: phone, text });
+
+  res.json({ success: true, channel, linkId: link.pay_link_id, providerResult });
+}));
+
+app.post('/api/v1/webhooks/paymenthub', asyncHandler(async (req, res) => {
+  // Fail-closed : sans jeton configuré, aucun callback n'est accepté
+  if (!process.env.PAYMENTHUB_WEBHOOK_TOKEN || !timingSafeEqualStr(req.headers['x-paymenthub-token'], process.env.PAYMENTHUB_WEBHOOK_TOKEN)) {
+    return res.status(401).json({ error: 'Webhook token invalide', code: 'INVALID_WEBHOOK_TOKEN' });
+  }
+
+  const payload = req.body?.data || req.body;
+  const operation = payload?.operations?.[0] || {};
+  const reference = operation.reference || payload?.reference;
+  if (!reference) return res.status(422).json({ error: 'reference manquante', code: 'REFERENCE_REQUIRED' });
+
+  const status = operation.status || payload?.status;
+  const normalized = String(status || '').toLowerCase();
+  const mappedStatus = ['completed', 'success', 'successful'].includes(normalized)
+    ? 'authorized'
+    : ['failed', 'rejected', 'cancelled'].includes(normalized)
+      ? 'failed'
+      : 'pending';
+
+  const { query } = require('./config/database');
+  if (mappedStatus === 'pending') return res.json({ success: true, updated: 0, status: 'pending' });
+  const callbackAmount = Number(operation.amount ?? payload?.amount);
+  const existing = await query(`SELECT amount, currency, status FROM transactions WHERE transaction_id = $1::uuid`, [reference]);
+  if (!existing.rows.length) return res.status(404).json({ error: 'Transaction inconnue', code: 'TXN_NOT_FOUND' });
+  if (Number.isFinite(callbackAmount) && callbackAmount > 0 && Math.abs(callbackAmount - Number(existing.rows[0].amount)) > 0.009) {
+    logger.warn('PaymentHub callback: montant différent', { reference, callbackAmount, stored: existing.rows[0].amount });
+    return res.status(409).json({ error: 'Montant du callback différent de la transaction', code: 'AMOUNT_MISMATCH' });
+  }
+  const updated = await query(
+    `UPDATE transactions SET
+       status = $1,
+       gateway_payment_id = COALESCE($2, gateway_payment_id),
+       gateway_name = COALESCE(gateway_name, 'paymenthub'),
+       response_code = CASE WHEN $1 = 'authorized' THEN '00' ELSE response_code END,
+       response_message = COALESCE($3, response_message),
+       completed_at = CASE WHEN $1 = 'authorized' THEN NOW() ELSE completed_at END
+     WHERE transaction_id = $4::uuid AND status = 'pending'
+     RETURNING transaction_id, merchant_id`,
+    [mappedStatus, payload?.id || operation.id || null, status || null, reference]
+  );
+
+  if (updated.rows.length) {
+    await query(
+      `INSERT INTO transaction_events (transaction_id, merchant_id, event_type, payload)
+       VALUES ($1,$2,'PAYMENTHUB_CALLBACK',$3)`,
+      [updated.rows[0].transaction_id, updated.rows[0].merchant_id, JSON.stringify(req.body)]
+    );
+  }
+
+  res.json({ success: true, updated: updated.rows.length, status: mappedStatus });
+}));
+
+app.post('/api/v1/detect/phone', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false }), (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'phone requis', code: 'PHONE_REQUIRED' });
+  res.json(detectFromPhone(phone));
+});
+
+app.post('/internal/settlement/run', asyncHandler(async (req, res) => {
+  if (!process.env.INTERNAL_TOKEN) return res.status(503).json({ error: 'INTERNAL_TOKEN non configuré', code: 'INTERNAL_DISABLED' });
+  if (!timingSafeEqualStr(req.headers['x-internal-token'], process.env.INTERNAL_TOKEN)) {
+    return res.status(403).json({ error: 'Acces refuse', code: 'FORBIDDEN' });
+  }
+  res.json(await runSettlement(req.body?.cutoffDate));
+}));
+
+app.get('/live', (_req, res) => {
+  res.json({ status: 'alive', version: '2.6.0', uptime: process.uptime() });
+});
+
+app.get('/ready', asyncHandler(async (_req, res) => {
+  const dbOk = await require('./config/database').pool.query('SELECT 1').then(() => true).catch(() => false);
+  res.status(dbOk ? 200 : 503).json({
+    status: dbOk ? 'ready' : 'not_ready',
+    db: dbOk ? 'connected' : 'unreachable',
+  });
+}));
+
+app.get('/metrics', metricsHandler);
+
+// ─── PAY LINK PUBLIC — pages HTML (montées APRÈS les routes API et de santé, voir audit §3.1) ─────
 app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
   try {
     const { shortId } = req.params;
@@ -124,7 +463,7 @@ app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
     const link = r.rows[0];
     const amt  = parseFloat(link.amount).toLocaleString('fr-FR');
     return res.send(`
-      <!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><title>Paiement ${amt} ${link.currency}</title>
+      <!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><title>Paiement ${esc(amt)} ${esc(link.currency)}</title>
       <meta name="viewport" content="width=device-width,initial-scale=1"/>
       <style>
         *{box-sizing:border-box;margin:0;padding:0}
@@ -154,10 +493,10 @@ app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
       <body>
       <div class="card">
         <div class="logo"><img src="https://app.c-pay.global/logo-calculus.png" alt="C-Pay" onerror="this.style.display='none'"/></div>
-        <div class="merchant">${link.business_name}</div>
-        <div class="amount">${amt}</div>
-        <div class="currency">${link.currency}</div>
-        ${link.description ? `<div class="desc">${link.description}</div>` : ''}
+        <div class="merchant">${esc(link.business_name)}</div>
+        <div class="amount">${esc(amt)}</div>
+        <div class="currency">${esc(link.currency)}</div>
+        ${link.description ? `<div class="desc">${esc(link.description)}</div>` : ''}
 
 
         <div id="payForm">
@@ -176,7 +515,7 @@ app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
           </div>
           <input id="cardName" class="inp" type="text" placeholder="Nom sur la carte" />
           <div id="errMsg" class="error-msg" style="display:none"></div>
-          <button class="btn" onclick="payCard()">💳 Payer ${amt} ${link.currency}</button>
+          <button class="btn" onclick="payCard()">💳 Payer ${esc(amt)} ${esc(link.currency)}</button>
           ` : `
           <div class="methods">
             <div class="method active" id="mtn" onclick="selectMethod('mtn')">
@@ -190,7 +529,7 @@ app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
           </div>
           <input id="phone" class="inp" type="tel" placeholder="+242XXXXXXXXX — Numéro Mobile Money" />
           <div id="errMsg" class="error-msg" style="display:none"></div>
-          <button class="btn" id="payBtn" onclick="pay()">💸 Payer ${amt} ${link.currency}</button>
+          <button class="btn" id="payBtn" onclick="pay()">💸 Payer ${esc(amt)} ${esc(link.currency)}</button>
           `}
         </div>
 
@@ -220,7 +559,7 @@ app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
           if (!phone) { err.textContent = 'Numéro de téléphone requis'; err.style.display = 'block'; return; }
           btn.disabled = true; btn.textContent = 'Traitement en cours…';
           try {
-            const r = await fetch('/api/v1/pay/${shortId}', {
+            const r = await fetch('/api/v1/pay/${esc(shortId)}', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ phone, method })
@@ -232,11 +571,11 @@ app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
               document.getElementById('txnRef').textContent = d.txnId || '—';
             } else {
               err.textContent = d.error || 'Erreur de paiement'; err.style.display = 'block';
-              btn.disabled = false; btn.textContent = 'Payer ${amt} ${link.currency}';
+              btn.disabled = false; btn.textContent = 'Payer ${esc(amt)} ${esc(link.currency)}';
             }
           } catch(e) {
             err.textContent = 'Erreur réseau'; err.style.display = 'block';
-            btn.disabled = false; btn.textContent = 'Payer ${amt} ${link.currency}';
+            btn.disabled = false; btn.textContent = 'Payer ${esc(amt)} ${esc(link.currency)}';
           }
         }
       </script>
@@ -272,7 +611,7 @@ app.get('/:shortId', async (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Paiement — ${link.business_name}</title>
+  <title>Paiement — ${esc(link.business_name)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Century Gothic', Arial, sans-serif; background: #f0f4f8; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -301,9 +640,9 @@ app.get('/:shortId', async (req, res) => {
       <h2>⚡ Calculus Plus</h2>
       <p style="font-size:12px;color:#5a6677">Paiement sécurisé</p>
     </div>
-    <div class="amount">${amount} ${link.currency}</div>
-    <div class="merchant">🏪 ${link.business_name}</div>
-    ${link.description ? `<div class="desc">${link.description}</div>` : ''}
+    <div class="amount">${esc(amount)} ${esc(link.currency)}</div>
+    <div class="merchant">🏪 ${esc(link.business_name)}</div>
+    ${link.description ? `<div class="desc">${esc(link.description)}</div>` : ''}
 
     ${paid ? `
     <div class="result">
@@ -333,7 +672,7 @@ app.get('/:shortId', async (req, res) => {
         ${link.psp === 'mtn' ? '<option value="mtn">MTN MoMo</option>' : '<option value="airtel">Airtel Money</option>'}
       </select>
       <input id="phone" type="tel" placeholder="Numéro ex: 06XXXXXXXX" />
-      <button class="btn btn-momo" onclick="payMomo()">💸 Payer ${amount} ${link.currency}</button>
+      <button class="btn btn-momo" onclick="payMomo()">💸 Payer ${esc(amount)} ${esc(link.currency)}</button>
     </div>` : `
     <div class="form">
       <div style="text-align:center;margin-bottom:16px">
@@ -349,7 +688,7 @@ app.get('/:shortId', async (req, res) => {
         <input id="cvv" type="password" placeholder="CVV" maxlength="4" />
       </div>
       <input id="cardName" type="text" placeholder="Nom sur la carte" />
-      <button class="btn" onclick="payCard()">💳 Payer ${amount} ${link.currency}</button>
+      <button class="btn" onclick="payCard()">💳 Payer ${esc(amount)} ${esc(link.currency)}</button>
     </div>`}
 
     <div id="result" style="display:none" class="result">
@@ -363,7 +702,7 @@ app.get('/:shortId', async (req, res) => {
   </div>
 
   <script>
-    const shortId = '${shortId}';
+    const shortId = '${esc(shortId)}';
     // Formulaire direct selon PSP choisi par le merchant
 
     function showResult(icon, title, msg, color) {
@@ -430,318 +769,6 @@ app.get('/:shortId', async (req, res) => {
   }
 });
 
-app.post('/api/v1/pay/:shortId', async (req, res) => {
-  const { phone, method } = req.body;
-  const { shortId } = req.params;
-  try {
-    const r = await require('./config/database').query(
-      `SELECT * FROM pay_links WHERE short_id=$1 AND status='pending' AND expires_at>NOW()`,
-      [shortId]
-    );
-    if (!r.rows.length) return res.status(404).json({ error: 'Lien invalide ou expiré' });
-    const link = r.rows[0];
-    // Traiter via orchestrateur
-    const result = await require('./services/orchestration/orchestrator').processTransaction({
-      merchantId:    link.merchant_id,
-      type:          'collect',
-      amount:        link.amount,
-      customerPhone: phone,
-      description:   link.description || 'Paiement C-Pay',
-      payLinkId:     link.pay_link_id,
-    });
-    if (result.success) {
-      await require('./config/database').query(
-        `UPDATE pay_links SET status='paid', paid_at=NOW(), paid_amount=$1 WHERE pay_link_id=$2`,
-        [link.amount, link.pay_link_id]
-      );
-    }
-    res.json({ success: result.success, txnId: result.txnId, message: result.message });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Swagger UI ───────────────────────────────────────────────────
-const swaggerUi = require('swagger-ui-express');
-const swaggerSpec = require('./swagger');
-app.use('/api/v1/docs', swaggerUi.serve);
-app.get('/api/v1/docs/', swaggerUi.setup(swaggerSpec, {
-  customCss: '.swagger-ui .topbar { background: #1d4f92; }',
-  customSiteTitle: 'CPlus API Documentation',
-  swaggerOptions: {
-    url: '/api/v1/docs.json',
-    persistAuthorization: true,
-    displayRequestDuration: true,
-    filter: true,
-    tryItOutEnabled: true,
-    defaultModelsExpandDepth: 1,
-    defaultModelExpandDepth: 1,
-  }
-}));
-app.get('/api/v1/docs.json', (req, res) => { res.json(swaggerSpec); });
-
-// Route upgrade compte développeur → merchant production
-app.post('/api/v1/developer/upgrade', async (req, res) => {
-  const { email, businessName, phone, country, rccm, nif } = req.body;
-  if (!email || !businessName) return res.status(422).json({error:'email et businessName requis'});
-  try {
-    const { query } = require('./config/database');
-    // Vérifier si compte développeur existe
-    const dev = await query(
-      `SELECT * FROM admin_notifications WHERE type='developer_registration' AND message LIKE $1 LIMIT 1`,
-      [`%${email}%`]
-    );
-    if (!dev.rows.length) return res.status(404).json({error:'Compte développeur introuvable'});
-
-    // Notifier l'admin pour validation manuelle
-    await query(
-      `INSERT INTO admin_notifications (type, title, message, metadata)
-       VALUES ('developer_upgrade_request', 'Demande upgrade Développeur → Merchant', $1, $2)`,
-      [`${email} demande un accès production pour: ${businessName}`,
-       JSON.stringify({ email, businessName, phone, country, rccm, nif })]
-    );
-    res.json({ success: true, message: 'Demande reçue — notre équipe validera votre compte production sous 48h.' });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-app.post('/api/v1/developer/register', async (req, res) => {
-  const { name, email, phone, appName, integrationType, country } = req.body;
-  if (!name || !email || !phone || !appName) return res.status(422).json({error:'Champs requis'});
-  try {
-    const { query } = require('./config/database');
-    await query(
-      `INSERT INTO admin_notifications (type, title, message, metadata)
-       VALUES ('developer_registration', 'Nouveau développeur inscrit', $1, $2)`,
-      [`${name} (${email}) — App: ${appName} — Pays: ${country||'CG'}`,
-       JSON.stringify({ name, email, phone, appName, integrationType, country })]
-    );
-    res.json({ success: true, message: 'Compte sandbox en cours de création — credentials par email sous 24h.' });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-app.use('/api/v1/partners', require('./routes/partners.routes'));
-// ─── CONSENTEMENTS ────────────────────────────────────────────────
-app.get('/api/v1/consent/check', async (req, res) => {
-  const { userId, userType, portal } = req.query;
-  if (!userId || !userType || !portal) return res.status(422).json({error:'userId, userType et portal requis'});
-  try {
-    const { query } = require('./config/database');
-    const r = await query(`SELECT * FROM consents WHERE user_id=$1 AND user_type=$2 AND portal=$3`, [userId, userType, portal]);
-    res.json({ hasConsented: r.rows.length > 0, consent: r.rows[0] || null });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-app.post('/api/v1/consent/accept', async (req, res) => {
-  const { userId, userType, portal, cguAccepted, privacyAccepted, contractAccepted } = req.body;
-  if (!userId || !userType || !portal) return res.status(422).json({error:'Champs requis manquants'});
-  try {
-    const { query } = require('./config/database');
-    await query(`INSERT INTO consents (user_id, user_type, portal, cgu_accepted, privacy_accepted, contract_accepted, ip_address, user_agent)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-      ON CONFLICT (user_id, user_type, portal)
-      DO UPDATE SET cgu_accepted=$4, privacy_accepted=$5, contract_accepted=$6, accepted_at=NOW()`,
-      [userId, userType, portal, cguAccepted||false, privacyAccepted||false, contractAccepted||false,
-       req.ip, req.headers['user-agent']||'']
-    );
-    res.json({success:true});
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-app.use('/api/v1/admin', adminRoutes);
-app.use('/api/v1/merchant', merchantRoutes);
-app.use('/api/v1/cardholder', cardholderRoutes);
-app.use('/api/v1/cardholder/gtp', gtpCardRoutes);
-app.use('/api/v1/momo', mtnMomoRoutes);
-app.use('/api/v1', card2momoRoutes);
-// Webhooks Mobile Money
-const { handleMtnWebhook, handleAirtelWebhook, handleCyberSourceWebhook, handleMigsWebhook } = require('./routes/webhook-handlers');
-app.post('/api/v1/webhooks/mtn',         handleMtnWebhook);
-app.post('/api/v1/webhooks/airtel',      handleAirtelWebhook);
-app.post('/api/v1/webhooks/cybersource', handleCyberSourceWebhook);
-app.post('/api/v1/webhooks/migs',        handleMigsWebhook);
-app.use('/api/v1/rails', railsRoutes);
-
-// ─── Reset mot de passe ───────────────────────────────────────────
-app.use('/api/v1/cardholder', cardholderResetRouter);
-app.use('/api/v1/merchant',   merchantResetRouter);
-
-// ─── Réclamations & Incidents ─────────────────────────────────────
-app.use('/api/v1/cardholder', claimsChRouter);
-app.use('/api/v1/admin',      claimsAdminRouter);
-
-// ─── Distribution ─────────────────────────────────────────────────
-app.use('/api/v1/admin/distribution', distAdminRouter);
-app.use('/api/v1/bank',               bankRouter);
-app.use('/api/v1/agency',             agencyRouter);
-app.use('/api/v1/agent',              agentPortalRouter);
-
-app.post('/api/v1/collect', merchantAuth, validatePaymentRequest, idempotency, asyncHandler(async (req, res) => {
-  const { amount, customerPhone, emvPayload, aidDetected, description, deviceId } = req.body;
-  const result = await orchestrator.processTransaction({
-    merchantId: req.user.merchantId,
-    type: 'collect',
-    amount,
-    customerPhone,
-    emvPayload,
-    aidDetected,
-    description,
-    deviceId,
-  });
-
-  res.status(result.success ? 200 : 402).json({
-    success: result.success,
-    txnId: result.txnId,
-    message: result.message,
-    amount: result.amount,
-    currency: result.currency,
-    authCode: result.authCode,
-    error: result.error || null,
-  });
-}));
-
-app.post('/api/v1/payout', merchantAuth, validatePaymentRequest, idempotency, asyncHandler(async (req, res) => {
-  const { amount, customerPhone, emvPayload, aidDetected, description, deviceId } = req.body;
-  const result = await orchestrator.processTransaction({
-    merchantId: req.user.merchantId,
-    type: 'payout',
-    amount,
-    customerPhone,
-    emvPayload,
-    aidDetected,
-    description,
-    deviceId,
-  });
-
-  res.status(result.success ? 200 : 402).json({
-    success: result.success,
-    txnId: result.txnId,
-    message: result.message,
-    amount: result.amount,
-    currency: result.currency,
-    error: result.error || null,
-  });
-}));
-
-app.post('/api/v1/qr-code', merchantAuth, validateLinkRequest, idempotency, asyncHandler(async (req, res) => {
-  const { amount, description } = req.body;
-  const { query } = require('./config/database');
-  const merchant = await query('SELECT currency FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
-  const result = await orchestrator.generateQRPayload({
-    merchantId: req.user.merchantId,
-    amount,
-    currency: merchant.rows[0]?.currency || 'XOF',
-    description,
-  });
-  res.json(result);
-}));
-
-app.post('/api/v1/pay-link', merchantAuth, validateLinkRequest, idempotency, asyncHandler(async (req, res) => {
-  const { amount, description } = req.body;
-  const { query } = require('./config/database');
-  const merchant = await query('SELECT currency FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
-  const result = await orchestrator.generatePayLink({
-    merchantId: req.user.merchantId,
-    amount,
-    currency: merchant.rows[0]?.currency || 'XOF',
-    description,
-  });
-  res.json(result);
-}));
-
-app.post('/api/v1/pay-link/:id/send', merchantAuth, validatePayLinkSendRequest, asyncHandler(async (req, res) => {
-  const { channel, phone } = req.body;
-  const { query } = require('./config/database');
-  const result = await query(
-    `SELECT pay_link_id, short_id, amount, currency, description, short_url
-     FROM pay_links
-     WHERE merchant_id = $1 AND (pay_link_id::text = $2 OR short_id = $2)
-     LIMIT 1`,
-    [req.user.merchantId, req.params.id]
-  );
-
-  if (!result.rows.length) {
-    return res.status(404).json({ error: 'Lien de paiement introuvable', code: 'PAY_LINK_NOT_FOUND' });
-  }
-
-  const link = result.rows[0];
-  const url = link.short_url || `${process.env.PAY_LINK_BASE_URL || 'https://pay.c-pay.global'}/${link.short_id}`;
-  const text = `Paiement ${link.description || ''} ${link.amount} ${link.currency}: ${url}`.replace(/\s+/g, ' ').trim();
-  const providerResult = channel === 'whatsapp'
-    ? await sendWhatsAppText({ to: phone, text })
-    : await sendSmsSmpp({ to: phone, text });
-
-  res.json({ success: true, channel, linkId: link.pay_link_id, providerResult });
-}));
-
-app.post('/api/v1/webhooks/paymenthub', asyncHandler(async (req, res) => {
-  if (process.env.PAYMENTHUB_WEBHOOK_TOKEN && req.headers['x-paymenthub-token'] !== process.env.PAYMENTHUB_WEBHOOK_TOKEN) {
-    return res.status(401).json({ error: 'Webhook token invalide', code: 'INVALID_WEBHOOK_TOKEN' });
-  }
-
-  const payload = req.body?.data || req.body;
-  const operation = payload?.operations?.[0] || {};
-  const reference = operation.reference || payload?.reference;
-  if (!reference) return res.status(422).json({ error: 'reference manquante', code: 'REFERENCE_REQUIRED' });
-
-  const status = operation.status || payload?.status;
-  const normalized = String(status || '').toLowerCase();
-  const mappedStatus = ['completed', 'success', 'successful'].includes(normalized)
-    ? 'authorized'
-    : ['failed', 'rejected', 'cancelled'].includes(normalized)
-      ? 'failed'
-      : 'pending';
-
-  const { query } = require('./config/database');
-  const updated = await query(
-    `UPDATE transactions SET
-       status = $1,
-       gateway_payment_id = COALESCE($2, gateway_payment_id),
-       gateway_name = COALESCE(gateway_name, 'paymenthub'),
-       response_code = CASE WHEN $1 = 'authorized' THEN '00' ELSE response_code END,
-       response_message = COALESCE($3, response_message),
-       completed_at = CASE WHEN $1 = 'authorized' THEN NOW() ELSE completed_at END
-     WHERE transaction_id = $4::uuid
-     RETURNING transaction_id, merchant_id`,
-    [mappedStatus, payload?.id || operation.id || null, status || null, reference]
-  );
-
-  if (updated.rows.length) {
-    await query(
-      `INSERT INTO transaction_events (transaction_id, merchant_id, event_type, payload)
-       VALUES ($1,$2,'PAYMENTHUB_CALLBACK',$3)`,
-      [updated.rows[0].transaction_id, updated.rows[0].merchant_id, JSON.stringify(req.body)]
-    );
-  }
-
-  res.json({ success: true, updated: updated.rows.length, status: mappedStatus });
-}));
-
-app.post('/api/v1/detect/phone', (req, res) => {
-  const { phone } = req.body;
-  if (!phone) return res.status(400).json({ error: 'phone requis', code: 'PHONE_REQUIRED' });
-  res.json(detectFromPhone(phone));
-});
-
-app.post('/internal/settlement/run', asyncHandler(async (req, res) => {
-  if (req.headers['x-internal-token'] !== process.env.INTERNAL_TOKEN) {
-    return res.status(403).json({ error: 'Acces refuse', code: 'FORBIDDEN' });
-  }
-  res.json(await runSettlement());
-}));
-
-app.get('/live', (_req, res) => {
-  res.json({ status: 'alive', version: '2.6.0', uptime: process.uptime() });
-});
-
-app.get('/ready', asyncHandler(async (_req, res) => {
-  const dbOk = await require('./config/database').pool.query('SELECT 1').then(() => true).catch(() => false);
-  res.status(dbOk ? 200 : 503).json({
-    status: dbOk ? 'ready' : 'not_ready',
-    db: dbOk ? 'connected' : 'unreachable',
-  });
-}));
-
-app.get('/metrics', metricsHandler);
 
 app.use(notFound);
 app.use(errorHandler(logger));
@@ -798,7 +825,5 @@ process.on('SIGINT', () => shutdown('SIGINT').catch((err) => {
 
 if (require.main === module) start();
 
-// REQ 10 : PCI Error Handler (doit être le dernier middleware)
-app.use(pciErrorHandler);
 
 module.exports = app;

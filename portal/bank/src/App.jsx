@@ -1,5 +1,5 @@
 // ================================================================
-// CPlus 2.6 — Portail Banque (bank.c-pay.global)
+// C-Pay 2.6 — Portail Banque (bank.c-pay.global)
 // ================================================================
 import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import axios from 'axios';
@@ -9,7 +9,27 @@ import { Toaster, toast } from 'react-hot-toast';
 const BASE = process.env.REACT_APP_API_BASE_URL || '';
 const api  = axios.create({ baseURL: `${BASE}/api/v1/bank` });
 api.interceptors.request.use(cfg => { const t = localStorage.getItem('bk_token'); if (t) cfg.headers.Authorization = `Bearer ${t}`; return cfg; });
-api.interceptors.response.use(r => r, e => { if (e.response?.status === 401) { localStorage.removeItem('bk_token'); window.location = '/login'; } return Promise.reject(e); });
+api.interceptors.response.use(r => r, e => {
+  const st = e.response?.status;
+  if (st === 401) {
+    // Purge complete (token ET utilisateur) : sinon AuthProvider relit bk_user,
+    // considere la session valide et renvoie sur '/' -> 401 -> boucle de redirection.
+    localStorage.removeItem('bk_token'); localStorage.removeItem('bk_user');
+    if (window.location.pathname !== '/login') window.location = '/login';
+  } else if (st === 403) {
+    toast.error('Accès refusé');
+  }
+  return Promise.reject(e);
+});
+
+// Session valide uniquement si le JWT n'est pas expire (base64url -> base64).
+const tokenValid = (t) => {
+  try {
+    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
+    return !!payload.exp && payload.exp * 1000 > Date.now();
+  } catch { return false; }
+};
 
 const FONT = "Inter, 'Century Gothic', 'URW Gothic', Jost, system-ui, sans-serif";
 const FONT_TITRE = "Jost, 'Century Gothic', 'URW Gothic', Questrial, system-ui, sans-serif";
@@ -20,7 +40,13 @@ const fmtNum = n => parseFloat(n||0).toLocaleString('fr-FR');
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
 const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('bk_user')||'null'); } catch { return null; } });
+  const [user, setUser] = useState(() => {
+    try {
+      const t = localStorage.getItem('bk_token');
+      if (!t || !tokenValid(t)) { localStorage.removeItem('bk_token'); localStorage.removeItem('bk_user'); return null; }
+      return JSON.parse(localStorage.getItem('bk_user') || 'null');
+    } catch { return null; }
+  });
   const login  = (token, u) => { localStorage.setItem('bk_token', token); localStorage.setItem('bk_user', JSON.stringify(u)); setUser(u); };
   const logout = () => { localStorage.removeItem('bk_token'); localStorage.removeItem('bk_user'); setUser(null); };
   return <AuthCtx.Provider value={{ user, login, logout, isAuth:!!user }}>{children}</AuthCtx.Provider>;
@@ -54,7 +80,7 @@ const Layout = ({ children }) => {
     <div style={{ display:'flex', minHeight:'100vh', background:BG, fontFamily:FONT }}>
       <aside style={{ width:220, background:BLUE, color:'#fff', display:'flex', flexDirection:'column', position:'fixed', top:0, bottom:0, zIndex:10 }}>
         <div style={{ padding:'20px 16px', borderBottom:'1px solid rgba(255,255,255,0.1)' }}>
-          <img src="/logo-calculus.png" alt="" style={{ height:36, marginBottom:8 }} onError={e=>e.target.style.display='none'} />
+          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height:36, marginBottom:8 }} onError={e=>e.target.style.display='none'} />
           <div style={{ fontSize:11, opacity:.7, fontFamily:FONT }}>Portail Banque</div>
           <div style={{ fontSize:13, fontWeight:700 }}>{user?.bank?.bankName}</div>
         </div>
@@ -88,13 +114,16 @@ const Login = () => {
       <div style={{ width:400 }}>
         <Box style={{ marginBottom:0 }}>
           <div style={{ textAlign:'center', marginBottom:24 }}>
-            <img src="/logo-calculus.png" alt="" style={{ height:48, marginBottom:12 }} onError={e=>e.target.style.display='none'} />
+            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height:48, marginBottom:12 }} onError={e=>e.target.style.display='none'} />
             <div style={{ fontSize:20, fontWeight:700, color:TEXT, fontFamily:FONT }}>Portail Banque</div>
             <div style={{ fontSize:13, color:MUTED }}>C-Pay Distribution Network</div>
           </div>
+          <form onSubmit={e => { e.preventDefault(); if (!loading) submit(); }}>
           <Inp label="Email" value={creds.email} onChange={v=>setCreds(c=>({...c,email:v}))} placeholder="admin@mabanque.com" />
-          <Inp label="Mot de passe" value={creds.password} onChange={v=>setCreds(c=>({...c,password:v}))} type="password" placeholder="••••••••" />
-          <Btn onClick={submit} disabled={loading} style={{ width:'100%', marginTop:8 }}>{loading?'Connexion…':'Se connecter'}</Btn>
+          <Inp label="Mot de passe" value={creds.password} onChange={v=>setCreds(c=>({...c,password:v}))} type="password" placeholder="••••••••" autoComplete="current-password" required />
+          <Btn disabled={loading} style={{ width:'100%', marginTop:8 }}>{loading?'Connexion…':'Se connecter'}</Btn>
+          </form>
+          <div style={{ textAlign:'center', marginTop:16, fontSize:11, color:MUTED, fontFamily:FONT }}>C-Pay est un produit de Calculus Plus SAS</div>
         </Box>
       </div>
     </div>

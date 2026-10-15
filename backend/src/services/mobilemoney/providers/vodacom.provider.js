@@ -37,14 +37,25 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       'Origin':        config.origin || 'https://api.c-pay.global' }
   );
 
-  const ok = r.body?.output_ResponseCode === 'INS-0';
+  // INS-0 a l'initiate = requete ACCEPTEE par M-Pesa (push envoye), pas un debit confirme.
+  // success:true uniquement si la reponse indique explicitement une completion ;
+  // sinon pending:true (callback / reconciliation finalisent).
+  const accepted  = r.body?.output_ResponseCode === 'INS-0';
+  const completed = accepted && isFinalSuccess(r.body);
   return {
-    success:              ok,
+    success:              completed,
+    pending:              accepted && !completed,
     transactionId:        r.body?.output_TransactionID,
     conversationId:       r.body?.output_ConversationID,
-    errorMessage:         ok ? null : (r.body?.output_ResponseDesc || 'M-Pesa failed'),
+    errorMessage:         accepted ? null : (r.body?.output_ResponseDesc || 'M-Pesa failed'),
     retryable:            ['INS-1', 'INS-9', 'INS-10'].includes(r.body?.output_ResponseCode),
   };
+};
+
+// Indicateur explicite de completion dans la reponse M-Pesa (statut de transaction final).
+const isFinalSuccess = (body) => {
+  const st = String(body?.output_TransactionStatus || body?.output_Status || body?.transactionStatus || '').toUpperCase();
+  return ['COMPLETED', 'COMPLETE', 'SUCCESS', 'SUCCESSFUL', 'TS'].includes(st);
 };
 
 const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
@@ -65,9 +76,13 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json',
       'Origin': config.origin || 'https://api.c-pay.global' }
   );
+  const accepted  = r.body?.output_ResponseCode === 'INS-0';
+  const completed = accepted && isFinalSuccess(r.body);
   return {
-    success:       r.body?.output_ResponseCode === 'INS-0',
+    success:       completed,
+    pending:       accepted && !completed,
     transactionId: r.body?.output_TransactionID,
+    errorMessage:  accepted ? null : (r.body?.output_ResponseDesc || 'M-Pesa payout failed'),
   };
 };
 

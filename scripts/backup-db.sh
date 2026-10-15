@@ -1,51 +1,41 @@
 #!/usr/bin/env bash
 # ================================================================
-# Backup PostgreSQL — CPlus OVH
-# Usage: ./scripts/backup-db.sh [--label <label>] [--restore <file>]
+# Sauvegarde PostgreSQL — C-Pay (base managée OVH Cloud DB ou locale)
+#   ./scripts/backup-db.sh [--label <label>]
+# Lit DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD (+ DB_SSL) dans backend/.env.
+# Exige pg_dump (apt install postgresql-client). Exporte en .sql.gz, rétention 30 j,
+# et copie optionnelle hors serveur via BACKUP_REMOTE (rclone, ex. "ovh-s3:cpay-backups").
 # ================================================================
 set -euo pipefail
+umask 077
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/cplus}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/cpay}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LABEL=""
+[ "${1:-}" = "--label" ] && LABEL="_${2:-manual}"
 
-for i in "$@"; do
-  case $i in
-    --label) LABEL="_${2}"; shift 2 ;;
-    --restore) RESTORE_FILE="${2}"; shift 2 ;;
-  esac
-done
+if [ -f "$ROOT/backend/.env" ]; then
+  set -a; # shellcheck disable=SC1091
+  . "$ROOT/backend/.env"; set +a
+fi
+: "${DB_HOST:?DB_HOST manquant}" "${DB_NAME:?DB_NAME manquant}" "${DB_USER:?DB_USER manquant}" "${DB_PASSWORD:?DB_PASSWORD manquant}"
+command -v pg_dump >/dev/null || { echo "pg_dump absent : apt install postgresql-client" >&2; exit 1; }
 
-# ─── Restore mode ─────────────────────────────────────────────────
-if [ -n "${RESTORE_FILE:-}" ]; then
-  echo "RESTORE: $RESTORE_FILE"
-  [ -f "$RESTORE_FILE" ] || { echo "Fichier introuvable: $RESTORE_FILE" >&2; exit 1; }
-  source "$ROOT/backend/.env" 2>/dev/null || true
-  gunzip -c "$RESTORE_FILE" | docker exec -i cplus-postgres psql \
-    -U "${DB_USER:-cplus_user}" -d "${DB_NAME:-cplus_db}"
-  echo "Restore terminé"
-  exit 0
+mkdir -p "$BACKUP_DIR"
+FILE="$BACKUP_DIR/cpay_${DB_NAME}_$(date +%Y%m%d_%H%M%S)${LABEL}.sql.gz"
+export PGPASSWORD="$DB_PASSWORD"
+[ "${DB_SSL:-false}" = "true" ] && export PGSSLMODE="${PGSSLMODE:-require}"
+
+echo "Sauvegarde $DB_NAME@$DB_HOST → $FILE"
+pg_dump -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" -d "$DB_NAME" --no-owner --no-acl | gzip -9 > "$FILE"
+unset PGPASSWORD
+gzip -t "$FILE"
+echo "OK — $(du -sh "$FILE" | cut -f1)"
+
+if [ -n "${BACKUP_REMOTE:-}" ] && command -v rclone >/dev/null; then
+  rclone copy "$FILE" "$BACKUP_REMOTE/" && echo "Copie distante OK ($BACKUP_REMOTE)"
 fi
 
-# ─── Backup ───────────────────────────────────────────────────────
-mkdir -p "$BACKUP_DIR"
-source "$ROOT/backend/.env" 2>/dev/null || true
-
-FILENAME="$BACKUP_DIR/cplus_${TIMESTAMP}${LABEL}.sql.gz"
-
-echo "Backup PostgreSQL → $FILENAME"
-docker exec cplus-postgres pg_dump \
-  -U "${DB_USER:-cplus_user}" \
-  -d "${DB_NAME:-cplus_db}" \
-  --no-owner --no-acl \
-  | gzip > "$FILENAME"
-
-SIZE=$(du -sh "$FILENAME" | cut -f1)
-echo "Backup OK — $SIZE"
-
-# Nettoyage des anciens backups
-find "$BACKUP_DIR" -name "cplus_*.sql.gz" -mtime "+$RETENTION_DAYS" -delete
-COUNT=$(find "$BACKUP_DIR" -name "cplus_*.sql.gz" | wc -l)
-echo "$COUNT backup(s) conservé(s) ($RETENTION_DAYS jours de rétention)"
+find "$BACKUP_DIR" -name "cpay_*.sql.gz" -mtime "+$RETENTION_DAYS" -delete
+echo "$(find "$BACKUP_DIR" -name 'cpay_*.sql.gz' | wc -l) sauvegarde(s) conservée(s), rétention $RETENTION_DAYS j"

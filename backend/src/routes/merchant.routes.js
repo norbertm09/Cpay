@@ -9,7 +9,7 @@ const express = require('express');
 const router  = express.Router();
 const bcrypt  = require('bcryptjs');
 const crypto  = require('crypto');
-const { query } = require('../config/database');
+const { query, withTransaction } = require('../config/database');
 
 // === Regles metier CPay (velocite, limites, frais) ===
 const OPERATOR_LIMITS = { airtel: 1000000, mtn: 1000000 };
@@ -158,14 +158,173 @@ function scheduleAirtelPolling(transactionId, airtelTxId) {
     }
   }, 30000);
 }
-const { merchantAuth, signToken, signRefreshToken, rotateRefreshToken, revokeRefreshToken, setRefreshCookie, clearRefreshCookie, readRefreshToken } = require('../middleware/auth');
+// WAVE-2 : module d'auth unique (audit §1.1) — aucun jwt.sign/verify local
+const {
+  merchantAuth, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
+  readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
+} = require('../middleware/auth');
 const logger  = require('../config/logger');
-const { detectFromPhone } = require('../services/detection/detection.engine');
+const { detectFromPhone, normalizePhone } = require('../services/detection/detection.engine');
 const { assignMerchantCountryDefaults } = require('../services/config/country-defaults');
 const ticketing = require('../services/support/ticketing.service');
 const integrations = require('../services/integrations/integration.service');
 const tokenVault = require('../services/tokenization/token-vault.service');
 const pilotControl = require('../services/pilot/pilot-control.service');
+const { idempotency } = require('../middleware/idempotency');
+const rateLimit = require('express-rate-limit');
+
+// ═══════════════════════════════════════════════════════════════════
+// HOTFIX WAVE-1 (audit prod 2.6.0) — helpers partages
+// ═══════════════════════════════════════════════════════════════════
+
+// Endpoints qui creaient de la valeur sans mouvement reel d'argent : desactives
+// (410 Gone) jusqu'a l'integration operateur. Aucune ecriture en base.
+const FEATURE_DISABLED_BODY = Object.freeze({
+  error: 'Fonctionnalité désactivée en attendant l’intégration opérateur',
+  code: 'FEATURE_DISABLED',
+});
+const featureDisabled = (res) => res.status(410).json(FEATURE_DISABLED_BODY);
+
+// Pagination bornee : page >= 1, 1 <= limit <= 100 (audit §3.12)
+const parsePagination = (q = {}, defaultLimit = 25) => {
+  let page = parseInt(q.page, 10);
+  if (!Number.isFinite(page) || page < 1) page = 1;
+  let limit = parseInt(q.limit, 10);
+  if (!Number.isFinite(limit)) limit = defaultLimit;
+  limit = Math.min(100, Math.max(1, limit));
+  return { page, limit, offset: (page - 1) * limit };
+};
+
+// Numero de telephone : E.164 strict (+ indicatif, 8 a 15 chiffres) via normalizePhone
+const E164_RE = /^\+[1-9]\d{7,14}$/;
+const toE164 = (phone) => {
+  if (phone === undefined || phone === null) return null;
+  const n = normalizePhone(String(phone));
+  return n && E164_RE.test(n) ? n : null;
+};
+
+// Rate limit des envois SMS/WhatsApp : 20 / heure / marchand (anti SMS pumping, audit §2.19)
+const smsLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => `sms:${req.user?.merchantId || req.user?.sub || 'anonymous'}`,
+  // la cle n'est pas l'IP : les validations liees a l'IP / au proxy ne s'appliquent pas
+  validate: { ip: false, trustProxy: false, xForwardedForHeader: false },
+  // POST /pay-links sans destinataire n'envoie rien : ne consomme pas le quota
+  skip: (req) => req.method === 'POST' && /^\/pay-links\/?$/.test(req.path) && !req.body?.recipientPhone,
+  handler: (req, res) => res.status(429).json({ error: 'Trop d’envois, reessayez plus tard (20/heure)', code: 'SMS_RATE_LIMITED' }),
+});
+
+// Pay links : shortId cryptographique + reprise sur collision (audit §3.11)
+const SHORT_ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const generateShortId = (len = 8) =>
+  Array.from({ length: len }, () => SHORT_ID_ALPHABET[crypto.randomInt(SHORT_ID_ALPHABET.length)]).join('');
+const withShortIdRetry = async (insertFn, attempts = 5) => {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    const shortId = generateShortId();
+    try { return await insertFn(shortId); }
+    catch (e) {
+      lastErr = e;
+      if (e.code !== '23505') throw e; // seule la violation d'unicite est rejouee
+    }
+  }
+  throw lastErr;
+};
+// expiresIn en heures : 1 h .. 30 j (720 h)
+const parseExpiresIn = (v, def = 24) => {
+  if (v === undefined || v === null || v === '') return def;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1 || n > 720) return null;
+  return n;
+};
+
+// Solde disponible — formule UNIQUE partagee par GET /balance et POST /transfer/payout :
+//   + encaissements 'collect' autorises non encore regles (net_amount)
+//   − merchant_transfers 'payout' non echoues (pending, processing, pending_settlement, completed)
+//   − transactions type='payout' (disburse app + retraits legacy) autorisees ou en cours
+// `exec` est soit `query`, soit `client.query` dans une transaction avec verrou.
+async function computeAvailableBalance(exec, merchantId) {
+  const r = await exec(
+    `SELECT
+       COALESCE(SUM(net_amount) FILTER (WHERE status='authorized' AND settlement_batch_id IS NULL), 0) AS collected,
+       COALESCE(SUM(net_amount) FILTER (WHERE status='pending'), 0) AS pending,
+       COUNT(*) FILTER (WHERE status='authorized') AS nb
+     FROM transactions WHERE merchant_id=$1 AND type='collect'`, [merchantId]);
+  const t = await exec(
+    `SELECT COALESCE(SUM(amount),0) AS withdrawn
+     FROM merchant_transfers
+     WHERE merchant_id=$1 AND direction='payout'
+       AND status NOT IN ('failed','cancelled','rejected')`, [merchantId]);
+  const p = await exec(
+    `SELECT COALESCE(SUM(amount),0) AS disbursed
+     FROM transactions
+     WHERE merchant_id=$1 AND type='payout' AND status IN ('authorized','pending')`, [merchantId]);
+  const collected = parseFloat(r.rows[0].collected) || 0;
+  const withdrawn = (parseFloat(t.rows[0].withdrawn) || 0) + (parseFloat(p.rows[0].disbursed) || 0);
+  return {
+    available: Math.max(0, collected - withdrawn),
+    pending: parseFloat(r.rows[0].pending) || 0,
+    totalCollected: collected,
+    totalWithdrawn: withdrawn,
+    transactionCount: parseInt(r.rows[0].nb, 10) || 0,
+  };
+}
+
+// Cles API : seul le SHA-256 est stocke (audit §2.9)
+const hashApiKey = (key) => crypto.createHash('sha256').update(String(key)).digest('hex');
+const apiKeyPrefix = (key) => String(key).slice(0, 12);
+const safeEqualHex = (a, b) => {
+  const ba = Buffer.from(String(a || ''), 'hex'), bb = Buffer.from(String(b || ''), 'hex');
+  return ba.length > 0 && ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// WAVE-2 — AUTH MARCHAND (sessions unifiees, 2FA, hygiene mots de passe)
+// ═══════════════════════════════════════════════════════════════════
+
+// Rate limits dedies (audit §2.19) — par IP, dans le routeur
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Trop d’inscriptions depuis cette adresse, réessayez plus tard', code: 'RATE_LIMITED' }),
+});
+const pairLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Trop de tentatives d’appairage, réessayez plus tard', code: 'RATE_LIMITED' }),
+});
+
+// Colonnes explicites : jamais password_hash / mfa_secret dans une reponse (audit §2.12)
+const MERCHANT_USER_COLS = `u.user_id, u.merchant_id, u.email, u.phone, u.first_name, u.last_name, u.role, u.is_active,
+              u.mfa_enabled, u.temp_password, u.failed_attempts, u.locked_until, u.last_login_at, u.created_at,
+              m.business_name, m.currency, m.kyb_level, m.merchant_status, m.country`;
+
+const merchantClaims = (user) => ({
+  type: 'merchant', merchantId: user.merchant_id, role: user.role,
+  businessName: user.business_name, country: user.country, currency: user.currency,
+});
+
+const merchantProfile = (user) => ({
+  userId: user.user_id, firstName: user.first_name, lastName: user.last_name,
+  email: user.email, role: user.role,
+  merchantId: user.merchant_id, businessName: user.business_name,
+  currency: user.currency, country: user.country, kybLevel: user.kyb_level,
+  mfaEnabled: !!user.mfa_enabled,
+});
+
+// Session complete apres authentification (login, 2FA validee, inscription).
+// refresh_token reste dans le JSON pour ne pas casser les portails non encore
+// migres vers le cookie — il sera retire en phase 3.
+const merchantSessionResponse = async ({ req, res, user, status = 200, extra = {} }) => {
+  const session = await issueSession({ actorType: 'merchant', actorId: user.user_id, claims: merchantClaims(user), req, res });
+  res.status(status).json({
+    ...session,
+    mustChangePassword: !!user.temp_password,
+    user: merchantProfile(user),
+    ...extra,
+  });
+};
 
 // ─── LOGIN MARCHAND ───────────────────────────────────────────────
 router.post('/auth/login', async (req, res) => {
@@ -174,8 +333,7 @@ router.post('/auth/login', async (req, res) => {
 
   try {
     const result = await query(
-      `SELECT u.*, m.merchant_id, m.business_name, m.currency, m.kyb_level,
-              m.merchant_status, m.country
+      `SELECT ${MERCHANT_USER_COLS}, u.password_hash, u.mfa_secret
        FROM merchant_users u
        JOIN merchants m ON u.merchant_id = m.merchant_id
        WHERE (u.email = $1 OR u.phone = $1) AND u.is_active = TRUE LIMIT 1`,
@@ -202,43 +360,60 @@ router.post('/auth/login', async (req, res) => {
       return res.status(403).json({ error: 'Compte suspendu — contactez le support', code: 'SUSPENDED' });
     }
 
+    // 2FA active : pas de session tant que le code TOTP n'est pas valide
+    // (POST /auth/2fa/validate). Le jeton MFA vaut 5 minutes.
+    if (user.mfa_enabled && user.mfa_secret) {
+      const mfaToken = signMfaToken({ actorType: 'merchant', sub: user.user_id });
+      return res.json({ mfaRequired: true, mfaToken });
+    }
+
     // NE PAS vérifier les APIs ici — juste l'utilisateur en DB
-    const accessToken  = signToken({
-      sub: user.user_id, merchantId: user.merchant_id,
-      role: user.role, type: 'merchant',
-      businessName: user.business_name, country: user.country, currency: user.currency,
-      // 12h -> 15m : un access token non revocable pendant 12h reste
-      // valide 12h apres la revocation du refresh, ce qui vide la
-      // revocation cote serveur de son sens.
-    }, '15m');
-    const refreshToken = await signRefreshToken({
-      subjectId: user.user_id,
-      actorType: 'merchant',
-      payload: { sub: user.user_id, type: 'merchant_refresh' },
-      expiresIn: '30d',
-    });
-
-    // Cookie HttpOnly : inaccessible au JavaScript, donc inexploitable par XSS.
-    // refresh_token reste dans le JSON pour ne pas casser les portails non
-    // encore migres — il sera retire en phase 3.
-    setRefreshCookie(res, { actorType: 'merchant', path: '/api/v1/merchant/auth', token: refreshToken });
-
-    res.json({
-      access_token: accessToken, refresh_token: refreshToken,
-      user: {
-        userId: user.user_id, firstName: user.first_name, lastName: user.last_name,
-        email: user.email, role: user.role,
-        merchantId: user.merchant_id, businessName: user.business_name,
-        currency: user.currency, country: user.country, kybLevel: user.kyb_level,
-      },
-    });
+    await merchantSessionResponse({ req, res, user });
   } catch (err) {
     logger.error('Merchant login error', { err: err.message });
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-router.post('/auth/register', async (req, res) => {
+// ─── 2FA : validation du code apres login (emet la session) ──────
+router.post('/auth/2fa/validate', async (req, res) => {
+  const { mfaToken, code } = req.body;
+  if (!mfaToken || !code) return res.status(422).json({ error: 'mfaToken et code requis' });
+  try {
+    let payload;
+    try { payload = verifyMfaToken(mfaToken, 'merchant'); }
+    catch (e) { return res.status(401).json({ error: e.message, code: e.code }); }
+
+    const r = await query(
+      `SELECT ${MERCHANT_USER_COLS}, u.mfa_secret
+       FROM merchant_users u JOIN merchants m ON u.merchant_id = m.merchant_id
+       WHERE u.user_id = $1 AND u.is_active = TRUE LIMIT 1`, [payload.sub]);
+    const user = r.rows[0];
+    if (!user) return res.status(401).json({ error: 'Utilisateur introuvable' });
+    if (user.merchant_status === 'suspended') return res.status(403).json({ error: 'Compte suspendu — contactez le support', code: 'SUSPENDED' });
+    if (!user.mfa_secret) return res.status(400).json({ error: '2FA non configuré' });
+    if (!verifyTotp(user.mfa_secret, code)) return res.status(401).json({ error: 'Code 2FA invalide', code: 'INVALID_TOTP' });
+
+    await merchantSessionResponse({ req, res, user });
+  } catch (err) {
+    logger.error('Merchant 2FA validate error', { err: err.message });
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ─── PROFIL (sans secrets) ────────────────────────────────────────
+router.get('/auth/me', merchantAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT ${MERCHANT_USER_COLS}
+       FROM merchant_users u JOIN merchants m ON u.merchant_id = m.merchant_id
+       WHERE u.user_id = $1 LIMIT 1`, [req.user.sub]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Utilisateur introuvable' });
+    res.json({ user: merchantProfile(r.rows[0]), mustChangePassword: !!r.rows[0].temp_password });
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.post('/auth/register', registerLimiter, async (req, res) => {
   const {
     businessName, rccm, nif, phone, email, password,
     settlementType = 'mobile_money', settlementAccount, settlementProvider,
@@ -293,37 +468,11 @@ router.post('/auth/register', async (req, res) => {
       return { merchant: merchantRow, user: user.rows[0], apiDefaults };
     });
 
-    const accessToken = signToken({
-      sub: created.user.user_id,
-      merchantId: created.merchant.merchant_id,
-      role: created.user.role,
-      type: 'merchant',
-      businessName: created.merchant.business_name,
-      country: created.merchant.country,
-      currency: created.merchant.currency,
-    }, '8h');
-    const refreshToken = await signRefreshToken({
-      subjectId: created.user.user_id,
-      actorType: 'merchant',
-      payload: { sub: created.user.user_id, type: 'merchant_refresh' },
-      expiresIn: '30d',
-    });
-
-    res.status(201).json({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      user: {
-        userId: created.user.user_id,
-        firstName: created.user.first_name,
-        email: created.user.email,
-        role: created.user.role,
-        merchantId: created.merchant.merchant_id,
-        businessName: created.merchant.business_name,
-        currency: created.merchant.currency,
-        country: created.merchant.country,
-        kybLevel: created.merchant.kyb_level,
-      },
-      apiDefaults: created.apiDefaults,
+    // Access 15 min (etait 8 h a l'inscription — audit §2.16), refresh en cookie
+    await merchantSessionResponse({
+      req, res, status: 201,
+      user: { ...created.user, ...created.merchant, temp_password: false },
+      extra: { apiDefaults: created.apiDefaults },
     });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email ou telephone deja utilise' });
@@ -338,40 +487,28 @@ router.post('/auth/refresh', async (req, res) => {
   if (!refreshToken) return res.status(422).json({ error: 'refreshToken requis' });
 
   try {
-    const tokens = await rotateRefreshToken({
-      token: refreshToken,
-      expectedType: 'merchant_refresh',
-      actorType: 'merchant',
-      buildAccessPayload: async (userId) => {
+    const tokens = await rotateRefresh({
+      actorType: 'merchant', token: refreshToken, req, res,
+      buildClaims: async ({ actorId }) => {
         const r = await query(
           `SELECT u.user_id, u.role, m.merchant_id, m.business_name, m.country, m.currency
            FROM merchant_users u JOIN merchants m ON u.merchant_id = m.merchant_id
            WHERE u.user_id = $1 AND u.is_active = TRUE AND m.merchant_status = 'active'`,
-          [userId]
+          [actorId]
         );
         if (!r.rows.length) throw new Error('Utilisateur introuvable');
-        const user = r.rows[0];
-        return {
-          sub: user.user_id,
-          merchantId: user.merchant_id,
-          role: user.role,
-          type: 'merchant',
-          businessName: user.business_name,
-          country: user.country,
-          currency: user.currency,
-        };
+        return merchantClaims(r.rows[0]);
       },
     });
-    setRefreshCookie(res, { actorType: 'merchant', path: '/api/v1/merchant/auth', token: tokens.refreshToken });
-    res.json({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken });
+    res.json({ access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_in: tokens.expires_in });
   } catch (err) {
-    res.status(err.statusCode || 401).json({ error: 'Refresh token invalide' });
+    res.status(err.statusCode || 401).json({ error: 'Refresh token invalide', code: err.code || 'INVALID_REFRESH' });
   }
 });
 
 router.post('/auth/logout', async (req, res) => {
   await revokeRefreshToken(readRefreshToken(req, 'merchant'));
-  clearRefreshCookie(res, { actorType: 'merchant', path: '/api/v1/merchant/auth' });
+  clearRefreshCookie(res, 'merchant');
   res.json({ success: true });
 });
 
@@ -425,8 +562,8 @@ router.put('/account', merchantAuth, async (req, res) => {
 
 // ─── HISTORIQUE TRANSACTIONS ──────────────────────────────────────
 router.get('/transactions', merchantAuth, async (req, res) => {
-  const { page = 1, limit = 25, status, type, dateFrom, dateTo, terminalId } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const { status, type, dateFrom, dateTo, terminalId } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 25);
   const params = [req.user.merchantId];
   let where = 'WHERE merchant_id = $1';
   if (status)     { params.push(status);     where += ` AND status = $${params.length}`; }
@@ -436,7 +573,7 @@ router.get('/transactions', merchantAuth, async (req, res) => {
   if (terminalId) { params.push(terminalId); where += ` AND device_id = $${params.length}`; }
   if (req.query.settlementStatus) { params.push(req.query.settlementStatus); where += ` AND settlement_status = $${params.length}`; }
 
-  params.push(parseInt(limit), offset);
+  params.push(limit, offset);
   const [data, count] = await Promise.all([
     query(
       `SELECT transaction_id, type, amount, currency, payment_method, status,
@@ -452,7 +589,7 @@ router.get('/transactions', merchantAuth, async (req, res) => {
 
   res.json({
     data: data.rows, total: parseInt(count.rows[0].count),
-    page: parseInt(page), pages: Math.ceil(count.rows[0].count / parseInt(limit)),
+    page, limit, pages: Math.ceil(count.rows[0].count / limit),
   });
 });
 
@@ -790,71 +927,84 @@ router.delete('/bank-accounts/:accountId', merchantAuth, async (req, res) => {
 });
 
 // ─── Retrait du solde marchand ───────────────────────────────────
-router.post('/transfer/payout', merchantAuth, async (req, res) => {
+// HOTFIX double depense (audit §2.7) : solde calcule DANS une transaction SQL,
+// sous verrou (FOR UPDATE sur la ligne marchand + advisory lock), ligne de
+// transfert inseree AVANT tout appel operateur, qui a lieu hors transaction.
+router.post('/transfer/payout', merchantAuth, idempotency, async (req, res) => {
   const mid = req.merchant?.merchantId || req.user?.merchantId;
   const { destType, accountId, operator, phone, amount, description } = req.body;
 
   if (['bank', 'wallet'].indexOf(destType) === -1)
     return res.status(422).json({ error: "destType: bank | wallet" });
-  if (!amount || parseFloat(amount) < 1000)
+  const amt = Number(amount);
+  if (!Number.isFinite(amt) || amt < 1000)
     return res.status(422).json({ error: 'Montant minimum 1000 XAF' });
+  if (destType === 'bank' && !accountId) return res.status(422).json({ error: 'accountId requis' });
+  if (destType === 'wallet' && (!phone || !operator))
+    return res.status(422).json({ error: 'operator et phone requis' });
+  const walletPhone = destType === 'wallet' ? String(phone).replace(/[^0-9]/g, '') : null;
+  if (destType === 'wallet' && walletPhone.length < 8)
+    return res.status(422).json({ error: 'phone invalide' });
 
-  const amt = parseFloat(amount);
   const fee = Math.round(amt * 0.01);
   const net = amt - fee;
-  const ref = 'PAY-' + Date.now().toString(36).toUpperCase();
+  const ref = 'PAY-' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(2).toString('hex').toUpperCase();
 
   let txnId = null;
+  let bankAcc = null;
 
   try {
-    // Verifier le solde disponible
-    const bal = await query(
-      `SELECT COALESCE(SUM(net_amount),0) AS solde
-       FROM transactions
-       WHERE merchant_id=$1 AND type='collect' AND status='authorized'
-         AND settlement_batch_id IS NULL`, [mid]);
-    const solde = parseFloat(bal.rows[0].solde || 0);
+    // 1) Reservation atomique des fonds
+    const reservation = await withTransaction(async (client) => {
+      const exec = (text, params) => client.query(text, params);
+      await exec('SELECT pg_advisory_xact_lock(hashtext($1))', [String(mid)]);
+      const m = await exec('SELECT merchant_id, merchant_status FROM merchants WHERE merchant_id=$1 FOR UPDATE', [mid]);
+      if (!m.rows.length) return { status: 404, body: { error: 'Marchand introuvable' } };
+      if (m.rows[0].merchant_status && m.rows[0].merchant_status !== 'active')
+        return { status: 403, body: { error: 'Compte marchand inactif', code: 'MERCHANT_INACTIVE' } };
 
-    if (solde < amt)
-      return res.status(422).json({
-        error: 'Solde insuffisant',
-        code: 'INSUFFICIENT_BALANCE',
-        available: solde,
-        requested: amt,
-      });
+      const bal = await computeAvailableBalance(exec, mid);
+      if (bal.available < amt) {
+        return { status: 422, body: {
+          error: 'Solde insuffisant',
+          code: 'INSUFFICIENT_BALANCE',
+          available: bal.available,
+          requested: amt,
+        } };
+      }
 
-    let bankAcc = null;
-    if (destType === 'bank') {
-      if (!accountId) return res.status(422).json({ error: 'accountId requis' });
-      const a = await query(
-        `SELECT ba.*, fi.name AS inst_name FROM bank_accounts ba
-         LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
-         WHERE ba.account_id=$1 AND ba.owner_id=$2 AND ba.status='verified'`,
-        [accountId, mid]);
-      if (!a.rows[0]) return res.status(404).json({ error: 'Compte bancaire introuvable' });
-      bankAcc = a.rows[0];
-    } else {
-      if (!phone || !operator)
-        return res.status(422).json({ error: 'operator et phone requis' });
-    }
+      if (destType === 'bank') {
+        const a = await exec(
+          `SELECT ba.*, fi.name AS inst_name FROM bank_accounts ba
+           LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
+           WHERE ba.account_id=$1 AND ba.owner_id=$2 AND ba.status='verified'`,
+          [accountId, mid]);
+        if (!a.rows[0]) return { status: 404, body: { error: 'Compte bancaire introuvable' } };
+        bankAcc = a.rows[0];
+      }
 
-    const t = await query(
-      `INSERT INTO merchant_transfers (merchant_id, direction, dest_type, bank_account_id,
-        wallet_operator, wallet_phone, amount, fee, net_amount, status, reference, description)
-       VALUES ($1,'payout',$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10)
-       RETURNING transfer_id`,
-      [mid, destType, destType === 'bank' ? accountId : null,
-       destType === 'wallet' ? operator : null,
-       destType === 'wallet' ? String(phone).replace(/[^0-9]/g, '') : null,
-       amt, fee, net, ref, description || 'Retrait']);
-    txnId = t.rows[0].transfer_id;
+      const t = await exec(
+        `INSERT INTO merchant_transfers (merchant_id, direction, dest_type, bank_account_id,
+          wallet_operator, wallet_phone, amount, fee, net_amount, status, reference, description)
+         VALUES ($1,'payout',$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10)
+         RETURNING transfer_id`,
+        [mid, destType, destType === 'bank' ? accountId : null,
+         destType === 'wallet' ? operator : null,
+         walletPhone,
+         amt, fee, net, ref, description || 'Retrait']);
+      return { transferId: t.rows[0].transfer_id };
+    });
 
+    if (reservation.status) return res.status(reservation.status).json(reservation.body);
+    txnId = reservation.transferId;
+
+    // 2) Appel operateur HORS transaction — la ligne 'pending' est deja comptee dans le solde
     // Vers un wallet : MTN Disbursement
     if (destType === 'wallet' && operator === 'mtn') {
       const mtn = require('../services/rails/mtn-momo.client');
       const d = await mtn.transfer({
         amount: net,
-        phone: String(phone).replace(/[^0-9]/g, ''),
+        phone: walletPhone,
         description: description || 'Retrait CPlus',
         externalId: ref,
       });
@@ -972,28 +1122,9 @@ router.get('/transfers', merchantAuth, async (req, res) => {
 router.get('/balance', merchantAuth, async (req, res) => {
   const mid = req.merchant?.merchantId || req.user?.merchantId;
   try {
-    const r = await query(
-      `SELECT
-         COALESCE(SUM(net_amount) FILTER (WHERE status='authorized' AND settlement_batch_id IS NULL), 0) AS disponible,
-         COALESCE(SUM(net_amount) FILTER (WHERE status='pending'), 0) AS en_attente,
-         COUNT(*) FILTER (WHERE status='authorized') AS nb_encaissements
-       FROM transactions WHERE merchant_id=$1 AND type='collect'`, [mid]);
-
-    const p = await query(
-      `SELECT COALESCE(SUM(amount),0) AS retire
-       FROM merchant_transfers
-       WHERE merchant_id=$1 AND status IN ('processing','completed')`, [mid]);
-
-    const dispo = parseFloat(r.rows[0].disponible) - parseFloat(p.rows[0].retire);
-
-    res.json({
-      available: Math.max(0, dispo),
-      pending: parseFloat(r.rows[0].en_attente),
-      totalCollected: parseFloat(r.rows[0].disponible),
-      totalWithdrawn: parseFloat(p.rows[0].retire),
-      transactionCount: parseInt(r.rows[0].nb_encaissements, 10),
-      currency: 'XAF',
-    });
+    // Meme formule que POST /transfer/payout (computeAvailableBalance)
+    const bal = await computeAvailableBalance(query, mid);
+    res.json({ ...bal, currency: 'XAF' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1017,7 +1148,8 @@ router.post('/terminals/check', async (req, res) => {
     res.status(500).json({ error: 'Erreur verification' });
   }
 });
-router.post('/terminals/pair', async (req, res) => {
+// WAVE-2 : 10 tentatives / 15 min / IP (code a 6 chiffres — audit §2.19)
+router.post('/terminals/pair', pairLimiter, async (req, res) => {
   const { pairingCode, androidId, deviceModel, appVersion } = req.body;
   if (!pairingCode || !androidId)
     return res.status(422).json({ error: 'pairingCode et androidId requis' });
@@ -1092,18 +1224,9 @@ router.get('/institutions', async (req, res) => {
 });
 
 
-// ─── Reconciliation manuelle des transactions pending ───
-router.post('/reconcile', merchantAuth, async (req, res) => {
-  try {
-    const { reconcilePending } = require('../services/reconcile.service');
-    const maxAgeHours = parseInt(req.body?.maxAgeHours || '24');
-    const r = await reconcilePending({ maxAgeHours, limit: 100 });
-    res.json(r.summary);
-  } catch (err) {
-    console.error('[reconcile]', err.message);
-    res.status(500).json({ error: 'Erreur reconciliation' });
-  }
-});
+// ─── Reconciliation manuelle : deplacee vers admin.routes.js (POST /admin/reconcile,
+//     requireRole super_admin|ops_admin). Un JWT marchand ne doit pas lancer une
+//     reconciliation globale (audit §2.18).
 
 
 // ─── Reglements groupes par journee ───
@@ -1181,15 +1304,12 @@ router.get('/config', merchantAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-module.exports = router;
-
 // ─── PAY LINKS (routes merchant) ─────────────────────────────────
 
 // Liste des pay links du marchand
 router.get('/pay-links', merchantAuth, async (req, res) => {
-  const { query } = require('../config/database');
-  const { page = 1, limit = 20, status } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const { status } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 20);
   try {
     const conditions = ['merchant_id = $1'];
     const params = [req.user.merchantId];
@@ -1200,31 +1320,37 @@ router.get('/pay-links', merchantAuth, async (req, res) => {
               recipient_phone, send_channel
        FROM pay_links WHERE ${conditions.join(' AND ')}
        ORDER BY created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*) FROM pay_links WHERE ${conditions.join(' AND ')}`, params);
-    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
+    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page, limit });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Créer un pay link
-router.post('/pay-links', merchantAuth, async (req, res) => {
+router.post('/pay-links', merchantAuth, smsLimiter, idempotency, async (req, res) => {
   const { v4: uuidv4 } = require('uuid');
-  const { query } = require('../config/database');
-  const { amount, description, expiresIn = 24, recipientPhone, channel = 'sms' } = req.body;
-  if (!amount || amount <= 0) return res.status(422).json({ error: 'Montant invalide' });
+  const { amount, description, channel = 'sms' } = req.body;
+  if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) return res.status(422).json({ error: 'Montant invalide' });
+  const expiresIn = parseExpiresIn(req.body.expiresIn, 24);
+  if (expiresIn === null) return res.status(422).json({ error: 'expiresIn invalide (1 a 720 heures)', code: 'INVALID_EXPIRES_IN' });
+  let recipientPhone = null;
+  if (req.body.recipientPhone) {
+    recipientPhone = toE164(req.body.recipientPhone);
+    if (!recipientPhone) return res.status(422).json({ error: 'recipientPhone invalide (format E.164 attendu, ex: +242061234567)', code: 'INVALID_PHONE' });
+  }
   try {
     const merchant = await query('SELECT currency FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
     const currency = merchant.rows[0]?.currency || 'XAF';
-    const shortId = Math.random().toString(36).substr(2, 8).toUpperCase();
-    const shortUrl = `${process.env.PAY_LINK_BASE_URL || 'https://pay.c-pay.global'}/${shortId}`;
     const expiresAt = new Date(Date.now() + expiresIn * 3600 * 1000);
-    const r = await query(
+    const baseUrl = process.env.PAY_LINK_BASE_URL || 'https://pay.c-pay.global';
+    const r = await withShortIdRetry((shortId) => query(
       `INSERT INTO pay_links (pay_link_id, merchant_id, short_id, amount, currency, description, short_url, expires_at, recipient_phone, send_channel, psp, payment_method, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending') RETURNING *`,
-      [uuidv4(), req.user.merchantId, shortId, amount, currency, description || null, shortUrl, expiresAt, recipientPhone || null, channel, req.body.psp || (req.body.payment_method==='mobile_money'?'momo':'cybersource'), req.body.payment_method || req.body.paymentMethod || 'card']
-    );
+      [uuidv4(), req.user.merchantId, shortId, amount, currency, description || null, `${baseUrl}/${shortId}`, expiresAt, recipientPhone, channel, req.body.psp || (req.body.payment_method==='mobile_money'?'momo':'cybersource'), req.body.payment_method || req.body.paymentMethod || 'card']
+    ));
     const link = r.rows[0];
+    const shortUrl = link.short_url;
     // Envoyer automatiquement si numéro fourni
     if (recipientPhone) {
       const text = `${description ? description + ' - ' : ''}Payez ${parseFloat(amount).toLocaleString()} ${currency} via: ${shortUrl}`;
@@ -1246,10 +1372,11 @@ router.post('/pay-links', merchantAuth, async (req, res) => {
 });
 
 // Envoyer un pay link existant
-router.post('/pay-links/:id/send', merchantAuth, async (req, res) => {
-  const { query } = require('../config/database');
-  const { phone, channel = 'sms' } = req.body;
-  if (!phone) return res.status(422).json({ error: 'phone requis' });
+router.post('/pay-links/:id/send', merchantAuth, smsLimiter, async (req, res) => {
+  const { channel = 'sms' } = req.body;
+  if (!req.body.phone) return res.status(422).json({ error: 'phone requis' });
+  const phone = toE164(req.body.phone);
+  if (!phone) return res.status(422).json({ error: 'phone invalide (format E.164 attendu, ex: +242061234567)', code: 'INVALID_PHONE' });
   try {
     const r = await query(
       `SELECT * FROM pay_links WHERE (pay_link_id::text=$1 OR short_id=$1) AND merchant_id=$2`,
@@ -1403,7 +1530,7 @@ router.patch('/support/tickets/:id/resolve', merchantAuth, async (req, res) => {
 
 // ─── PAIEMENT SANS CONTACT (NFC) ─────────────────────────────────
 // ─── MOBILE APP COLLECT (JWT Auth) ───────────────────────────────
-router.post('/collect', merchantAuth, async (req, res) => {
+router.post('/collect', merchantAuth, idempotency, async (req, res) => {
   const { amount, customerPhone, method, description, terminalId } = req.body;
   if (!amount || parseFloat(amount) < 1)
     return res.status(422).json({ error: 'Montant minimum 1 XAF' });
@@ -1640,7 +1767,7 @@ router.get('/collect/:txnId/status', merchantAuth, async (req, res) => {
 });
 
 // ─── MOBILE APP DISBURSE (JWT Auth) ──────────────────────────────
-router.post('/disburse', merchantAuth, async (req, res) => {
+router.post('/disburse', merchantAuth, idempotency, async (req, res) => {
   const { amount, recipientPhone, method, description } = req.body;
   if (!amount || parseFloat(amount) < 1)
     return res.status(422).json({ error: 'Montant minimum 1 XAF' });
@@ -1664,16 +1791,28 @@ router.post('/disburse', merchantAuth, async (req, res) => {
   let txnId = null;
 
   try {
-    const txn = await query(
-      `INSERT INTO transactions (
-        merchant_id, type, amount, currency, fee_amount, net_amount,
-        payment_method, status, detected_operator, gateway_name,
-        description, initiated_at
-      ) VALUES ($1,'payout',$2,'XAF',$3,$4,'mobile_money','pending',$5,$6,$7,NOW())
-      RETURNING transaction_id`,
-      [merchantId, amt, fee, total, operator, operator || 'unknown',
-       description || 'Decaissement mobile']);
-    txnId = txn.rows[0].transaction_id;
+    // Réservation atomique des fonds (même verrou et même formule que /transfer/payout) :
+    // la ligne 'pending' est insérée dans la transaction SQL, donc comptée par tout appel concurrent.
+    const reservation = await withTransaction(async (client) => {
+      const exec = (text, params) => client.query(text, params);
+      await exec('SELECT pg_advisory_xact_lock(hashtext($1))', [String(merchantId)]);
+      const bal = await computeAvailableBalance(exec, merchantId);
+      if (bal.available < total) {
+        return { status: 422, body: { error: 'Solde insuffisant', code: 'INSUFFICIENT_BALANCE', available: bal.available, requested: total } };
+      }
+      const txn = await exec(
+        `INSERT INTO transactions (
+          merchant_id, type, amount, currency, fee_amount, net_amount,
+          payment_method, status, detected_operator, gateway_name,
+          description, initiated_at
+        ) VALUES ($1,'payout',$2,'XAF',$3,$4,'mobile_money','pending',$5,$6,$7,NOW())
+        RETURNING transaction_id`,
+        [merchantId, amt, fee, total, operator, operator || 'unknown',
+         description || 'Decaissement mobile']);
+      return { txnId: txn.rows[0].transaction_id };
+    });
+    if (reservation.status) return res.status(reservation.status).json(reservation.body);
+    txnId = reservation.txnId;
 
     if (operator === 'mtn') {
       const mtn = require('../services/rails/mtn-momo.client');
@@ -1825,40 +1964,17 @@ router.get('/disburse/:txnId/status', merchantAuth, async (req, res) => {
 });
 
 // ─── WITHDRAW (retrait solde marchand vers Mobile Money) ─────────
-router.post('/withdraw', merchantAuth, async (req, res) => {
-  const { amount, phone, operator, description } = req.body;
-  if (!amount || parseFloat(amount) < 1000) return res.status(422).json({ error: 'Montant minimum 1000 XAF' });
-  if (!phone) return res.status(422).json({ error: 'phone requis' });
-  if (!operator) return res.status(422).json({ error: 'operator requis (mtn, airtel, orange, vodacom)' });
-  try {
-    const merchantId = req.merchant?.merchantId || req.user?.merchantId;
-    const bal = await query(
-      `SELECT COALESCE(SUM(net_amount),0) as balance FROM transactions
-       WHERE merchant_id=$1 AND type='collect' AND status='authorized'`, [merchantId]);
-    const available = parseFloat(bal.rows[0].balance);
-    if (parseFloat(amount) > available)
-      return res.status(422).json({ error: `Solde insuffisant (disponible: ${available} XAF)` });
-
-    const ref = 'WDR-' + Date.now().toString(36).toUpperCase();
-    const fee = Math.round(parseFloat(amount) * 0.01);
-    const net = parseFloat(amount) - fee;
-    const authCode = 'WDR' + Math.random().toString(36).slice(2,8).toUpperCase();
-    const txn = await query(
-      `INSERT INTO transactions (merchant_id, type, amount, currency, fee_amount, net_amount,
-        payment_method, status, auth_code, description, initiated_at)
-       VALUES ($1,'payout',$2,'XAF',$3,$4,'mobile_money','authorized',$5,$6,NOW())
-       RETURNING transaction_id`,
-      [merchantId, parseFloat(amount), fee, net, authCode, description || `Retrait ${ref}`]
-    );
-    res.json({ success:true, txnId: txn.rows[0].transaction_id, reference: ref,
-      authCode, amount: parseFloat(amount), fee, net, status:'authorized' });
-  } catch(err) { console.error('withdraw:', err.message); res.status(500).json({ error: err.message }); }
-});
+// HOTFIX (audit §2.6) : ce endpoint marquait un payout 'authorized' sans aucun
+// transfert operateur et sans deduire les retraits precedents (retraits illimites).
+// Desactive : 410 Gone, aucune ecriture. Utiliser POST /transfer/payout.
+router.post('/withdraw', merchantAuth, (req, res) => featureDisabled(res));
 
 // ─── RECEIPTS SMS ────────────────────────────────────────────────
-router.post('/receipts/sms', merchantAuth, async (req, res) => {
-  const { phone, txnId, amount, reference, type } = req.body;
-  if (!phone) return res.status(422).json({ error: 'phone requis' });
+router.post('/receipts/sms', merchantAuth, smsLimiter, async (req, res) => {
+  const { txnId, amount, reference, type } = req.body;
+  if (!req.body.phone) return res.status(422).json({ error: 'phone requis' });
+  const phone = toE164(req.body.phone);
+  if (!phone) return res.status(422).json({ error: 'phone invalide (format E.164 attendu, ex: +242061234567)', code: 'INVALID_PHONE' });
   try {
     const text = `CPlus - ${(type||'Transaction').toUpperCase()}\nMontant: ${amount} XAF\nRef: ${reference||txnId}\nMerci de votre confiance.\nc-pay.global`;
     try {
@@ -1872,125 +1988,74 @@ router.post('/receipts/sms', merchantAuth, async (req, res) => {
 });
 
 // ─── ACCOUNT CHANGE PASSWORD ─────────────────────────────────────
-router.post('/account/change-password', merchantAuth, async (req, res) => {
-  const bcrypt = require('bcryptjs');
+// WAVE-2 (audit §2.13, §2.15) : leve temp_password et revoque toutes les
+// sessions (refresh) du marchand ; l'access en cours expire sous 15 min.
+const changeMerchantPassword = async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(422).json({ error: 'currentPassword et newPassword requis' });
   if (newPassword.length < 8) return res.status(422).json({ error: 'Minimum 8 caracteres' });
   try {
-    const userId = req.merchant?.userId || req.user?.userId;
+    // Le JWT marchand porte l'identifiant utilisateur dans `sub` (audit §3.3)
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'Utilisateur non identifie' });
     const u = await query(`SELECT password_hash FROM merchant_users WHERE user_id=$1`, [userId]);
     if (!u.rows[0]) return res.status(404).json({ error: 'Utilisateur introuvable' });
     const ok = await bcrypt.compare(currentPassword, u.rows[0].password_hash);
     if (!ok) return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
-    const hash = await bcrypt.hash(newPassword, 10);
-    await query(`UPDATE merchant_users SET password_hash=$1, updated_at=NOW() WHERE user_id=$2`, [hash, userId]);
-    res.json({ success:true, message:'Mot de passe modifie' });
+    const hash = await bcrypt.hash(newPassword, 12);
+    await query(`UPDATE merchant_users SET password_hash=$1, temp_password=FALSE, updated_at=NOW() WHERE user_id=$2`, [hash, userId]);
+    await revokeAll('merchant', userId);
+    clearRefreshCookie(res, 'merchant');
+    res.json({ success:true, message:'Mot de passe modifie', sessionsRevoked: true });
   } catch(err) { res.status(500).json({ error: err.message }); }
-});
+};
+router.post('/account/change-password', merchantAuth, changeMerchantPassword);
+router.post('/auth/change-password',    merchantAuth, changeMerchantPassword);
 
-router.post('/collect/contactless', merchantAuth, async (req, res) => {
-  const { amount, currency = 'XAF', description, cardData } = req.body;
-  if (!amount || parseFloat(amount) < 100) return res.status(422).json({ error: 'Montant invalide' });
-
-  try {
-    // En prod: cardData contient le cryptogramme EMV lu par le terminal NFC
-    // Ici: simulation avec CyberSource
-    const txnRef = 'NFC-' + Date.now().toString(36).toUpperCase();
-    const fee = Math.round(parseFloat(amount) * 0.015);
-    const net = parseFloat(amount) - fee;
-
-    // Appel PSP CyberSource (simulation si pas de config active)
-    let authCode = 'NFC' + Math.random().toString(36).slice(2,8).toUpperCase();
-    let pspResponse = { authorized: true, authCode, network: 'Visa' };
-
-    // Vérifier si config CyberSource active
-    const pspConfig = await query(
-      `SELECT * FROM api_configs WHERE provider_key='cybersource' AND status='active' LIMIT 1`
-    ).catch(() => ({ rows: [] }));
-
-    if (pspConfig.rows.length > 0 && cardData?.cryptogram) {
-      // TODO: appel réel CyberSource POST /pts/v2/payments avec cryptogramme EMV
-      // Pour l'instant: simulation réaliste
-      authCode = 'AUTH' + Math.random().toString(36).slice(2,8).toUpperCase();
-    }
-
-    // Enregistrer la transaction
-    const txn = await query(
-      `INSERT INTO transactions (
-        merchant_id, type, amount, currency, fee_amount, net_amount,
-        payment_method, status, auth_code, reference, description, initiated_at
-      ) VALUES ($1,'payment',$2,$3,$4,$5,'contactless_nfc','authorized',$6,$7,$8,NOW())
-      RETURNING *`,
-      [req.merchant.merchantId, parseFloat(amount), currency, fee, net, authCode, txnRef, description || 'Paiement sans contact']
-    );
-
-    res.json({
-      success: true,
-      transaction: txn.rows[0],
-      authCode,
-      network: pspResponse.network,
-      amount: parseFloat(amount),
-      fee,
-      net,
-      currency,
-      reference: txnRef,
-      message: 'Paiement autorisé'
-    });
-
-  } catch(err) {
-    console.error('NFC payment error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+// HOTFIX (audit §2.6, §3.4) : autorisation NFC simulee (auth code aleatoire, aucun
+// appel PSP, req.merchant undefined). Desactive : 410 Gone, aucune ecriture.
+router.post('/collect/contactless', merchantAuth, (req, res) => featureDisabled(res));
 
 // ─── 2FA MERCHANT ─────────────────────────────────────────────────
-const speakeasy = require('speakeasy');
-const QRCode    = require('qrcode');
+// WAVE-2 (audit §2.11) : TOTP reel (speakeasy, fenetre 1), secret base32 sur
+// la ligne utilisateur, QR genere cote serveur. Le login emet un mfaToken
+// quand mfa_enabled (voir POST /auth/2fa/validate plus haut).
 
-// Setup 2FA — générer secret + QR
+// Setup 2FA — générer secret + QR (non activé tant que /verify n'a pas réussi)
 router.post('/auth/2fa/setup', merchantAuth, async (req, res) => {
   try {
-    const secret = speakeasy.generateSecret({
-      name: `CPlus:${req.user.email}`,
-      length: 20
-    });
-    // Sauvegarder le secret temporairement (non activé)
+    const u = await query(`SELECT email FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
+    const label = u.rows[0]?.email || req.user.email || String(req.user.sub);
+    const enrollment = await buildTotpEnrollment({ label, issuer: 'C-Pay Merchant' });
     await query(
-      `UPDATE merchant_users SET mfa_secret=$1 WHERE user_id=$2`,
-      [secret.base32, req.user.sub]
+      `UPDATE merchant_users SET mfa_secret=$1, mfa_enabled=FALSE WHERE user_id=$2`,
+      [enrollment.secret, req.user.sub]
     );
-    const qrUrl = await QRCode.toDataURL(secret.otpauth_url);
-    res.json({ secret: secret.base32, qrCode: qrUrl, otpauthUrl: secret.otpauth_url });
+    res.json(enrollment);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
 // Vérifier et activer 2FA
 router.post('/auth/2fa/verify', merchantAuth, async (req, res) => {
   const { token } = req.body;
-  if (!token) return res.status(422).json({error:'Token requis'});
+  if (!token || typeof token !== 'string') return res.status(422).json({error:'Token requis'});
   try {
     const u = await query(`SELECT mfa_secret FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
     if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
-    const valid = speakeasy.totp.verify({
-      secret: u.rows[0].mfa_secret,
-      encoding: 'base32',
-      token: token.replace(/\s/g,''),
-      window: 2
-    });
-    if (!valid) return res.status(400).json({error:'Code invalide'});
+    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
     await query(`UPDATE merchant_users SET mfa_enabled=TRUE WHERE user_id=$1`, [req.user.sub]);
     res.json({success:true, message:'2FA activé ✅'});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-// Désactiver 2FA
+// Désactiver 2FA — code TOTP valide obligatoire (mfa_secret NULL → 400, plus de TypeError, audit §3.8)
 router.post('/auth/2fa/disable', merchantAuth, async (req, res) => {
   const { token } = req.body;
+  if (!token || typeof token !== 'string') return res.status(422).json({error:'Token requis'});
   try {
     const u = await query(`SELECT mfa_secret FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
-    const valid = speakeasy.totp.verify({ secret: u.rows[0].mfa_secret, encoding:'base32', token:token.replace(/\s/g,''), window:2 });
-    if (!valid) return res.status(400).json({error:'Code invalide'});
+    if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
+    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
     await query(`UPDATE merchant_users SET mfa_enabled=FALSE, mfa_secret=NULL WHERE user_id=$1`, [req.user.sub]);
     res.json({success:true});
   } catch(err){ res.status(500).json({error:err.message}); }
@@ -2011,49 +2076,37 @@ router.get('/auth/2fa/status', merchantAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-// Validation 2FA lors du login (route séparée)
-router.post('/auth/2fa/validate', async (req, res) => {
-  const { tempToken, totpCode } = req.body;
-  if (!tempToken || !totpCode) return res.status(422).json({error:'Token et code requis'});
-  try {
-    const jwt = require('jsonwebtoken');
-    const payload = jwt.verify(tempToken, process.env.JWT_SECRET);
-    if (payload.type !== 'mfa_pending') return res.status(401).json({error:'Token invalide'});
-    const u = await query(`SELECT * FROM merchant_users WHERE user_id=$1`, [payload.sub]);
-    if (!u.rows[0]) return res.status(404).json({error:'Utilisateur introuvable'});
-    const valid = speakeasy.totp.verify({
-      secret: u.rows[0].mfa_secret,
-      encoding: 'base32',
-      token: totpCode.replace(/\s/g,''),
-      window: 2
-    });
-    if (!valid) return res.status(400).json({error:'Code 2FA invalide'});
-    const { signToken } = require('../middleware/auth');
-    const accessToken = signToken({ sub: u.rows[0].user_id, email: u.rows[0].email, merchantId: u.rows[0].merchant_id, role: u.rows[0].role, type: 'merchant' }, '8h');
-    res.json({ access_token: accessToken, user: { email: u.rows[0].email, firstName: u.rows[0].first_name } });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
+// (WAVE-2) L'ancienne route /auth/2fa/validate attendait un jeton `mfa_pending`
+// que personne n'emettait ; elle est remplacee par la route du meme nom
+// declaree avec le login (mfaToken de type merchant_mfa).
 
 // ─── API KEYS MANAGEMENT ──────────────────────────────────────────
+// HOTFIX (audit §2.9) : la cle `sk_live_…` n'est plus stockee en clair.
+//   - api_key_hash  = SHA-256(cle)      (recherche a l'authentification)
+//   - key_prefix    = 12 premiers chars (affichage)
+//   - api_secret_hash = SHA-256(secret) (verification X-API-Secret, nouvelles cles)
+// Compatibilite : les lignes legacy dont `api_key` contient encore la cle brute
+// restent acceptees ; au premier usage reussi la ligne est migree (hash renseigne,
+// colonne brute mise a NULL). Voir database/007c_hotfix_merchant_admin.sql.
 
-// Lister les API keys du merchant
+// Lister les API keys du merchant (jamais la cle, ni le hash)
 router.get('/api-keys', merchantAuth, async (req, res) => {
   try {
     const r = await query(
-      `SELECT key_id, key_name, api_key, permissions, is_active, last_used_at, expires_at, created_at
+      `SELECT key_id, key_name, key_prefix, api_key, permissions, is_active, last_used_at, expires_at, created_at
        FROM merchant_api_keys WHERE merchant_id=$1 ORDER BY created_at DESC`,
       [req.user.merchantId]
     );
-    // Masquer la clé : sk_live_xxxx****
-    const keys = r.rows.map(k => ({
-      ...k,
-      api_key: k.api_key.slice(0,12) + '****' + k.api_key.slice(-4)
-    }));
+    const keys = r.rows.map(k => {
+      const prefix = k.key_prefix || (k.api_key ? apiKeyPrefix(k.api_key) : 'sk_live_');
+      const { api_key, key_prefix, ...rest } = k;
+      return { ...rest, key_prefix: prefix, api_key: prefix + '****', legacy_plaintext: !!api_key };
+    });
     res.json({ data: keys });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-// Créer une nouvelle API key
+// Créer une nouvelle API key — la cle et le secret bruts sont renvoyes UNE SEULE FOIS
 router.post('/api-keys', merchantAuth, async (req, res) => {
   const { keyName, permissions, expiresAt } = req.body;
   if (!keyName) return res.status(422).json({error:'Nom de la clé requis'});
@@ -2061,17 +2114,17 @@ router.post('/api-keys', merchantAuth, async (req, res) => {
     const apiKey    = 'sk_live_' + crypto.randomBytes(24).toString('hex');
     const apiSecret = 'sk_secret_' + crypto.randomBytes(32).toString('hex');
     const r = await query(
-      `INSERT INTO merchant_api_keys (merchant_id, key_name, api_key, api_secret, permissions, expires_at, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [req.user.merchantId, keyName, apiKey, apiSecret,
+      `INSERT INTO merchant_api_keys (merchant_id, key_name, api_key, api_key_hash, key_prefix, api_secret, api_secret_hash, permissions, expires_at, created_by)
+       VALUES ($1,$2,NULL,$3,$4,NULL,$5,$6,$7,$8)
+       RETURNING key_id, key_name, key_prefix, permissions, is_active, expires_at, created_at`,
+      [req.user.merchantId, keyName, hashApiKey(apiKey), apiKeyPrefix(apiKey), hashApiKey(apiSecret),
        JSON.stringify(permissions || ['collect','disburse','transactions','pay_links']),
        expiresAt || null, req.user.sub]
     );
-    // Retourner la clé complète UNE SEULE FOIS
     res.status(201).json({
       success: true,
       message: 'Conservez ces credentials — ils ne seront plus affichés.',
-      key: r.rows[0]
+      key: { ...r.rows[0], api_key: apiKey, api_secret: apiSecret },
     });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
@@ -2100,94 +2153,140 @@ router.delete('/api-keys/:keyId/permanent', merchantAuth, async (req, res) => {
 });
 
 // ─── MIDDLEWARE API KEY AUTH ───────────────────────────────────────
+// Recherche par hash ; repli sur la colonne brute legacy (migree au premier succes).
+// X-API-Secret : verifie uniquement si la ligne possede un api_secret_hash (cles
+// creees apres ce hotfix) ; pour les cles legacy l'en-tete est ignore, comme avant.
 const apiKeyAuth = async (req, res, next) => {
   const apiKey = req.headers['x-api-key'];
-  if (!apiKey) return res.status(401).json({error:'X-API-Key header requis', code:'API_KEY_REQUIRED'});
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.length > 128)
+    return res.status(401).json({error:'X-API-Key header requis', code:'API_KEY_REQUIRED'});
   try {
+    const keyHash = hashApiKey(apiKey);
     const r = await query(
       `SELECT k.*, m.merchant_id, m.business_name, m.merchant_status
        FROM merchant_api_keys k
        JOIN merchants m ON m.merchant_id=k.merchant_id
-       WHERE k.api_key=$1 AND k.is_active=TRUE
-       AND (k.expires_at IS NULL OR k.expires_at > NOW())`,
-      [apiKey]
+       WHERE (k.api_key_hash=$1 OR (k.api_key_hash IS NULL AND k.api_key=$2))
+         AND k.is_active=TRUE
+         AND (k.expires_at IS NULL OR k.expires_at > NOW())
+       LIMIT 1`,
+      [keyHash, apiKey]
     );
     if (!r.rows.length) return res.status(401).json({error:'Clé API invalide ou expirée', code:'INVALID_API_KEY'});
     const key = r.rows[0];
+    // Defense en profondeur : la ligne doit correspondre au hash OU a la cle brute exacte
+    const matchesHash = key.api_key_hash && safeEqualHex(key.api_key_hash, keyHash);
+    const matchesLegacy = !key.api_key_hash && typeof key.api_key === 'string'
+      && key.api_key.length === apiKey.length
+      && crypto.timingSafeEqual(Buffer.from(key.api_key), Buffer.from(apiKey));
+    if (!matchesHash && !matchesLegacy) return res.status(401).json({error:'Clé API invalide ou expirée', code:'INVALID_API_KEY'});
+
+    if (key.api_secret_hash) {
+      const secret = req.headers['x-api-secret'];
+      if (!secret || typeof secret !== 'string' || !safeEqualHex(key.api_secret_hash, hashApiKey(secret)))
+        return res.status(401).json({error:'X-API-Secret invalide', code:'INVALID_API_SECRET'});
+    }
     if (key.merchant_status !== 'active') return res.status(403).json({error:'Compte merchant inactif', code:'MERCHANT_INACTIVE'});
-    // Injecter les infos merchant dans req
-    req.user = { merchantId: key.merchant_id, sub: key.merchant_id, email: key.business_name, role:'api', permissions: key.permissions };
-    req.apiKey = key;
-    // Update last_used_at
-    query(`UPDATE merchant_api_keys SET last_used_at=NOW() WHERE key_id=$1`, [key.key_id]).catch(()=>{});
+
+    let permissions = key.permissions;
+    if (typeof permissions === 'string') { try { permissions = JSON.parse(permissions); } catch (e) { permissions = []; } }
+    if (!Array.isArray(permissions)) permissions = [];
+
+    req.user = { merchantId: key.merchant_id, sub: key.merchant_id, email: key.business_name, role:'api', permissions };
+    req.apiKey = { ...key, permissions, api_key: undefined, api_secret: undefined, api_key_hash: undefined, api_secret_hash: undefined };
+
+    if (matchesLegacy) {
+      // Migration transparente : hash + prefixe, cle brute effacee
+      query(`UPDATE merchant_api_keys SET api_key_hash=$1, key_prefix=$2, api_key=NULL, last_used_at=NOW() WHERE key_id=$3 AND api_key_hash IS NULL`,
+        [keyHash, apiKeyPrefix(apiKey), key.key_id]).catch((e) => logger.warn('api key legacy migration failed', { err: e.message }));
+    } else {
+      query(`UPDATE merchant_api_keys SET last_used_at=NOW() WHERE key_id=$1`, [key.key_id]).catch(()=>{});
+    }
     next();
   } catch(err){ res.status(500).json({error:err.message}); }
 };
 
 // ─── ROUTES PUBLIQUES API (authentification par API Key) ──────────
-router.post('/public/collect', apiKeyAuth, async (req, res) => {
-  if (!req.apiKey.permissions.includes('collect')) return res.status(403).json({error:'Permission collect non accordée'});
-  const { amount, currency='XAF', customerPhone, method, description, reference } = req.body;
-  if (!amount || !customerPhone || !method) return res.status(422).json({error:'amount, customerPhone et method requis'});
-  try {
-    const ref = reference || 'API-' + Date.now().toString(36).toUpperCase();
-    const { data } = await require('axios').post(
-      `http://localhost:${process.env.PORT||3000}/api/v1/merchant/collect`,
-      { amount, currency, customerPhone, description: description||ref, mobileOperator: method },
-      { headers: { Authorization: `Bearer internal`, 'X-Merchant-Id': req.user.merchantId } }
-    ).catch(() => ({ data: { txnId: 'SIM-'+Date.now(), status:'pending' } }));
-    res.json({ success:true, reference:ref, txnId:data.txnId, status:data.status||'pending' });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
+// HOTFIX (audit §2.6) : /public/collect rejouait /merchant/collect via axios (non
+// installe) avec un Bearer factice et renvoyait success:true + txnId 'SIM-…' fictif.
+// Desactive : 410 Gone, aucune ecriture.
+router.post('/public/collect', apiKeyAuth, (req, res) => featureDisabled(res));
 
 router.get('/public/transactions', apiKeyAuth, async (req, res) => {
   if (!req.apiKey.permissions.includes('transactions')) return res.status(403).json({error:'Permission transactions non accordée'});
-  const { page=1, limit=20, status } = req.query;
+  const { status } = req.query;
+  const { page, limit, offset } = parsePagination(req.query, 20);
   try {
-    const offset = (parseInt(page)-1)*parseInt(limit);
     const conds = ['merchant_id=$1']; const params = [req.user.merchantId];
     if (status) { params.push(status); conds.push(`status=$${params.length}`); }
     const r = await query(
       `SELECT transaction_id, type, amount, currency, status, payment_method, auth_code, reference, initiated_at
        FROM transactions WHERE ${conds.join(' AND ')}
        ORDER BY initiated_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     const cnt = await query(`SELECT COUNT(*) FROM transactions WHERE ${conds.join(' AND ')}`, params);
-    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page: parseInt(page), limit: parseInt(limit) });
+    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page, limit });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
 router.post('/public/pay-links', apiKeyAuth, async (req, res) => {
   if (!req.apiKey.permissions.includes('pay_links')) return res.status(403).json({error:'Permission pay_links non accordée'});
   const { amount, currency='XAF', description, recipientPhone, psp='cybersource', paymentMethod='card' } = req.body;
-  if (!amount) return res.status(422).json({error:'amount requis'});
+  if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) return res.status(422).json({error:'amount requis'});
+  const expiresIn = parseExpiresIn(req.body.expiresIn, 24);
+  if (expiresIn === null) return res.status(422).json({ error: 'expiresIn invalide (1 a 720 heures)', code: 'INVALID_EXPIRES_IN' });
   try {
-    const shortId = Math.random().toString(36).substr(2,8).toUpperCase();
-    const shortUrl = `${process.env.PAY_LINK_BASE_URL||'https://pay.c-pay.global'}/${shortId}`;
-    const expiresAt = new Date(Date.now() + 24*3600000);
-    const r = await query(
+    const baseUrl = process.env.PAY_LINK_BASE_URL||'https://pay.c-pay.global';
+    const expiresAt = new Date(Date.now() + expiresIn*3600000);
+    const r = await withShortIdRetry((shortId) => query(
       `INSERT INTO pay_links (merchant_id, short_id, amount, currency, description, short_url, expires_at, psp, payment_method, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending') RETURNING pay_link_id, short_id, short_url, amount, currency, expires_at`,
-      [req.user.merchantId, shortId, amount, currency, description||null, shortUrl, expiresAt, psp, paymentMethod]
-    );
+      [req.user.merchantId, shortId, amount, currency, description||null, `${baseUrl}/${shortId}`, expiresAt, psp, paymentMethod]
+    ));
     res.status(201).json({ success:true, ...r.rows[0] });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
 // ─── WEBHOOK CONFIG ───────────────────────────────────────────────
+// HOTFIX (audit §2.12, §2.22) : le secret n'est jamais renvoye apres sa creation,
+// l'URL doit etre https:// et ne pas pointer vers une adresse privee (SSRF).
 router.get('/webhook-config', merchantAuth, async (req, res) => {
   try {
     const r = await query(`SELECT webhook_url, webhook_secret FROM merchants WHERE merchant_id=$1`, [req.user.merchantId]);
-    res.json(r.rows[0] || {});
+    const row = r.rows[0] || {};
+    res.json({
+      webhook_url: row.webhook_url || null,
+      webhook_secret: { configured: !!row.webhook_secret },
+    });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
 router.patch('/webhook-config', merchantAuth, async (req, res) => {
-  const { webhookUrl } = req.body;
+  const { webhookUrl, rotateSecret } = req.body || {};
   try {
-    await query(`UPDATE merchants SET webhook_url=$1, updated_at=NOW() WHERE merchant_id=$2`, [webhookUrl||null, req.user.merchantId]);
-    res.json({success:true});
+    let safeUrl = null;
+    if (webhookUrl) {
+      try { safeUrl = await integrations.assertSafeWebhookUrl(webhookUrl); }
+      catch (e) { return res.status(e.statusCode || 422).json({ error: e.message, code: e.code || 'UNSAFE_WEBHOOK_URL' }); }
+    }
+    const cur = await query(`SELECT webhook_secret FROM merchants WHERE merchant_id=$1`, [req.user.merchantId]);
+    if (!cur.rows.length) return res.status(404).json({ error: 'Marchand introuvable' });
+
+    let newSecret = null;
+    if (!cur.rows[0].webhook_secret || rotateSecret === true) {
+      newSecret = crypto.randomBytes(32).toString('hex');
+    }
+    await query(
+      `UPDATE merchants SET webhook_url=$1, webhook_secret=COALESCE($2, webhook_secret), updated_at=NOW() WHERE merchant_id=$3`,
+      [safeUrl, newSecret, req.user.merchantId]
+    );
+    const body = { success: true, webhook_url: safeUrl, webhook_secret: { configured: true } };
+    if (newSecret) {
+      // Renvoye UNE SEULE FOIS : il n'est plus jamais lisible via l'API ensuite
+      body.webhook_secret = { configured: true, value: newSecret, message: 'Conservez ce secret — il ne sera plus affiché.' };
+    }
+    res.json(body);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -2196,30 +2295,28 @@ router.post('/webhook-config/test', merchantAuth, async (req, res) => {
     const r = await query(`SELECT webhook_url, webhook_secret FROM merchants WHERE merchant_id=$1`, [req.user.merchantId]);
     const { webhook_url, webhook_secret } = r.rows[0] || {};
     if (!webhook_url) return res.status(400).json({error:'URL webhook non configurée'});
+    if (!webhook_secret) return res.status(400).json({error:'Secret webhook non configuré — enregistrez la configuration (PATCH /webhook-config)', code:'WEBHOOK_SECRET_MISSING'});
 
-    const crypto  = require('crypto');
+    let safeUrl;
+    try { safeUrl = await integrations.assertSafeWebhookUrl(webhook_url); }
+    catch (e) { return res.status(e.statusCode || 422).json({ error: e.message, code: e.code || 'UNSAFE_WEBHOOK_URL' }); }
+
     const payload = JSON.stringify({
       event: 'webhook.test', txnId: 'test-' + Date.now(),
       reference: 'TEST-001', amount: 100, currency: 'XAF',
       status: 'authorized', method: 'test',
       timestamp: new Date().toISOString()
     });
-    const signature = 'sha256=' + crypto.createHmac('sha256', webhook_secret||'').update(payload).digest('hex');
+    const signature = 'sha256=' + crypto.createHmac('sha256', webhook_secret).update(payload).digest('hex');
 
-    const url = new URL(webhook_url);
-    const lib = url.protocol === 'https:' ? require('https') : require('http');
-
-    await new Promise((resolve, reject) => {
-      const req2 = lib.request({
-        hostname: url.hostname, port: url.port||(url.protocol==='https:'?443:80),
-        path: url.pathname, method: 'POST',
-        headers: { 'Content-Type':'application/json', 'Content-Length':Buffer.byteLength(payload), 'X-CPlus-Signature':signature, 'X-CPlus-Event':'webhook.test' },
-        timeout: 10000
-      }, r2 => { resolve(r2.statusCode); });
-      req2.on('error', reject);
-      req2.write(payload); req2.end();
+    const resp = await integrations.fetchWithTimeout(safeUrl, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'X-CPlus-Signature':signature, 'X-CPlus-Event':'webhook.test' },
+      body: payload,
     });
 
-    res.json({success:true, message:'Webhook test envoyé ✅'});
+    res.json({success:true, statusCode: resp.status, message:'Webhook test envoyé ✅'});
   } catch(err){ res.status(400).json({error:'Endpoint inaccessible: ' + err.message}); }
 });
+
+module.exports = router;

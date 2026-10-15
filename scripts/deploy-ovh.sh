@@ -31,16 +31,12 @@ done
 if [ "$ROLLBACK" = true ]; then
   log "ROLLBACK: arrêt des services actuels..."
   cd "$DOCKER_DIR"
-  docker compose down --timeout 30
-  PREV_IMAGE=$(docker images cplus-api --format "{{.Tag}}" | sed -n '2p')
-  if [ -n "$PREV_IMAGE" ]; then
-    log "ROLLBACK: démarrage de la version précédente $PREV_IMAGE..."
-    export CPLUS_TAG=$PREV_IMAGE
-    docker compose up -d
-    log "Rollback terminé vers $PREV_IMAGE"
-  else
-    die "Pas d'image précédente trouvée pour le rollback"
-  fi
+  # Les images sont taguées 2.6.0-<timestamp> à chaque déploiement : on reprend l'avant-dernière
+  PREV_IMAGE=$(docker images cplus-api --format "{{.Tag}}" | grep -E '^2\.6\.0-[0-9_]+$' | sort -r | sed -n '2p')
+  [ -n "$PREV_IMAGE" ] || die "Pas d'image précédente trouvée pour le rollback"
+  log "ROLLBACK: redémarrage de l'API sur $PREV_IMAGE (sans coupure des portails)..."
+  CPLUS_TAG="$PREV_IMAGE" docker compose up -d --no-build api
+  log "Rollback terminé vers $PREV_IMAGE (la base de données n'est pas restaurée : voir scripts/restore-db.sh)"
   exit 0
 fi
 
@@ -66,8 +62,9 @@ log "Snapshot base de données avant déploiement..."
 if [ "$SKIP_BUILD" = false ]; then
   log "Build des images Docker..."
   cd "$DOCKER_DIR"
-  docker compose build --no-cache api admin-portal merchant-portal
-  log "Images buildées avec succès"
+  docker compose build api admin-portal merchant-portal cardholder-portal partners-portal
+  docker tag "cplus-api:${CPLUS_TAG:-2.6.0}" "cplus-api:2.6.0-$TIMESTAMP"
+  log "Images buildées avec succès (api taguée 2.6.0-$TIMESTAMP)"
 else
   warn "Build ignoré (--skip-build)"
 fi
@@ -81,11 +78,13 @@ mkdir -p "$DOCKER_DIR/secrets"
 printf '%s' "${METRICS_TOKEN:?METRICS_TOKEN required}" > "$DOCKER_DIR/secrets/metrics_token"
 chmod 600 "$DOCKER_DIR/secrets/metrics_token"
 
-docker compose up -d postgres
-
-# 2. Attendre que PostgreSQL soit prêt
-log "Attente PostgreSQL..."
-timeout 60 bash -c "until docker compose exec -T postgres pg_isready -U '${DB_USER:-cplus_user}' -d '${DB_NAME:-cplus_db}' > /dev/null 2>&1; do sleep 2; done"
+# 2. Base managée OVH Cloud DB : vérifier la joignabilité (pas de conteneur postgres)
+log "Vérification PostgreSQL ($DB_HOST:${DB_PORT:-5432})..."
+if command -v pg_isready >/dev/null 2>&1; then
+  pg_isready -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" -d "$DB_NAME" >/dev/null || die "PostgreSQL injoignable"
+else
+  timeout 5 bash -c "</dev/tcp/$DB_HOST/${DB_PORT:-5432}" || die "PostgreSQL injoignable (port fermé)"
+fi
 
 # 3. Lancer les migrations (via l'entrypoint de l'API)
 log "Exécution des migrations DB..."
@@ -112,12 +111,15 @@ done
 
 # 6. Démarrer les portails
 log "Démarrage des portails..."
-docker compose up -d admin-portal merchant-portal
+docker compose up -d admin-portal merchant-portal cardholder-portal partners-portal
 
-# 7. Services monitoring
-log "Démarrage du monitoring..."
-docker compose up -d nginx
-docker compose up -d prometheus alertmanager grafana loki promtail node-exporter postgres-exporter settlement-cron
+# 7. Services optionnels : démarrés seulement s'ils existent dans le compose
+log "Démarrage des services annexes..."
+for svc in settlement-cron nginx prometheus alertmanager grafana loki promtail node-exporter; do
+  if docker compose config --services 2>/dev/null | grep -qx "$svc"; then
+    docker compose up -d "$svc" || warn "Service $svc non démarré"
+  fi
+done
 
 # ─── Vérification finale ──────────────────────────────────────────
 log "Vérification finale des services..."

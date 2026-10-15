@@ -4,10 +4,17 @@
  * Config chargée depuis la table api_configurations (DB).
  * Si la config n'est pas en DB, fallback sur les variables d'environnement.
  * Le démarrage ne bloque JAMAIS même si aucune API n'est configurée.
+ *
+ * WAVE-2 (audit prod 2.6.0, 02-§4) :
+ *   - api_key / api_secret et les valeurs sensibles de extra_params sont déchiffrées
+ *     à la lecture (config/secrets.js, AES-256-GCM, valeurs héritées en clair tolérées) ;
+ *   - extra_params ne peut plus écraser apiKey / apiSecret / baseUrl (fusion explicite) ;
+ *   - webhookUrl() : URL de callback secrète commune aux providers.
  */
 'use strict';
 
-const logger = require('../../config/logger');
+const logger  = require('../../config/logger');
+const secrets = require('../../config/secrets');
 
 // Registry des providers
 const PROVIDERS = {
@@ -39,6 +46,27 @@ const PROVIDERS = {
   free_money_sn:   () => require('./providers/free_money.provider'),
 };
 
+// Clés de config réservées : jamais écrasées par extra_params
+const RESERVED_CONFIG_KEYS = new Set(['providerKey', 'baseUrl', 'apiKey', 'apiSecret']);
+
+/** Ligne api_configurations → objet config déchiffré (fusion explicite, extra_params ne prime jamais). */
+const buildConfigFromRow = (row) => {
+  const extra = secrets.decryptExtraParams(row.extra_params && typeof row.extra_params === 'object' ? row.extra_params : {});
+  const cfg = {};
+  for (const [k, v] of Object.entries(extra)) {
+    if (RESERVED_CONFIG_KEYS.has(k)) {
+      logger.warn('MM Router: extra_params key ignored (reserved)', { providerKey: row.provider_key, key: k });
+      continue;
+    }
+    cfg[k] = v;
+  }
+  cfg.providerKey = row.provider_key;
+  cfg.baseUrl     = row.base_url;
+  cfg.apiKey      = secrets.decrypt(row.api_key);
+  cfg.apiSecret   = secrets.decrypt(row.api_secret);
+  return cfg;
+};
+
 // Cache config DB (5 min)
 let _configCache = {};
 let _cacheTime   = 0;
@@ -54,16 +82,16 @@ const getConfig = async (providerKey) => {
          FROM api_configurations WHERE provider_type = 'mobile_money'`,
         []
       );
-      _configCache = {};
+      const fresh = {};
       for (const row of result.rows) {
-        _configCache[row.provider_key] = {
-          providerKey:  row.provider_key,
-          baseUrl:     row.base_url,
-          apiKey:      row.api_key,
-          apiSecret:   row.api_secret,
-          ...row.extra_params,
-        };
+        try {
+          fresh[row.provider_key] = buildConfigFromRow(row);
+        } catch (err) {
+          // Clé de chiffrement absente / valeur altérée : le provider reste non configuré (fallback env)
+          logger.error('MM Router: config row unreadable (decrypt failed)', { providerKey: row.provider_key, err: err.message });
+        }
       }
+      _configCache = fresh;
       _cacheTime = Date.now();
     } catch (err) {
       logger.warn('MM Router: could not load config from DB, using env vars', { err: err.message });
@@ -72,6 +100,29 @@ const getConfig = async (providerKey) => {
 
   // Config DB en priorité, sinon env vars
   return _configCache[providerKey] || buildConfigFromEnv(providerKey);
+};
+
+/** Module provider enregistré pour une clé de gateway (ou null). */
+const getProvider = (gateway) => {
+  const factory = PROVIDERS[gateway];
+  return factory ? factory() : null;
+};
+
+/**
+ * URL de callback opérateur : segment secret (WEBHOOK_PATH_SECRET) + nom du provider.
+ * Sans secret configuré, on retombe sur l'ancien chemin public /webhooks/<provider>
+ * (toujours monté, mais fail-closed pour les providers sans signature).
+ */
+let _warnedNoSecret = false;
+const webhookUrl = (provider, suffix = '') => {
+  const base   = String(process.env.API_BASE_URL || '').replace(/\/+$/, '');
+  const secret = process.env.WEBHOOK_PATH_SECRET;
+  if (secret) return `${base}/api/v1/webhooks/${encodeURIComponent(secret)}/${provider}${suffix}`;
+  if (!_warnedNoSecret) {
+    _warnedNoSecret = true;
+    logger.warn('WEBHOOK_PATH_SECRET non configuré : URLs de callback legacy /webhooks/<provider> utilisées');
+  }
+  return `${base}/webhooks/${provider}${suffix}`;
 };
 
 const processPayment = async ({ txnId, amount, currency, phone, operator, gateway, country, description }) => {
@@ -127,18 +178,26 @@ const testProvider = async (providerKey) => {
 };
 
 // Invalider le cache (après mise à jour config admin)
-const invalidateCache = () => { _cacheTime = 0; };
+const invalidateCache = () => { _cacheTime = 0; _configCache = {}; };
 
-const normalize = (raw, operator) => ({
-  approved:      raw.success === true,
-  pending:       raw.pending === true,
-  authCode:      raw.transactionId || raw.financialTransactionId || raw.sessionId || null,
-  responseCode:  raw.responseCode || (raw.success ? '00' : '05'),
-  declineReason: raw.errorMessage || raw.reason || null,
-  gatewayRef:    raw.externalId   || raw.transactionId || null,
-  retryable:     raw.retryable    ?? false,
-  _operator:     operator,
-});
+// pending:true (push accepte, PIN non saisi, timeout de polling) est propage tel quel :
+// l'orchestrateur laisse alors la transaction `pending` (jamais `failed`).
+// gatewayRef est persisté dans transactions.gateway_payment_id : pour Orange c'est le
+// notif_token (comparé au callback notif_url), pour Wave l'id de session checkout.
+const normalize = (raw, operator) => {
+  const pending  = raw.pending === true;
+  const approved = !pending && raw.success === true;
+  return {
+    approved,
+    pending,
+    authCode:      raw.transactionId || raw.financialTransactionId || raw.sessionId || null,
+    responseCode:  raw.responseCode || (approved ? '00' : (pending ? '09' : '05')),
+    declineReason: raw.errorMessage || raw.reason || null,
+    gatewayRef:    raw.notifToken   || raw.sessionId || raw.externalId || raw.transactionId || null,
+    retryable:     raw.retryable    ?? false,
+    _operator:     operator,
+  };
+};
 
 // Fallback env vars si pas de config DB
 const buildConfigFromEnv = (key) => ({
@@ -155,6 +214,12 @@ const buildConfigFromEnv = (key) => ({
   companyCode:process.env[`${key.toUpperCase()}_COMPANY_CODE`],
   debitAccountNo:process.env[`${key.toUpperCase()}_DEBIT_ACCOUNT_NO`],
   callbackUrl:process.env[`${key.toUpperCase()}_CALLBACK_URL`],
+  webhookSecret:process.env[`${key.toUpperCase()}_WEBHOOK_SECRET`],
+  webhookToken:process.env[`${key.toUpperCase()}_WEBHOOK_TOKEN`],
+  statusPath:process.env[`${key.toUpperCase()}_STATUS_PATH`],
 });
 
-module.exports = { processPayment, sendPayout, testProvider, invalidateCache };
+module.exports = {
+  processPayment, sendPayout, testProvider, invalidateCache, getConfig, getProvider, webhookUrl,
+  normalize, buildConfigFromRow, PROVIDERS,
+};

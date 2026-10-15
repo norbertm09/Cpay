@@ -12,6 +12,9 @@ docker/certbot/
 *.pem
 *.key
 
+# Jamais de binaire de distribution dans le depot (APK debug publie par erreur, audit P0 #13)
+*.apk
+
 # Artefacts locaux
 node_modules/
 dist/

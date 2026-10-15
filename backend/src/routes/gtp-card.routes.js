@@ -6,29 +6,34 @@
 'use strict';
 
 const express = require('express');
-const jwt     = require('jsonwebtoken');
 const router  = express.Router();
 const gtp     = require('../services/rails/gtp-card.service');
 const gtpClient = require('../services/rails/gtp.client');
 const { query } = require('../config/database');
 
 // ─── Auth ────────────────────────────────────────────────────────
-const cardAuth = async (req, res, next) => {
+// WAVE-2 : auth unique (audit §1.1). cardholderAuth n'accepte qu'un JWT de
+// type cardholder (audit §2.5) et pose req.chId (= sub) + req.cardholder.
+const { cardholderAuth: cardAuth } = require('../middleware/auth');
+
+// ─── HOTFIX IDOR : :gtpCardId doit appartenir au porteur ─────────
+const ownCard = async (req, res, next) => {
   try {
-    const h = req.headers.authorization;
-    if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const d = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-    req.cardholder = d;
-    req.chId = d.cardholderId || d.sub;
+    const id = parseInt(req.params.gtpCardId, 10);
+    if (!Number.isInteger(id)) return res.status(404).json({ error: 'Carte introuvable' });
+    const r = await query(
+      `SELECT gtp_card_id, last4, status FROM gtp_cards WHERE gtp_card_id=$1 AND cardholder_id=$2`,
+      [id, req.chId]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Carte introuvable' });
+    req.gtpCard = r.rows[0];
     next();
-  } catch (e) {
-    res.status(401).json({ error: 'Token invalide' });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 };
 
 // ─── Gestion d'erreurs GTP ───────────────────────────────────────
 const handleErr = (err, res) => {
   console.error('[GTP]', err.code || '-', err.message);
+  if (err.code === 'GTP_CARD_NOT_OWNED') return res.status(404).json({ error: 'Carte introuvable' });
   const m = {
     GTP_NOT_CONFIGURED: [503, 'Service GTP non configure (token manquant)'],
     GTP_TIMEOUT:        [504, 'GTP ne repond pas'],
@@ -100,8 +105,8 @@ router.get('/cards', cardAuth, async (req, res) => {
   } catch (e) { handleErr(e, res); }
 });
 
-router.get('/cards/:gtpCardId', cardAuth, async (req, res) => {
-  try { res.json(await gtp.getCardDetails(req.params.gtpCardId)); }
+router.get('/cards/:gtpCardId', cardAuth, ownCard, async (req, res) => {
+  try { res.json(await gtp.getCardDetails(req.params.gtpCardId, req.chId)); }
   catch (e) { handleErr(e, res); }
 });
 
@@ -112,19 +117,19 @@ router.post('/issue', cardAuth, async (req, res) => {
   } catch (e) { handleErr(e, res); }
 });
 
-router.get('/cards/:gtpCardId/transactions', cardAuth, async (req, res) => {
+router.get('/cards/:gtpCardId/transactions', cardAuth, ownCard, async (req, res) => {
   try {
     const txns = await gtp.getTransactions(req.params.gtpCardId, {
       startDate: req.query.startDate,
       endDate:   req.query.endDate,
-      limit:     parseInt(req.query.limit || '100', 10),
-    });
+      limit:     Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 100)),
+    }, req.chId);
     res.json({ data: txns, total: txns.length });
   } catch (e) { handleErr(e, res); }
 });
 
 // ─── TopUp / Unload ──────────────────────────────────────────────
-router.post('/cards/:gtpCardId/topup', cardAuth, async (req, res) => {
+router.post('/cards/:gtpCardId/topup', cardAuth, ownCard, async (req, res) => {
   const { amount, operator, mmPhone } = req.body;
   if (!amount || parseFloat(amount) <= 0)
     return res.status(422).json({ error: 'Montant invalide' });
@@ -139,7 +144,7 @@ router.post('/cards/:gtpCardId/topup', cardAuth, async (req, res) => {
   } catch (e) { handleErr(e, res); }
 });
 
-router.post('/cards/:gtpCardId/unload', cardAuth, async (req, res) => {
+router.post('/cards/:gtpCardId/unload', cardAuth, ownCard, async (req, res) => {
   const { amount, operator, mmPhone } = req.body;
   if (!amount || parseFloat(amount) <= 0)
     return res.status(422).json({ error: 'Montant invalide' });
@@ -155,7 +160,7 @@ router.post('/cards/:gtpCardId/unload', cardAuth, async (req, res) => {
 });
 
 // ─── Paiement ────────────────────────────────────────────────────
-router.post('/cards/:gtpCardId/payment', cardAuth, async (req, res) => {
+router.post('/cards/:gtpCardId/payment', cardAuth, ownCard, async (req, res) => {
   const { toCustomerId, toLast4, amount, description } = req.body;
   if (!toCustomerId) return res.status(422).json({ error: 'toCustomerId requis' });
   if (!amount || parseFloat(amount) <= 0)
@@ -185,33 +190,33 @@ router.post('/payment/token', cardAuth, async (req, res) => {
 });
 
 // ─── Gel / Reactivation ──────────────────────────────────────────
-router.patch('/cards/:gtpCardId/freeze', cardAuth, async (req, res) => {
+router.patch('/cards/:gtpCardId/freeze', cardAuth, ownCard, async (req, res) => {
   try {
     const phone = await getPhone(req.chId);
-    res.json(await gtp.freezeCard(req.params.gtpCardId, phone));
+    res.json(await gtp.freezeCard(req.params.gtpCardId, phone, req.chId));
   } catch (e) { handleErr(e, res); }
 });
 
-router.patch('/cards/:gtpCardId/unfreeze', cardAuth, async (req, res) => {
+router.patch('/cards/:gtpCardId/unfreeze', cardAuth, ownCard, async (req, res) => {
   try {
     const phone = await getPhone(req.chId);
-    res.json(await gtp.unfreezeCard(req.params.gtpCardId, phone));
+    res.json(await gtp.unfreezeCard(req.params.gtpCardId, phone, req.chId));
   } catch (e) { handleErr(e, res); }
 });
 
-router.delete('/cards/:gtpCardId', cardAuth, async (req, res) => {
+router.delete('/cards/:gtpCardId', cardAuth, ownCard, async (req, res) => {
   try {
     const phone = await getPhone(req.chId);
-    res.json(await gtp.cancelCard(req.params.gtpCardId, phone));
+    res.json(await gtp.cancelCard(req.params.gtpCardId, phone, req.chId));
   } catch (e) { handleErr(e, res); }
 });
 
 // ─── PIN ─────────────────────────────────────────────────────────
-router.post('/cards/:gtpCardId/pin', cardAuth, async (req, res) => {
+router.post('/cards/:gtpCardId/pin', cardAuth, ownCard, async (req, res) => {
   const { pin } = req.body;
   if (!pin || !/^[0-9]{4}$/.test(pin))
     return res.status(422).json({ error: 'PIN 4 chiffres requis' });
-  try { res.json(await gtp.changePin(req.params.gtpCardId, pin)); }
+  try { res.json(await gtp.changePin(req.params.gtpCardId, pin, req.chId)); }
   catch (e) { handleErr(e, res); }
 });
 
@@ -332,7 +337,7 @@ router.post('/transfer/:transactionId/reverse', cardAuth, async (req, res) => {
     const card = await getCard(req.chId);
     if (!card) return res.status(404).json({ error: 'Aucune carte GTP' });
     const r = await gtp.reverseTransaction(
-      card.gtp_card_id, req.params.transactionId, req.body.reason);
+      card.gtp_card_id, req.params.transactionId, req.body.reason, req.chId);
     res.json({ success: true, ...r });
   } catch (e) { handleErr(e, res); }
 });

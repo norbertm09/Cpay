@@ -78,10 +78,12 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
   return { success: false, responseCode: String(result.statusCode) };
 };
 
-const pollStatus = async (config, ref, token, maxWaitMs = 30000) => {
+// Timeout de polling ≠ echec : le client peut encore valider son PIN. On rend
+// pending:true ; le webhook / la reconciliation (getRequestStatus) finalisent.
+const pollStatus = async (config, ref, token, maxWaitMs = 30000, sleepMs = 3000) => {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
-    await sleep(3000);
+    await sleep(sleepMs);
     const r = await httpRequest('GET', config.baseUrl,
       `/collection/v1_0/requesttopay/${ref}`,
       null,
@@ -96,21 +98,62 @@ const pollStatus = async (config, ref, token, maxWaitMs = 30000) => {
       return { success: true, financialTransactionId: r.body.financialTransactionId, externalId: ref };
     }
     if (status === 'FAILED') {
-      return { success: false, reason: r.body.reason || 'FAILED', errorMessage: 'Paiement refusé', retryable: false };
+      return { success: false, reason: r.body.reason || 'FAILED', errorMessage: 'Paiement refusé', retryable: false, externalId: ref };
     }
   }
-  return { success: false, reason: 'TIMEOUT', errorMessage: 'Délai dépassé', retryable: true };
+  return { success: false, pending: true, reason: 'TIMEOUT', errorMessage: 'En attente de confirmation client', retryable: false, externalId: ref };
 };
 
-const pollDisbursementStatus = async (config, ref, token) => {
-  await sleep(5000);
+const pollDisbursementStatus = async (config, ref, token, sleepMs = 5000) => {
+  await sleep(sleepMs);
   const r = await httpRequest('GET', config.baseUrl,
     `/disbursement/v1_0/transfer/${ref}`,
     null,
     { 'Authorization': `Bearer ${token}`, 'X-Target-Environment': process.env.MTN_ENV || 'sandbox', 'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey }
   );
-  return { success: r.body?.status === 'SUCCESSFUL', financialTransactionId: r.body?.financialTransactionId };
+  const status = r.body?.status;
+  if (status === 'SUCCESSFUL') {
+    return { success: true, financialTransactionId: r.body.financialTransactionId, externalId: ref };
+  }
+  if (status === 'FAILED') {
+    return { success: false, reason: r.body?.reason || 'FAILED', errorMessage: 'Transfert refusé', retryable: false, externalId: ref };
+  }
+  // PENDING (ou statut inconnu) : le transfert peut encore aboutir → jamais failed
+  return { success: false, pending: true, reason: status || 'PENDING', errorMessage: 'Transfert en cours', retryable: false, externalId: ref };
 };
+
+// ─── Statut reel (webhook / reconciliation) ───────────────────────
+// Retourne le statut tel que renvoye par MTN : { status, amount, currency, financialTransactionId, reason }
+const getStatusGeneric = async (config, product, ref) => {
+  const token = await getAccessToken(config);
+  const path  = product === 'disbursement'
+    ? `/disbursement/v1_0/transfer/${ref}`
+    : `/collection/v1_0/requesttopay/${ref}`;
+  const r = await httpRequest('GET', config.baseUrl, path, null, {
+    'Authorization':             `Bearer ${token}`,
+    'X-Target-Environment':      process.env.MTN_ENV || 'sandbox',
+    'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey,
+  });
+  if (r.statusCode >= 400 || !r.body || typeof r.body !== 'object') {
+    const err = new Error(`MTN status query failed: HTTP ${r.statusCode}`);
+    err.statusCode = r.statusCode;
+    throw err;
+  }
+  const b = r.body;
+  return {
+    referenceId: ref,
+    status:      b.status || null,                     // PENDING | SUCCESSFUL | FAILED
+    amount:      b.amount != null ? parseFloat(b.amount) : null,
+    currency:    b.currency || null,
+    financialTransactionId: b.financialTransactionId || null,
+    financialTxnId:         b.financialTransactionId || null,
+    reason:      b.reason ? (typeof b.reason === 'object' ? (b.reason.message || b.reason.code) : b.reason) : null,
+    externalId:  b.externalId || null,
+  };
+};
+
+const getRequestStatus  = (config, ref) => getStatusGeneric(config, 'collection', ref);
+const getTransferStatus = (config, ref) => getStatusGeneric(config, 'disbursement', ref);
 
 const httpRequest = (method, baseUrl, path, body, headers) => new Promise((resolve, reject) => {
   const u = new URL(baseUrl + path);
@@ -135,4 +178,4 @@ const httpRequest = (method, baseUrl, path, body, headers) => new Promise((resol
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-module.exports = { collectPayment, sendPayout };
+module.exports = { collectPayment, sendPayout, getRequestStatus, getTransferStatus, pollStatus, pollDisbursementStatus };

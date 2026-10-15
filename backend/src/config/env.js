@@ -15,6 +15,9 @@ const requiredInProduction = [
   'METRICS_TOKEN',
   'GRAFANA_PASSWORD',
   'CERTBOT_EMAIL',
+  // Vague 2
+  'CONFIG_ENCRYPTION_KEY', // chiffrement AES-256-GCM des api_configs (secrets.js)
+  'WEBHOOK_PATH_SECRET',   // segment secret des URLs de webhooks Mobile Money
 ];
 
 const recommendedProviders = {
@@ -27,6 +30,8 @@ const recommendedProviders = {
   mastercardDevelopers: ['MASTERCARD_DEVELOPERS_CONSUMER_KEY', 'MASTERCARD_DEVELOPERS_PRIVATE_KEY_PATH'],
   paymenthub: ['PAYMENTHUB_BASE_URL', 'PAYMENTHUB_WEBHOOK_TOKEN'],
   interswitchDrc: ['INTERSWITCH_AUTH_BASE_URL', 'INTERSWITCH_WALLET_BASE_URL'],
+  assistant: ['ANTHROPIC_API_KEY'],
+  wave: ['WAVE_WEBHOOK_SECRET'],
 };
 
 const valueLooksMissing = (name) => {

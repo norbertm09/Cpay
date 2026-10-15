@@ -1,4 +1,4 @@
-// CPlus 2.6.0 — Admin Portal Enrichi
+// C-Pay 2.6.0 — Admin Portal Enrichi
 // Modules: Dashboard, Monitoring, Alerts, Fraud, Merchants, Transactions, Users, APIs, Audit
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -87,9 +87,29 @@ api.interceptors.request.use(cfg => {
   return cfg;
 });
 api.interceptors.response.use(r => r, err => {
-  if (err.response?.status === 401) { localStorage.removeItem('admin_token'); window.location.href = '/login'; }
+  const st = err.response?.status;
+  if (st === 401) { localStorage.removeItem('admin_token'); if (window.location.pathname !== '/login') window.location.href = '/login'; }
+  else if (st === 403) { toast.error('Accès refusé'); } // droits insuffisants : pas de redirection
   return Promise.reject(err);
 });
+
+// ─── CRM / back-office assistant ──────────────────────────────────
+// Contrat : backend/src/routes/crm-admin.routes.js, monte sur /api/v1/admin/crm.
+//   GET  /crm/stats                      -> { leads:{new,total,last7d}, claims:{open,total,last7d}, conversations:{last7d,handoffs} }
+//   GET  /crm/leads?status&q&page&limit  -> { data, total, page, limit }   PATCH /crm/leads/:id { status, assignedTo, notes } -> lead
+//   GET  /crm/claims?status&category&q   -> { data, total, page, limit }   PATCH /crm/claims/:id { status, assignedTo, resolution } -> claim
+//   GET  /crm/conversations?page&limit   -> { data, page, limit }          GET /crm/conversations/:id -> { ...conversation, messages[] }
+const crmApi = {
+  stats:         ()      => api.get('/crm/stats'),
+  leads:         p       => api.get('/crm/leads', { params: p }),
+  updateLead:    (id, d) => api.patch(`/crm/leads/${id}`, d),
+  claims:        p       => api.get('/crm/claims', { params: p }),
+  updateClaim:   (id, d) => api.patch(`/crm/claims/${id}`, d),
+  conversations: p       => api.get('/crm/conversations', { params: p }),
+  conversation:  id      => api.get(`/crm/conversations/${id}`),
+};
+const CRM_ROLES = ['super_admin', 'ops_admin', 'support_agent'];
+const hasRole = (admin, roles) => !roles || roles.includes(admin?.role);
 
 const fraudApi  = { events: p => api.get('/fraud/events', { params: p }), rules: () => api.get('/fraud/rules'), updateRule: (id, d) => api.put(`/fraud/rules/${id}`, d), createRule: d => api.post('/fraud/rules', d), review: (id, d) => api.patch(`/fraud/events/${id}/review`, d) };
 const txnApi    = { list: p => api.get('/transactions', { params: p }), get: id => api.get(`/transactions/${id}`), refund: id => api.post(`/transactions/${id}/refund`) };
@@ -99,7 +119,7 @@ const alertsApi = { list: p => api.get('/alerts', { params: p }), resolve: (id, 
 // ─── Auth ─────────────────────────────────────────────────────────
 const useAuth = () => {
   const token = localStorage.getItem('admin_token');
-  const admin = token ? (() => { try { return JSON.parse(atob(token.split('.')[1])); } catch { return null; } })() : null;
+  const admin = token ? (() => { try { const b = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '='))); } catch { return null; } })() : null;
   return { isAuth: !!admin && admin.exp * 1000 > Date.now(), admin };
 };
 const useRole = () => useAuth();
@@ -178,7 +198,7 @@ const Sel = ({ label, value, onChange, options }) => (
   <div style={{ marginBottom: 12 }}>
     {label && <label style={{ display: 'block', fontSize: 12, color: C.muted, marginBottom: 4 }}>{label}</label>}
     <select value={value} onChange={e => onChange(e.target.value)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: '9px 12px', color: C.text, fontSize: 14, boxSizing: 'border-box' }}>
-      {options.map(o => <option key={o.v || o} value={o.v || o}>{o.l || o}</option>)}
+      {options.map(o => { const v = (o && typeof o === 'object') ? o.v : o; const l = (o && typeof o === 'object') ? o.l : o; return <option key={String(v)} value={v ?? ''}>{l}</option>; })}
     </select>
   </div>
 );
@@ -325,6 +345,7 @@ const Layout = ({ children }) => {
     { group: LANG==='fr'?'PARTENAIRES':'PARTNERS', items: [{ p: '/banks', l: '🏦 Banques' }, { p: '/tenants', l: '🌐 Tenants' }, { p: '/partners-agencies', l: '🏢 Agences' }, { p: '/partners-agents', l: '👤 Agents' }], roles: ['super_admin','ops_admin'] },
     { group: LANG==='fr'?'CONFIG':'CONFIG', items: [{ p: '/api-configs', l: '🔌 '+t('apiConfigs') }, { p: '/audit', l: '📋 '+t('audit') }], roles: ['super_admin','ops_admin'] },
     { group: 'SUPPORT', items: [{ p: '/tickets', l: '🎫 Incidents' }], roles: ['super_admin','ops_admin','support_agent'] },
+    { group: 'CRM', items: [{ p: '/crm/leads', l: '🎯 Leads' }, { p: '/crm/complaints', l: '📣 Réclamations' }, { p: '/crm/conversations', l: '💬 Conversations' }], roles: CRM_ROLES, gated: true },
     { group: 'FINANCE', items: [{ p: '/finance', l: '💰 Règlements' }], roles: ['super_admin','finance_admin'] },
     { group: 'ADMIN', items: [{ p: '/admin-users', l: '👥 Utilisateurs Admin' }], roles: ['super_admin'] },
   ];
@@ -335,11 +356,11 @@ const Layout = ({ children }) => {
       <aside style={{ width: 230, background: C.card, borderRight: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 100 }}>
         <div style={{ padding: '14px 16px 12px', borderBottom: `1px solid ${C.border}` }}>
           
-          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 200, height: 'auto', display: 'block', objectFit: 'contain' }} />
-          <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textAlign: 'center' }}>{t('administration')}</div>
+          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 200, height: 'auto', display: 'block', objectFit: 'contain' }} />
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textAlign: 'center' }}>C-Pay — {t('administration')}</div>
         </div>
         <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-          {sections.map(({ group, items }) => (
+          {sections.filter(sec => !sec.gated || hasRole(admin, sec.roles)).map(({ group, items }) => (
             <div key={group}>
               <div style={{ padding: '10px 18px 4px', fontSize: 10, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: 'uppercase' }}>{group}</div>
               {items.map(({ p, l }) => (
@@ -372,28 +393,82 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [pwd, setPwd] = useState('');
   const [loading, setLoading] = useState(false);
+  // Etapes supplementaires renvoyees par /auth/login (hotfix v1) :
+  //   { mfaRequired:true, mfaToken } -> code TOTP 6 chiffres via POST /auth/2fa/validate { mfaToken, code }
+  //   { mustChangePassword:true }    -> changement de mot de passe force avant d'entrer
+  const [mfa, setMfa] = useState(null);
+  const [code, setCode] = useState('');
+  const [forcePwd, setForcePwd] = useState(false);
+  const [newPwd, setNewPwd] = useState({ newPassword: '', confirm: '' });
   const navigate = useNavigate();
   const { isAuth } = useAuth();
-  useEffect(() => { if (isAuth) navigate('/'); }, [isAuth, navigate]);
+  useEffect(() => { if (isAuth && !forcePwd) navigate('/'); }, [isAuth, forcePwd, navigate]);
+
+  const finishLogin = (data) => {
+    if (data.mfaRequired && data.mfaToken) { setMfa({ mfaToken: data.mfaToken }); return; }
+    if (data.access_token) localStorage.setItem('admin_token', data.access_token);
+    if (data.mustChangePassword) { setForcePwd(true); return; }
+    navigate('/');
+  };
 
   const submit = async () => {
     setLoading(true);
-    try { const { data } = await authApi.login({ email, password: pwd }); localStorage.setItem('admin_token', data.access_token); navigate('/'); }
-    catch { toast.error('Identifiants incorrects'); }
+    try { const { data } = await authApi.login({ email, password: pwd }); finishLogin(data); }
+    catch (err) { toast.error(err.response?.data?.error || 'Identifiants incorrects'); }
     finally { setLoading(false); }
   };
 
+  const submitMfa = async () => {
+    if (code.length !== 6) return toast.error('Code à 6 chiffres requis');
+    setLoading(true);
+    try { const { data } = await api.post('/auth/2fa/validate', { mfaToken: mfa.mfaToken, code }); finishLogin({ ...data, mfaRequired: false }); }
+    catch (err) { toast.error(err.response?.data?.error || 'Code invalide'); }
+    finally { setLoading(false); }
+  };
+
+  const submitPwd = async () => {
+    if (newPwd.newPassword.length < 8) return toast.error('8 caractères minimum');
+    if (newPwd.newPassword !== newPwd.confirm) return toast.error('Les mots de passe ne correspondent pas');
+    setLoading(true);
+    try {
+      await api.post('/auth/change-password', { currentPassword: pwd, newPassword: newPwd.newPassword });
+      toast.success('Mot de passe modifié ✅'); setForcePwd(false); navigate('/');
+    } catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
+    finally { setLoading(false); }
+  };
+
+  const onSubmit = e => { e.preventDefault(); if (loading) return; if (forcePwd) submitPwd(); else if (mfa) submitMfa(); else submit(); };
+
   return (
     <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <Card style={{ width: 380 }}>
+      <div style={{ width: 380 }}>
+      <Card>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 200, height: "auto", display: "block", margin: "0 auto 8px", objectFit: "contain", mixBlendMode: "multiply" }} />
-          <div style={{ fontSize: 13, color: C.muted }}>Administration Platform</div>
+          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 200, height: "auto", display: "block", margin: "0 auto 8px", objectFit: "contain" }} />
+          <div style={{ fontSize: 13, color: C.muted }}>C-Pay — Administration</div>
         </div>
-        <Inp label="Email administrateur" value={email} onChange={setEmail} type="email" placeholder="admin@cplus.africa" />
-        <Inp label="Mot de passe" value={pwd} onChange={setPwd} type="password" placeholder="••••••••" />
-        <Btn onClick={submit} disabled={loading} style={{ width: '100%', marginTop: 8 }}>{loading ? 'Connexion…' : 'Se connecter'}</Btn>
+        <form onSubmit={onSubmit}>
+          {forcePwd ? (<>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>🔐 Nouveau mot de passe requis</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>Pour continuer, définissez un nouveau mot de passe (8 caractères minimum).</div>
+            <Inp label="Nouveau mot de passe" value={newPwd.newPassword} onChange={v => setNewPwd(p => ({ ...p, newPassword: v }))} type="password" placeholder="••••••••" autoComplete="new-password" required />
+            <Inp label="Confirmer" value={newPwd.confirm} onChange={v => setNewPwd(p => ({ ...p, confirm: v }))} type="password" placeholder="••••••••" autoComplete="new-password" required />
+            <Btn disabled={loading} style={{ width: '100%', marginTop: 8 }}>{loading ? 'Enregistrement…' : 'Enregistrer'}</Btn>
+          </>) : mfa ? (<>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>🔐 Vérification en deux étapes</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>Saisissez le code à 6 chiffres de votre application d&apos;authentification.</div>
+            <Inp label="Code à 6 chiffres" value={code} onChange={v => setCode(String(v).replace(/[^0-9]/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" autoComplete="one-time-code" required />
+            <Btn disabled={loading || code.length !== 6} style={{ width: '100%', marginTop: 8 }}>{loading ? 'Vérification…' : 'Valider'}</Btn>
+            <button type="button" onClick={() => { setMfa(null); setCode(''); }} style={{ width: '100%', background: 'none', border: 'none', color: C.muted, cursor: 'pointer', marginTop: 10, fontSize: 12 }}>← Retour</button>
+          </>) : (<>
+            <Inp label="Email administrateur" value={email} onChange={setEmail} type="email" placeholder="admin@c-pay.global" autoComplete="username" required />
+            <Inp label="Mot de passe" value={pwd} onChange={setPwd} type="password" placeholder="••••••••" autoComplete="current-password" required />
+            <Btn disabled={loading} style={{ width: '100%', marginTop: 8 }}>{loading ? 'Connexion…' : 'Se connecter'}</Btn>
+          </>)}
+        </form>
       </Card>
+      <div style={{ textAlign: 'center', marginTop: 12, fontSize: 11, color: C.muted }}>C-Pay est un produit de Calculus Plus SAS</div>
+      </div>
     </div>
   );
 };
@@ -447,11 +522,53 @@ const Dashboard = () => {
         <Stat label="Total marchands" value={stats.merchants?.total || 0} />
         <Stat label="Gateways actifs" value={stats.gateways?.length || 0} color={C.blue} />
       </div>
+      <CrmStatsBlock />
     </div>
   );
 };
 
-// ─── MONITORING ───────────────────────────────────────────────────
+// Bloc CRM du tableau de bord : GET /admin/crm/stats (roles super_admin / ops_admin / support_agent)
+const CrmStatsBlock = () => {
+  const { admin } = useAuth();
+  const [crm, setCrm] = useState(null);
+  const [err, setErr] = useState(false);
+  const allowed = hasRole(admin, CRM_ROLES);
+  useEffect(() => { if (allowed) crmApi.stats().then(r => setCrm(r.data || {})).catch(() => setErr(true)); }, [allowed]);
+  if (!allowed || err) return null;
+  const L = crm?.leads || {}, K = crm?.claims || {}, V = crm?.conversations || {};
+  return (
+    <Card style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>🎯 CRM — leads, réclamations, assistant</div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <Link to="/crm/leads" style={{ fontSize: 12, color: C.primary, textDecoration: 'none' }}>Leads →</Link>
+          <Link to="/crm/complaints" style={{ fontSize: 12, color: C.primary, textDecoration: 'none' }}>Réclamations →</Link>
+          <Link to="/crm/conversations" style={{ fontSize: 12, color: C.primary, textDecoration: 'none' }}>Conversations →</Link>
+        </div>
+      </div>
+      {!crm ? <Spin /> : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12 }}>
+          {[
+            ['Leads nouveaux',        L.new,     C.primary, `${fmt(L.total)} au total`],
+            ['Leads (7 j)',           L.last7d,  C.blue,    null],
+            ['Réclamations ouvertes', K.open,    C.warning, `${fmt(K.total)} au total`],
+            ['Réclamations (7 j)',    K.last7d,  C.text,    null],
+            ['Conversations (7 j)',   V.last7d,  C.success, null],
+            ['Transferts humain',     V.handoffs, C.danger, 'handoff demandé'],
+          ].map(([l, v, col, sub]) => (
+            <div key={l} style={{ background: C.bg, borderRadius: 10, padding: '12px 14px' }}>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>{l}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: col }}>{fmt(v || 0)}</div>
+              {sub && <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{sub}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+};
+
+// ─── MONITORING// ─── MONITORING ───────────────────────────────────────────────────
 const Monitoring = () => {
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1191,14 +1308,36 @@ const Transactions = () => {
   const refund = async id => {
     if (!window.confirm('Confirmer le remboursement ?')) return;
     try { await txnApi.refund(id); toast.success('Remboursement initié'); load(); }
-    catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
+    catch (err) {
+      // Hotfix v1 : POST /transactions/:id/refund repond 501 REFUND_NOT_IMPLEMENTED
+      if (err.response?.status === 501 || err.response?.data?.code === 'REFUND_NOT_IMPLEMENTED') toast('Remboursement manuel via l\u2019opérateur', { icon: 'ℹ️', duration: 6000 });
+      else toast.error(err.response?.data?.error || 'Erreur');
+    }
+  };
+
+  // Reconciliation manuelle des transactions pending : POST /api/v1/admin/reconcile (super_admin / ops_admin)
+  const { admin } = useAuth();
+  const [reconciling, setReconciling] = useState(false);
+  const reconcile = async () => {
+    if (!window.confirm('Lancer la réconciliation des transactions en attente (24 h) auprès des opérateurs ?')) return;
+    setReconciling(true);
+    try {
+      const { data } = await api.post('/reconcile', { maxAgeHours: 24 });
+      const sum = data || {};
+      toast.success(`Réconciliation : ${sum.checked ?? sum.total ?? '?'} vérifiée(s), ${sum.updated ?? sum.changed ?? 0} mise(s) à jour`, { duration: 6000 });
+      load();
+    } catch (err) { toast.error(err.response?.data?.error || 'Erreur réconciliation'); }
+    finally { setReconciling(false); }
   };
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Transactions <span style={{ fontSize: 14, color: C.muted }}>({fmt(total)})</span></h1>
-        <Btn small variant="secondary" onClick={load}>↻</Btn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {hasRole(admin, ['super_admin', 'ops_admin']) && <Btn small variant="blue" onClick={reconcile} disabled={reconciling}>{reconciling ? 'Réconciliation…' : '🔄 Réconcilier les pending'}</Btn>}
+          <Btn small variant="secondary" onClick={load}>↻</Btn>
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
         {[['status', [['', 'Tous statuts'], ['authorized', 'Approuvé'], ['failed', 'Refusé'], ['pending', 'En attente']]],
@@ -1335,6 +1474,35 @@ const CreateUserModal = ({ onClose, onCreated }) => {
 };
 
 // ─── APIS & OPÉRATEURS ────────────────────────────────────────────
+// Affichage d'un secret masque { configured, last4 } renvoye par le backend (hotfix v1)
+const SecretHint = ({ masked }) => {
+  if (!masked || typeof masked !== 'object') return null;
+  return masked.configured
+    ? <div style={{ fontSize:11, color:C.success, marginTop:3 }}>✅ configuré ••••{masked.last4 || '????'} — laisser vide pour conserver, saisir pour remplacer</div>
+    : <div style={{ fontSize:11, color:C.muted, marginTop:3 }}>non configuré</div>;
+};
+// Resume des secrets d'une configuration API : api_key / api_secret / extra_params masques
+const SecretSummary = ({ data }) => {
+  if (!data) return null;
+  const rows = [];
+  if (data.api_key && typeof data.api_key === 'object') rows.push(['api_key', data.api_key]);
+  if (data.api_secret && typeof data.api_secret === 'object') rows.push(['api_secret', data.api_secret]);
+  Object.entries(data.extra_params || {}).forEach(([k, v]) => { if (v && typeof v === 'object' && 'configured' in v) rows.push([k, v]); });
+  if (!rows.length) return null;
+  return (
+    <div style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:10, padding:12, marginBottom:14 }}>
+      <div style={{ fontSize:12, fontWeight:700, marginBottom:6 }}>🔒 Secrets enregistrés (jamais affichés en clair)</div>
+      <div style={{ fontSize:11, color:C.muted, marginBottom:6 }}>Laissez les champs secrets vides pour conserver les valeurs actuelles ; saisissez une valeur pour la remplacer.</div>
+      {rows.map(([k, v]) => (
+        <div key={k} style={{ display:'flex', justifyContent:'space-between', fontSize:12, padding:'3px 0' }}>
+          <code style={{ color:C.text }}>{k}</code>
+          <span style={{ color: v.configured ? C.success : C.muted }}>{v.configured ? `configuré ••••${v.last4 || '????'}` : 'non configuré'}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const ApiConfigs = () => {
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1343,12 +1511,39 @@ const ApiConfigs = () => {
   const [testing, setTesting] = useState(null);
   const [activeCountry, setActiveCountry] = useState('cd');
   const [activeTab, setActiveTab] = useState('operators');
-  const [notifConfig, setNotifConfig] = useState({ smpp_host:'', smpp_port:'2775', smpp_user:'', smpp_pass:'', smpp_src:'CPlus', smtp_host:'', smtp_port:'587', smtp_user:'', smtp_pass:'', smtp_from:'noreply@c-pay.global', smtp_secure:'tls', wa_token:'', wa_phone_id:'', wa_verify_token:'' });
+  const [notifConfig, setNotifConfig] = useState({ smpp_host:'', smpp_port:'2775', smpp_user:'', smpp_pass:'', smpp_src:'C-Pay', smtp_host:'', smtp_port:'587', smtp_user:'', smtp_pass:'', smtp_from:'noreply@c-pay.global', smtp_secure:'tls', wa_token:'', wa_phone_id:'', wa_verify_token:'' });
   const [savingNotif, setSavingNotif] = useState(false);
+  // Hotfix v1 : GET /notification-configs renvoie les secrets sous la forme
+  // { configured, last4 } (jamais la valeur). notifMeta garde cet etat pour l'affichage ;
+  // le champ reste vide = conserver, saisir = remplacer.
+  const [notifMeta, setNotifMeta] = useState({});
+  const NOTIF_SECRETS = ['smpp_pass', 'smtp_pass', 'wa_token', 'wa_verify_token'];
+  const loadNotifConfig = useCallback(() => {
+    api.get('/notification-configs').then(r => {
+      const d = r.data || {}; const meta = {}; const vals = {};
+      Object.entries(d).forEach(([k, v]) => {
+        if (v && typeof v === 'object' && 'configured' in v) { meta[k] = v; vals[k] = ''; }
+        else if (typeof v !== 'object' && v != null) vals[k] = String(v);
+      });
+      setNotifMeta(meta);
+      setNotifConfig(p => ({ ...p, ...vals }));
+    }).catch(() => {});
+  }, []);
+  useEffect(() => { loadNotifConfig(); }, [loadNotifConfig]);
 
   const saveNotifConfig = async (section) => {
     setSavingNotif(true);
-    try { await api.post('/notification-configs', { section, ...notifConfig }); toast.success('Sauvegardé ✅'); }
+    try {
+      const payload = { section };
+      Object.entries(notifConfig).forEach(([k, v]) => {
+        if (typeof v === 'object') return;
+        if (NOTIF_SECRETS.includes(k) && (v === '' || v == null)) return; // vide = conserver le secret stocke
+        payload[k] = v;
+      });
+      await api.post('/notification-configs', payload); toast.success('Sauvegardé ✅');
+      setNotifConfig(p => { const n = { ...p }; NOTIF_SECRETS.forEach(k => { n[k] = ''; }); return n; });
+      loadNotifConfig();
+    }
     catch(err){ toast.error(err.response?.data?.error||'Erreur'); }
     finally { setSavingNotif(false); }
   };
@@ -1393,7 +1588,8 @@ const ApiConfigs = () => {
   const openEdit = async config => {
     try {
       let data = config;
-      if (config.config_id) { const res = await apiConfigsApi.get(config.config_id); data = res.data; }
+      if (config.config_id) { const res = await apiConfigsApi.get(config.config_id); data = { ...config, ...(res.data?.data || res.data) }; }
+      // Les secrets arrivent masques ({configured,last4}) : les champs restent vides (= conserver)
       setForm({
         displayName: data.display_name || config.display_name || '',
         baseUrlSandbox: data.extra_params?.base_url_sandbox || '',
@@ -1454,7 +1650,6 @@ const ApiConfigs = () => {
     const env = cfg?.extra_params?.environment || cfg?.extra_params?.env || 'sandbox';
     const lastTestOk = cfg?.last_test_ok;
     const lastTested = cfg?.last_tested_at;
-    const hasEnvConfig = cfg?.api_key || cfg?.extra_params?.col_api_user_prod || cfg?.extra_params?.col_client_id_prod;
     const [testing, setTesting] = useState(false);
 
     const testProvider = async () => {
@@ -1549,11 +1744,12 @@ const ApiConfigs = () => {
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:20 }}>
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}><span style={{ fontSize:28 }}>📱</span><div><div style={{ fontSize:15, fontWeight:700 }}>SMS — Protocole SMPP</div><div style={{ fontSize:11, color:C.muted }}>Envoi SMS via SMPP</div></div></div>
-            {[['smpp_host','Hôte SMPP *','smpp.operateur.com','text'],['smpp_port','Port','2775','text'],['smpp_user','Utilisateur *','smpp_user','text'],['smpp_pass','Mot de passe *','••••••','password'],['smpp_src','Nom expéditeur','CPlus','text']].map(([k,l,ph,t])=>(
+            {[['smpp_host','Hôte SMPP *','smpp.operateur.com','text'],['smpp_port','Port','2775','text'],['smpp_user','Utilisateur *','smpp_user','text'],['smpp_pass','Mot de passe *','','password'],['smpp_src','Nom expéditeur','C-Pay','text']].map(([k,l,ph,t])=>(
               <div key={k} style={{ marginBottom:10 }}>
                 <label style={{ display:'block', fontSize:11, color:C.muted, marginBottom:4 }}>{l}</label>
-                <input type={t} value={notifConfig[k]||''} onChange={e=>setNotifConfig(p=>({...p,[k]:e.target.value}))} placeholder={ph}
+                <input type={t} value={notifConfig[k]||''} onChange={e=>setNotifConfig(p=>({...p,[k]:e.target.value}))} placeholder={NOTIF_SECRETS.includes(k) && notifMeta[k]?.configured ? 'Laisser vide pour conserver' : ph}
                   style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:6, padding:'8px 10px', fontSize:13, color:C.text, boxSizing:'border-box' }} />
+                {NOTIF_SECRETS.includes(k) && <SecretHint masked={notifMeta[k]} />}
               </div>
             ))}
             <div style={{ display:'flex', gap:8, marginBottom:10 }}>
@@ -1574,8 +1770,9 @@ const ApiConfigs = () => {
             {[['wa_token','Token accès permanent *','EAAxxxxxxx…','password'],['wa_phone_id','Phone Number ID *','123456789012345','text'],['wa_verify_token','Verify Token','mon_token_secret','text']].map(([k,l,ph,t])=>(
               <div key={k} style={{ marginBottom:10 }}>
                 <label style={{ display:'block', fontSize:11, color:C.muted, marginBottom:4 }}>{l}</label>
-                <input type={t} value={notifConfig[k]||''} onChange={e=>setNotifConfig(p=>({...p,[k]:e.target.value}))} placeholder={ph}
+                <input type={t} value={notifConfig[k]||''} onChange={e=>setNotifConfig(p=>({...p,[k]:e.target.value}))} placeholder={NOTIF_SECRETS.includes(k) && notifMeta[k]?.configured ? 'Laisser vide pour conserver' : ph}
                   style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:6, padding:'8px 10px', fontSize:13, color:C.text, boxSizing:'border-box' }} />
+                {NOTIF_SECRETS.includes(k) && <SecretHint masked={notifMeta[k]} />}
               </div>
             ))}
             <div style={{ display:'flex', gap:8, marginBottom:10 }}>
@@ -1602,8 +1799,9 @@ const ApiConfigs = () => {
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:14 }}>
               <div><label style={{ display:'block', fontSize:11, color:C.muted, marginBottom:4 }}>Mot de passe *</label>
-              <input type='password' value={notifConfig.smtp_pass||''} onChange={e=>setNotifConfig(p=>({...p,smtp_pass:e.target.value}))} placeholder='••••••••'
-                style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:6, padding:'8px 10px', fontSize:13, color:C.text, boxSizing:'border-box' }} /></div>
+              <input type='password' value={notifConfig.smtp_pass||''} onChange={e=>setNotifConfig(p=>({...p,smtp_pass:e.target.value}))} placeholder={notifMeta.smtp_pass?.configured ? 'Laisser vide pour conserver' : '••••••••'}
+                style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:6, padding:'8px 10px', fontSize:13, color:C.text, boxSizing:'border-box' }} />
+              <SecretHint masked={notifMeta.smtp_pass} /></div>
               <div><label style={{ display:'block', fontSize:11, color:C.muted, marginBottom:4 }}>Port *</label>
               <select value={notifConfig.smtp_port||'587'} onChange={e=>setNotifConfig(p=>({...p,smtp_port:e.target.value}))}
                 style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:6, padding:'8px 10px', fontSize:13, color:C.text }}>
@@ -1632,6 +1830,7 @@ const ApiConfigs = () => {
 
       {editing && (
         <Modal title={`⚙️ ${editing.display_name || editing.provider_key}`} onClose={() => setEditing(null)}>
+          <SecretSummary data={editing} />
           <div style={{ marginBottom:16 }}>
             <label style={{ display:'block', fontSize:12, color:C.muted, marginBottom:6 }}>Environnement actif</label>
             <div style={{ display:'flex', gap:8 }}>
@@ -2740,6 +2939,312 @@ const CardholderDetail = () => {
   );
 };
 
+
+// ─── CRM : LEADS / RÉCLAMATIONS / CONVERSATIONS ───────────────────
+// Contrat : backend/src/routes/crm-admin.routes.js (docs/ASSISTANT-API.md, back office).
+// Roles : super_admin, ops_admin, support_agent (403 sinon -> toast « Accès refusé »).
+const CrmGuard = ({ children }) => {
+  const { admin } = useAuth();
+  if (!hasRole(admin, CRM_ROLES)) return <Card><div style={{ color:C.muted, padding:20, textAlign:'center' }}>⛔ Accès réservé aux rôles super_admin, ops_admin et support_agent.</div></Card>;
+  return children;
+};
+const LEAD_STATUSES = [['new','Nouveau'],['contacted','Contacté'],['qualified','Qualifié'],['converted','Converti'],['lost','Perdu']];
+const leadColor = st => ({ new:C.primary, contacted:C.warning, qualified:C.blue, converted:C.success, lost:C.danger }[st] || C.muted);
+const LEAD_INTERESTS = { merchant:'Marchand', partner:'Partenaire', developer:'Développeur', other:'Autre' };
+const CLAIM_STATUSES = [['open','Ouverte'],['in_progress','En cours'],['resolved','Résolue'],['closed','Fermée']];
+const claimColor = st => ({ open:C.danger, in_progress:C.warning, resolved:C.success, closed:C.muted }[st] || C.muted);
+const CLAIM_CATEGORIES = [['payment','Paiement'],['settlement','Règlement'],['account','Compte'],['fraud','Fraude'],['other','Autre']];
+const Drawer = ({ title, onClose, children, width = 520 }) => (
+  <div style={{ position:'fixed', inset:0, zIndex:1000 }}>
+    <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.35)' }} />
+    <div style={{ position:'absolute', top:0, right:0, bottom:0, width, maxWidth:'100%', background:C.card, borderLeft:`1px solid ${C.border}`, boxShadow:'-8px 0 32px rgba(0,0,0,0.12)', display:'flex', flexDirection:'column' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'16px 20px', borderBottom:`1px solid ${C.border}` }}>
+        <h2 style={{ margin:0, fontSize:16 }}>{title}</h2>
+        <button onClick={onClose} style={{ background:'none', border:'none', fontSize:22, cursor:'pointer', color:C.muted }}>✕</button>
+      </div>
+      <div style={{ flex:1, overflowY:'auto', padding:20 }}>{children}</div>
+    </div>
+  </div>
+);
+const KV = ({ l, v }) => (
+  <div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'7px 0', borderBottom:`1px solid ${C.border}`, fontSize:13 }}>
+    <span style={{ color:C.muted, whiteSpace:'nowrap' }}>{l}</span><span style={{ textAlign:'right', wordBreak:'break-word' }}>{v || '—'}</span>
+  </div>
+);
+// Liste des admins pour l'assignation (GET /admin-users)
+const useAdminUsers = () => {
+  const [users, setUsers] = useState([]);
+  useEffect(() => { api.get('/admin-users').then(r => setUsers(r.data?.data || (Array.isArray(r.data) ? r.data : []))).catch(() => {}); }, []);
+  const label = id => { const u = users.find(x => x.admin_id === id); return u ? (`${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email) : null; };
+  return { users, label };
+};
+const AssigneeSelect = ({ value, onChange, users }) => (
+  <Sel label="Assigné à" value={value || ''} onChange={onChange}
+    options={[{ v:'', l:'— Non assigné —' }, ...users.map(u => ({ v: u.admin_id, l: `${u.first_name || ''} ${u.last_name || ''} (${u.email})`.trim() }))]} />
+);
+
+const CrmLeads = () => {
+  const LIMIT = 25;
+  const [leads, setLeads] = useState([]); const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [status, setStatus] = useState(''); const [search, setSearch] = useState(''); const [q, setQ] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [notes, setNotes] = useState(''); const [saving, setSaving] = useState(false);
+  const { users, label: userLabel } = useAdminUsers();
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const params = { page, limit: LIMIT }; if (status) params.status = status; if (q) params.q = q;
+    crmApi.leads(params).then(r => { setLeads(r.data?.data || []); setTotal(r.data?.total || 0); })
+      .catch(err => { if (err.response?.status !== 403) toast.error(err.response?.data?.error || 'Erreur chargement leads'); })
+      .finally(() => setLoading(false));
+  }, [page, status, q]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const h = setTimeout(() => { setQ(search.trim()); setPage(1); }, 350); return () => clearTimeout(h); }, [search]);
+
+  const open = lead => { setSelected(lead); setNotes(lead.notes || ''); };
+  const patch = async (fields, okMsg) => {
+    setSaving(true);
+    try {
+      const r = await crmApi.updateLead(selected.lead_id, fields);
+      const updated = r.data?.lead_id ? r.data : { ...selected, ...fields };
+      setSelected(updated); setNotes(updated.notes || '');
+      setLeads(ls => ls.map(l => l.lead_id === updated.lead_id ? updated : l));
+      toast.success(okMsg || 'Lead mis à jour');
+    } catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
+    finally { setSaving(false); }
+  };
+  const stLabel = st => (LEAD_STATUSES.find(([v]) => v === st) || [st, st])[1];
+
+  return (
+    <CrmGuard>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <h1 style={{ margin:0, fontSize:22, fontWeight:700 }}>🎯 Leads <span style={{ fontSize:14, color:C.muted }}>({fmt(total)})</span></h1>
+        <Btn small variant="secondary" onClick={load}>↻</Btn>
+      </div>
+      <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher (nom, email, société)…"
+          style={{ flex:1, minWidth:240, background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 12px', fontSize:13, color:C.text }} />
+        <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 12px', fontSize:13, color:C.text }}>
+          <option value="">Tous statuts</option>
+          {LEAD_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </div>
+      {loading ? <Spin /> : (
+        <Card>
+          <Tbl heads={['Date', 'Nom', 'Contact', 'Société', 'Intérêt', 'Source', 'Statut', 'Assigné']}
+            rows={leads.map(l => (
+              <tr key={l.lead_id} style={{ cursor:'pointer' }} onClick={() => open(l)}>
+                <TD style={{ fontSize:11, color:C.muted }}>{fmtDate(l.created_at)}</TD>
+                <TD style={{ fontWeight:600 }}>{l.name || '—'}</TD>
+                <TD style={{ fontSize:12 }}>{l.email || '—'}<br/><span style={{ color:C.muted }}>{l.phone || ''}</span></TD>
+                <TD>{l.company || '—'}{l.country ? <span style={{ color:C.muted, fontSize:11 }}> · {l.country}</span> : null}</TD>
+                <TD style={{ fontSize:12 }}>{LEAD_INTERESTS[l.interest] || l.interest || '—'}</TD>
+                <TD style={{ fontSize:12, color:C.muted }}>{l.source || '—'}</TD>
+                <TD><Badge label={stLabel(l.status)} color={leadColor(l.status)} /></TD>
+                <TD style={{ fontSize:12 }}>{userLabel(l.assigned_to) || (l.assigned_to ? String(l.assigned_to).slice(0, 8) : '—')}</TD>
+              </tr>
+            ))} empty="Aucun lead" />
+          <Pagination page={page} setPage={setPage} count={leads.length} limit={LIMIT} />
+        </Card>
+      )}
+      {selected && (
+        <Drawer title={`Lead — ${selected.name || selected.email || ''}`} onClose={() => setSelected(null)}>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:14 }}>
+            {LEAD_STATUSES.filter(([v]) => v !== 'new').map(([v, l]) => (
+              <Btn key={v} small disabled={saving || selected.status === v} variant={v === 'lost' ? 'danger' : v === 'converted' ? 'success' : 'blue'} onClick={() => patch({ status: v }, `Lead marqué « ${l} »`)}>{l}</Btn>
+            ))}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <Sel label="Statut" value={selected.status || 'new'} onChange={v => patch({ status: v })} options={LEAD_STATUSES.map(([v, l]) => ({ v, l }))} />
+            <AssigneeSelect value={selected.assigned_to} users={users} onChange={v => v ? patch({ assignedTo: v }, 'Lead assigné') : toast('Le backend ne permet pas de désassigner (COALESCE) — réassignez à un autre admin.', { icon: 'ℹ️' })} />
+          </div>
+          <KV l="Email" v={selected.email} /><KV l="Téléphone" v={selected.phone} />
+          <KV l="Société" v={selected.company} /><KV l="Pays" v={selected.country} />
+          <KV l="Intérêt" v={LEAD_INTERESTS[selected.interest] || selected.interest} /><KV l="Source" v={selected.source} />
+          <KV l="Conversation" v={selected.conversation_id ? <Link to="/crm/conversations" style={{ color:C.primary }}>{String(selected.conversation_id).slice(0, 8)}…</Link> : null} />
+          <KV l="Consentement" v={fmtDate(selected.consent_at)} /><KV l="Créé le" v={fmtDate(selected.created_at)} /><KV l="Mis à jour" v={fmtDate(selected.updated_at)} />
+          {selected.message && (<>
+            <div style={{ marginTop:14, fontSize:13, fontWeight:700, marginBottom:6 }}>Message</div>
+            <div style={{ fontSize:13, background:C.bg, borderRadius:8, padding:12, whiteSpace:'pre-wrap' }}>{selected.message}</div>
+          </>)}
+          <div style={{ marginTop:18, fontSize:13, fontWeight:700, marginBottom:6 }}>📝 Notes internes</div>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes de suivi (visibles par l'équipe uniquement)…" rows={5}
+            style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:'9px 12px', fontSize:13, color:C.text, boxSizing:'border-box', resize:'vertical' }} />
+          <Btn small onClick={() => patch({ notes }, 'Notes enregistrées')} disabled={saving || notes === (selected.notes || '')} style={{ marginTop:8 }}>Enregistrer les notes</Btn>
+        </Drawer>
+      )}
+    </CrmGuard>
+  );
+};
+
+const CrmComplaints = () => {
+  const LIMIT = 25;
+  const [items, setItems] = useState([]); const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [status, setStatus] = useState(''); const [category, setCategory] = useState('');
+  const [search, setSearch] = useState(''); const [q, setQ] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [resolution, setResolution] = useState(''); const [saving, setSaving] = useState(false);
+  const { users, label: userLabel } = useAdminUsers();
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const params = { page, limit: LIMIT }; if (status) params.status = status; if (category) params.category = category; if (q) params.q = q;
+    crmApi.claims(params).then(r => { setItems(r.data?.data || []); setTotal(r.data?.total || 0); })
+      .catch(err => { if (err.response?.status !== 403) toast.error(err.response?.data?.error || 'Erreur chargement réclamations'); })
+      .finally(() => setLoading(false));
+  }, [page, status, category, q]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const h = setTimeout(() => { setQ(search.trim()); setPage(1); }, 350); return () => clearTimeout(h); }, [search]);
+
+  const open = c => { setSelected(c); setResolution(c.resolution || ''); };
+  const save = async (fields, okMsg) => {
+    setSaving(true);
+    try {
+      const r = await crmApi.updateClaim(selected.claim_id, fields);
+      const updated = r.data?.claim_id ? r.data : { ...selected, ...fields };
+      setSelected(updated); setResolution(updated.resolution || '');
+      setItems(ls => ls.map(c => c.claim_id === updated.claim_id ? updated : c));
+      toast.success(okMsg || 'Réclamation mise à jour');
+    } catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
+    finally { setSaving(false); }
+  };
+  const stLabel = st => (CLAIM_STATUSES.find(([v]) => v === st) || [st, st])[1];
+  const catLabel = ct => (CLAIM_CATEGORIES.find(([v]) => v === ct) || [ct, ct || '—'])[1];
+
+  return (
+    <CrmGuard>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <h1 style={{ margin:0, fontSize:22, fontWeight:700 }}>📣 Réclamations <span style={{ fontSize:14, color:C.muted }}>({fmt(total)})</span></h1>
+        <Btn small variant="secondary" onClick={load}>↻</Btn>
+      </div>
+      <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Référence REC-…, nom, email, réf. transaction"
+          style={{ flex:1, minWidth:240, background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 12px', fontSize:13, color:C.text }} />
+        <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 12px', fontSize:13, color:C.text }}>
+          <option value="">Tous statuts</option>{CLAIM_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <select value={category} onChange={e => { setCategory(e.target.value); setPage(1); }} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 12px', fontSize:13, color:C.text }}>
+          <option value="">Toutes catégories</option>{CLAIM_CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </div>
+      {loading ? <Spin /> : (
+        <Card>
+          <Tbl heads={['Référence', 'Date', 'Catégorie', 'Plaignant', 'Description', 'Statut', 'Assigné']}
+            rows={items.map(c => (
+              <tr key={c.claim_id} style={{ cursor:'pointer' }} onClick={() => open(c)}>
+                <TD style={{ fontFamily:'monospace', fontSize:12, fontWeight:600 }}>{c.reference}</TD>
+                <TD style={{ fontSize:11, color:C.muted }}>{fmtDate(c.created_at)}</TD>
+                <TD><Badge label={catLabel(c.category)} color={c.category === 'fraud' ? C.danger : C.blue} /></TD>
+                <TD style={{ fontSize:12 }}>{c.name}<br/><span style={{ color:C.muted }}>{c.email || c.phone || ''}</span></TD>
+                <TD style={{ maxWidth:300, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.description}</TD>
+                <TD><Badge label={stLabel(c.status)} color={claimColor(c.status)} /></TD>
+                <TD style={{ fontSize:12 }}>{userLabel(c.assigned_to) || (c.assigned_to ? String(c.assigned_to).slice(0, 8) : '—')}</TD>
+              </tr>
+            ))} empty="Aucune réclamation" />
+          <Pagination page={page} setPage={setPage} count={items.length} limit={LIMIT} />
+        </Card>
+      )}
+      {selected && (
+        <Drawer title={`Réclamation ${selected.reference}`} onClose={() => setSelected(null)}>
+          <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:14 }}>
+            <Badge label={stLabel(selected.status)} color={claimColor(selected.status)} />
+            <Badge label={catLabel(selected.category)} color={selected.category === 'fraud' ? C.danger : C.blue} />
+            {selected.resolved_at && <span style={{ fontSize:11, color:C.muted }}>résolue le {fmtDate(selected.resolved_at)}</span>}
+          </div>
+          <KV l="Référence" v={<code>{selected.reference}</code>} /><KV l="Créée le" v={fmtDate(selected.created_at)} />
+          <KV l="Plaignant" v={selected.name} /><KV l="Email" v={selected.email} /><KV l="Téléphone" v={selected.phone} />
+          <KV l="Réf. marchand" v={selected.merchant_ref} /><KV l="Réf. transaction" v={selected.transaction_ref} />
+          <KV l="Source" v={selected.source} />
+          <KV l="Conversation" v={selected.conversation_id ? <Link to="/crm/conversations" style={{ color:C.primary }}>{String(selected.conversation_id).slice(0, 8)}…</Link> : null} />
+          <div style={{ marginTop:14, fontSize:13, fontWeight:700, marginBottom:6 }}>Description</div>
+          <div style={{ fontSize:13, background:C.bg, borderRadius:8, padding:12, whiteSpace:'pre-wrap', marginBottom:14 }}>{selected.description || '—'}</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <Sel label="Statut" value={selected.status || 'open'} onChange={v => save({ status: v }, `Statut : ${stLabel(v)}`)} options={CLAIM_STATUSES.map(([v, l]) => ({ v, l }))} />
+            <AssigneeSelect value={selected.assigned_to} users={users} onChange={v => v ? save({ assignedTo: v }, 'Réclamation assignée') : toast('Le backend ne permet pas de désassigner (COALESCE) — réassignez à un autre admin.', { icon: 'ℹ️' })} />
+          </div>
+          <div style={{ fontSize:12, color:C.muted, marginBottom:4 }}>Résolution</div>
+          <textarea value={resolution} onChange={e => setResolution(e.target.value)} rows={4} placeholder="Décrire la résolution apportée…"
+            style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:'9px 12px', fontSize:13, color:C.text, boxSizing:'border-box', resize:'vertical' }} />
+          <div style={{ display:'flex', gap:8, marginTop:8 }}>
+            <Btn small onClick={() => save({ resolution }, 'Résolution enregistrée')} disabled={saving || !resolution.trim()}>Enregistrer la résolution</Btn>
+            <Btn small variant="success" onClick={() => save({ resolution, status: 'resolved' }, 'Réclamation résolue')} disabled={saving || !resolution.trim() || selected.status === 'resolved'}>✓ Résoudre</Btn>
+          </div>
+        </Drawer>
+      )}
+    </CrmGuard>
+  );
+};
+
+const CrmConversations = () => {
+  const LIMIT = 25;
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState(null); const [msgs, setMsgs] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    crmApi.conversations({ page, limit: LIMIT }).then(r => setItems(r.data?.data || []))
+      .catch(err => { if (err.response?.status !== 403) toast.error(err.response?.data?.error || 'Erreur chargement conversations'); })
+      .finally(() => setLoading(false));
+  }, [page]);
+  useEffect(() => { load(); }, [load]);
+
+  const open = async (c) => {
+    setSelected(c); setMsgs(null);
+    try { const r = await crmApi.conversation(c.conversation_id); setSelected(p => ({ ...p, ...r.data })); setMsgs(Array.isArray(r.data?.messages) ? r.data.messages : []); }
+    catch (err) { toast.error(err.response?.data?.error || 'Erreur'); setMsgs([]); }
+  };
+  const isUser = m => (m.role || '').toLowerCase() === 'user';
+  const text = m => typeof m.content === 'string' ? m.content : Array.isArray(m.content) ? m.content.map(b => b?.text || '').join('\n') : JSON.stringify(m.content || '');
+
+  return (
+    <CrmGuard>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <h1 style={{ margin:0, fontSize:22, fontWeight:700 }}>💬 Conversations de l&apos;assistant</h1>
+        <Btn small variant="secondary" onClick={load}>↻</Btn>
+      </div>
+      {loading ? <Spin /> : (
+        <Card>
+          <Tbl heads={['Dernier message', 'Page', 'Langue', 'Messages', 'Transfert humain', 'Lead / Réclamation']}
+            rows={items.map(c => (
+              <tr key={c.conversation_id} style={{ cursor:'pointer' }} onClick={() => open(c)}>
+                <TD style={{ fontSize:11, color:C.muted }}>{fmtDate(c.last_message_at || c.created_at)}</TD>
+                <TD style={{ fontSize:12 }}>{c.page || '—'}</TD>
+                <TD><Badge label={(c.locale || 'fr').toUpperCase()} color={C.blue} /></TD>
+                <TD>{c.message_count ?? '—'}</TD>
+                <TD>{c.handoff_requested ? <Badge label={`Oui${c.handoff_team ? ' · ' + c.handoff_team : ''}`} color={C.warning} /> : <span style={{ color:C.muted }}>—</span>}</TD>
+                <TD style={{ fontSize:11 }}>{c.lead_id && <Badge label="Lead" color={C.primary} />} {c.claim_id && <Badge label="Réclamation" color={C.danger} />}{!c.lead_id && !c.claim_id && <span style={{ color:C.muted }}>—</span>}</TD>
+              </tr>
+            ))} empty="Aucune conversation" />
+          <Pagination page={page} setPage={setPage} count={items.length} limit={LIMIT} />
+        </Card>
+      )}
+      {selected && (
+        <Drawer title={`Conversation ${String(selected.conversation_id).slice(0, 8)}…`} onClose={() => setSelected(null)} width={620}>
+          <div style={{ fontSize:11, color:C.muted, marginBottom:12 }}>
+            Lecture seule · {selected.locale || 'fr'} · page {selected.page || '—'} · {fmtDate(selected.created_at)}
+            {selected.handoff_requested && <> · <span style={{ color:C.warning }}>transfert humain demandé{selected.handoff_team ? ` (${selected.handoff_team})` : ''}</span></>}
+          </div>
+          {msgs === null ? <Spin /> : msgs.length === 0 ? <div style={{ color:C.muted, fontSize:13 }}>Transcript vide.</div> : msgs.map(m => (
+            <div key={m.message_id} style={{ display:'flex', justifyContent: isUser(m) ? 'flex-end' : 'flex-start', marginBottom:10 }}>
+              <div style={{ maxWidth:'82%', background: isUser(m) ? `${C.primary}18` : C.bg, border:`1px solid ${isUser(m) ? C.primary + '40' : C.border}`, borderRadius:12, padding:'8px 12px', fontSize:13 }}>
+                <div style={{ fontSize:10, color:C.muted, marginBottom:3 }}>{isUser(m) ? '👤 visiteur' : '🤖 ' + (m.role || 'assistant')} · {fmtDate(m.created_at)}</div>
+                <div style={{ whiteSpace:'pre-wrap' }}>{text(m)}</div>
+                {Array.isArray(m.tool_calls) && m.tool_calls.length > 0 && <div style={{ fontSize:10, color:C.muted, marginTop:4 }}>🔧 {m.tool_calls.map(tc => tc.name || tc.function?.name || 'outil').join(', ')}</div>}
+              </div>
+            </div>
+          ))}
+        </Drawer>
+      )}
+    </CrmGuard>
+  );
+};
+
 // ─── AUDIT LOGS ───────────────────────────────────────────────────
 const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
@@ -3155,7 +3660,7 @@ const AdminUsers = () => {
         <Modal title="Créer un utilisateur admin" onClose={() => setShowNew(false)}>
           <Inp label="Prénom" value={form.firstName} onChange={v=>setForm(p=>({...p,firstName:v}))} placeholder="Jean" />
           <Inp label="Nom" value={form.lastName} onChange={v=>setForm(p=>({...p,lastName:v}))} placeholder="Dupont" />
-          <Inp label="Email *" value={form.email} onChange={v=>setForm(p=>({...p,email:v}))} placeholder="user@cplus.africa" />
+          <Inp label="Email *" value={form.email} onChange={v=>setForm(p=>({...p,email:v}))} placeholder="user@c-pay.global" />
           <Inp label="Mot de passe *" value={form.password} onChange={v=>setForm(p=>({...p,password:v}))} type="password" placeholder="••••••••" />
           <div style={{ marginBottom:14 }}>
             <label style={{ display:'block', fontSize:12, color:C.muted, marginBottom:4 }}>Role *</label>
@@ -3183,7 +3688,7 @@ const AdminUsers = () => {
                 <TD><span style={{ background:`${ROLE_COLORS[u.role]||C.muted}20`, color:ROLE_COLORS[u.role]||C.muted, borderRadius:20, padding:'3px 10px', fontSize:11, fontWeight:700 }}>{ROLE_LABELS[u.role]||u.role}</span></TD>
                 <TD><Badge label={u.is_active?'Actif':'Inactif'} color={u.is_active?C.success:C.danger} /></TD>
                 <TD style={{ fontSize:11, color:C.muted }}>{u.last_login_at?fmtDate(u.last_login_at):'Jamais'}</TD>
-                <TD>{isSuperAdmin && u.email !== 'admin@cplus.africa' && (
+                <TD>{isSuperAdmin && u.email !== 'admin@c-pay.global' && (
                   <Btn small variant={u.is_active?'danger':'success'} onClick={() => toggleActive(u.admin_id, u.is_active)}>
                     {u.is_active?'Désactiver':'Activer'}
                   </Btn>
@@ -3361,6 +3866,9 @@ export default function App() {
           <Route path="/partners-agents"   element={<PartnersAgents />} />
           <Route path="/api-configs"   element={<ApiConfigs />} />
           <Route path="/tickets"       element={<SupportTickets />} />
+          <Route path="/crm/leads"         element={<CrmLeads />} />
+          <Route path="/crm/complaints"    element={<CrmComplaints />} />
+          <Route path="/crm/conversations" element={<CrmConversations />} />
           <Route path="/finance"       element={<Finance />} />
           <Route path="/admin-users"   element={<AdminUsers />} />
           <Route path="/audit"         element={<AuditLogs />} />

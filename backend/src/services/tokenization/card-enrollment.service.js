@@ -106,8 +106,9 @@ const generateSessionKey = (cardholderId) => {
     used:         false,
   });
 
-  // Nettoyage automatique
-  setTimeout(() => sessionKeys.delete(keyId), 11 * 60 * 1000);
+  // Nettoyage automatique (unref : ne retient pas le process / les tests)
+  const t = setTimeout(() => sessionKeys.delete(keyId), 11 * 60 * 1000);
+  if (typeof t.unref === 'function') t.unref();
 
   return { keyId, sessionKey, expiresAt };
 };
