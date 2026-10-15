@@ -137,7 +137,7 @@ const processPayment = async ({ txnId, amount, currency, phone, operator, gatewa
   try {
     const config = await getConfig(gateway);
     const result = await factory().collectPayment({ txnId, amount, currency, phone, description, config });
-    return normalize(result, operator);
+    return normalize(result, operator, gateway);
   } catch (err) {
     logger.error('MM Router: collect failed', { txnId, gateway, err: err.message });
     // Ne jamais bloquer — retourner une erreur réseau
@@ -154,7 +154,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, operator, gateway, c
   try {
     const config = await getConfig(gateway);
     const result = await factory().sendPayout({ txnId, amount, currency, phone, config });
-    return normalize(result, operator);
+    return normalize(result, operator, gateway);
   } catch (err) {
     logger.error('MM Router: payout failed', { txnId, gateway, err: err.message });
     return { approved: false, responseCode: '96', declineReason: 'Service de retrait indisponible', retryable: true };
@@ -184,7 +184,9 @@ const invalidateCache = () => { _cacheTime = 0; _configCache = {}; };
 // l'orchestrateur laisse alors la transaction `pending` (jamais `failed`).
 // gatewayRef est persisté dans transactions.gateway_payment_id : pour Orange c'est le
 // notif_token (comparé au callback notif_url), pour Wave l'id de session checkout.
-const normalize = (raw, operator) => {
+// WAVE-3 : _gateway (clé orange_cg, wave_sn…) est persisté dans transactions.gateway_name
+// (comme les gateways carte) — la réconciliation et les webhooks retrouvent ainsi la config.
+const normalize = (raw, operator, gateway = null) => {
   const pending  = raw.pending === true;
   const approved = !pending && raw.success === true;
   return {
@@ -196,6 +198,7 @@ const normalize = (raw, operator) => {
     gatewayRef:    raw.notifToken   || raw.sessionId || raw.externalId || raw.transactionId || null,
     retryable:     raw.retryable    ?? false,
     _operator:     operator,
+    _gateway:      gateway || null,
   };
 };
 

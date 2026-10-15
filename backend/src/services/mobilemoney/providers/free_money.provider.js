@@ -32,7 +32,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       amount:      String(amount),
       currency:    currency || 'XOF',
       orderId:     txnId,
-      description: description || 'CPlus 2.6.0',
+      description: description || 'C-Pay',
       callbackUrl: webhookUrl('free_money', `/${txnId}`),
     },
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }

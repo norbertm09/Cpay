@@ -37,14 +37,38 @@ router.get('/leads', crm, async (req, res) => {
   res.json({ data: data.rows, total: total.rows[0].n, page: p, limit: l });
 });
 
+// WAVE-3 : sémantique PATCH — champ absent = inchangé ; null (ou "" pour un texte) = effacé ; valeur = remplacée.
+// Renvoie { sets, params } ou { error } (422).
+const buildPatch = ({ body, statusList, textField }) => {
+  const { status, assignedTo } = body;
+  const text = body[textField];
+  const sets = []; const params = [];
+  const add = (sql, v) => { params.push(v); sets.push(sql.replace('?', `$${params.length}`)); };
+  if (status !== undefined) {
+    if (!statusList.includes(status)) return { error: 'Statut invalide' };
+    add('status = ?', status);
+  }
+  if (assignedTo !== undefined) {
+    if (assignedTo === null || assignedTo === '') add('assigned_to = ?::uuid', null);
+    else if (typeof assignedTo === 'string' && UUID.test(assignedTo)) add('assigned_to = ?::uuid', assignedTo);
+    else return { error: 'assignedTo invalide (uuid ou null)' };
+  }
+  if (text !== undefined) {
+    if (text === null || text === '') add(`${textField} = ?`, null);
+    else if (typeof text === 'string') add(`${textField} = ?`, text.slice(0, 4000));
+    else return { error: `${textField} invalide` };
+  }
+  return { sets, params };
+};
+
 router.patch('/leads/:id', crm, async (req, res) => {
   if (!UUID.test(req.params.id)) return res.status(404).json({ error: 'Lead introuvable' });
-  const { status, assignedTo, notes } = req.body || {};
-  if (status !== undefined && !LEAD_STATUS.includes(status)) return res.status(422).json({ error: 'Statut invalide', code: 'VALIDATION_ERROR' });
+  const patch = buildPatch({ body: req.body || {}, statusList: LEAD_STATUS, textField: 'notes' });
+  if (patch.error) return res.status(422).json({ error: patch.error, code: 'VALIDATION_ERROR' });
+  if (!patch.sets.length) return res.status(422).json({ error: 'Aucun champ à mettre à jour', code: 'VALIDATION_ERROR' });
+  patch.params.push(req.params.id);
   const r = await query(
-    `UPDATE crm_leads SET status = COALESCE($1, status), assigned_to = COALESCE($2::uuid, assigned_to), notes = COALESCE($3, notes), updated_at = NOW()
-     WHERE lead_id = $4 RETURNING *`,
-    [status ?? null, assignedTo && UUID.test(assignedTo) ? assignedTo : null, typeof notes === 'string' ? notes.slice(0, 4000) : null, req.params.id]);
+    `UPDATE crm_leads SET ${patch.sets.join(', ')}, updated_at = NOW() WHERE lead_id = $${patch.params.length} RETURNING *`, patch.params);
   if (!r.rows.length) return res.status(404).json({ error: 'Lead introuvable' });
   res.json(r.rows[0]);
 });
@@ -65,13 +89,14 @@ router.get('/claims', crm, async (req, res) => {
 
 router.patch('/claims/:id', crm, async (req, res) => {
   if (!UUID.test(req.params.id)) return res.status(404).json({ error: 'Réclamation introuvable' });
-  const { status, assignedTo, resolution } = req.body || {};
-  if (status !== undefined && !CLAIM_STATUS.includes(status)) return res.status(422).json({ error: 'Statut invalide', code: 'VALIDATION_ERROR' });
+  const patch = buildPatch({ body: req.body || {}, statusList: CLAIM_STATUS, textField: 'resolution' });
+  if (patch.error) return res.status(422).json({ error: patch.error, code: 'VALIDATION_ERROR' });
+  if (!patch.sets.length) return res.status(422).json({ error: 'Aucun champ à mettre à jour', code: 'VALIDATION_ERROR' });
+  const { status } = req.body || {};
+  if (status === 'resolved' || status === 'closed') patch.sets.push('resolved_at = COALESCE(resolved_at, NOW())');
+  patch.params.push(req.params.id);
   const r = await query(
-    `UPDATE crm_claims SET status = COALESCE($1, status), assigned_to = COALESCE($2::uuid, assigned_to), resolution = COALESCE($3, resolution),
-       resolved_at = CASE WHEN $1 IN ('resolved','closed') THEN COALESCE(resolved_at, NOW()) ELSE resolved_at END, updated_at = NOW()
-     WHERE claim_id = $4 RETURNING *`,
-    [status ?? null, assignedTo && UUID.test(assignedTo) ? assignedTo : null, typeof resolution === 'string' ? resolution.slice(0, 4000) : null, req.params.id]);
+    `UPDATE crm_claims SET ${patch.sets.join(', ')}, updated_at = NOW() WHERE claim_id = $${patch.params.length} RETURNING *`, patch.params);
   if (!r.rows.length) return res.status(404).json({ error: 'Réclamation introuvable' });
   res.json(r.rows[0]);
 });

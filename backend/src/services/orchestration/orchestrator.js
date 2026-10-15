@@ -316,7 +316,7 @@ const generatePayLink = async ({ merchantId, amount, currency, description }) =>
     linkId,
     shortId,
     url,
-    shareText: `Payer ${amount} ${currency} via CPlus 2.6.0 : ${url}`,
+    shareText: `Payer ${amount} ${currency} via C-Pay : ${url}`,
     channels: {
       whatsapp: `https://wa.me/?text=${encodeURIComponent(`Payer ${amount} ${currency} : ${url}`)}`,
       sms:      `sms:?body=${encodeURIComponent(`Payer ${amount} ${currency} : ${url}`)}`,

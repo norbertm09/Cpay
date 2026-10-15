@@ -103,7 +103,7 @@ const sendReceipt = ({ to, type, amount, fee, reference, authCode, date, method,
     </table>
   `, 'Conservez ce reçu pour vos archives.');
 
-  return send({ to, subject: `CPlus — Reçu ${type} · ${fmt(amount)} XAF`, html });
+  return send({ to, subject: `C-Pay — Reçu ${type} · ${fmt(amount)} XAF`, html });
 };
 
 // Transfert bancaire
@@ -129,7 +129,7 @@ const sendTransferNotice = ({ to, direction, amount, institution, accountNumber,
   `);
   return send({
     to,
-    subject: `CPlus — Virement ${isOut ? 'vers' : 'depuis'} ${institution} · ${fmt(amount)} XAF`,
+    subject: `C-Pay — Virement ${isOut ? 'vers' : 'depuis'} ${institution} · ${fmt(amount)} XAF`,
     html,
   });
 };
@@ -139,16 +139,16 @@ const sendWelcome = ({ to, firstName, userType }) => {
   const isM = userType === 'merchant';
   const html = wrap(`Bienvenue ${firstName || ''} !`, `
     <p style="color:#5a6677;font-size:15px;line-height:1.6;">
-      Votre compte ${isM ? 'marchand' : 'porteur'} CPlus est actif.
+      Votre compte ${isM ? 'marchand' : 'porteur'} C-Pay est actif.
       ${isM ? 'Vous pouvez maintenant encaisser des paiements Mobile Money, QR et sans contact.'
             : 'Vous pouvez créer vos cartes, les recharger et payer partout.'}
     </p>
-    ${btn('Ouvrir CPlus', isM ? 'https://merchant.c-pay.global' : 'https://app.c-pay.global')}
+    ${btn('Ouvrir C-Pay', isM ? 'https://merchant.c-pay.global' : 'https://app.c-pay.global')}
     <p style="color:#5a6677;font-size:13px;">
       📱 Application mobile : <a href="https://c-pay.global/downloads/cplus-v2.6.0-debug.apk" style="color:#12b6c7;">télécharger l'APK Android</a>
     </p>
   `);
-  return send({ to, subject: 'Bienvenue sur CPlus 🎉', html });
+  return send({ to, subject: 'Bienvenue sur C-Pay 🎉', html });
 };
 
 // Reinitialisation de mot de passe
@@ -167,7 +167,7 @@ const sendPasswordReset = ({ to, token, userType }) => {
       <div style="color:#c53030;font-size:12px;">⚠️ Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</div>
     </div>
   `);
-  return send({ to, subject: 'CPlus — Réinitialisation de mot de passe', html });
+  return send({ to, subject: 'C-Pay — Réinitialisation de mot de passe', html });
 };
 
 // Alerte securite
@@ -187,7 +187,7 @@ const sendSecurityAlert = ({ to, event, ip, device, date }) => {
     </p>
     ${btn('Sécuriser mon compte', 'https://app.c-pay.global/profile')}
   `);
-  return send({ to, subject: `CPlus — ${event}`, html });
+  return send({ to, subject: `C-Pay — ${event}`, html });
 };
 
 // Carte creee / emise
@@ -203,7 +203,7 @@ const sendCardIssued = ({ to, cardMasked, label, cardholderName }) => {
     </p>
     ${btn('Configurer ma carte', 'https://app.c-pay.global/cards')}
   `);
-  return send({ to, subject: 'CPlus — Votre nouvelle carte est prête 💳', html });
+  return send({ to, subject: 'C-Pay — Votre nouvelle carte est prête 💳', html });
 };
 
 // KYC
@@ -221,7 +221,7 @@ const sendKycStatus = ({ to, status, level, reason }) => {
            : 'Nos équipes examinent vos documents. Vous serez notifié sous 48h.'}
     </p>
   `);
-  return send({ to, subject: `CPlus — Vérification ${ok ? 'approuvée' : 'en cours'}`, html });
+  return send({ to, subject: `C-Pay — Vérification ${ok ? 'approuvée' : 'en cours'}`, html });
 };
 
 // Test SMTP

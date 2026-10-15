@@ -34,7 +34,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
     body: {
       company_code: config.companyCode,
       reference: txnId,
-      narration: config.narration || 'CPlus payout',
+      narration: config.narration || 'C-Pay payout',
       debit_account_no: config.debitAccountNo,
       debit_type: 'single',
       callback_url: config.callbackUrl || process.env.PAYMENTHUB_CALLBACK_URL,
@@ -44,7 +44,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
         amount: Number(amount),
         currency: currency || 'CDF',
         reference: txnId,
-        narration: config.operationNarration || 'CPlus payout',
+        narration: config.operationNarration || 'C-Pay payout',
       }],
     },
     headers: {

@@ -32,7 +32,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       currency,
       customer_msisdn: phone.replace('+', ''),
       external_transaction_id: txnId,
-      description:   description || 'CPlus 2.6.0',
+      description:   description || 'C-Pay',
       country_code:  country,
     },
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }

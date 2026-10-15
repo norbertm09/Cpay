@@ -115,7 +115,7 @@ const initiate = async ({ cardholderId, direction, sourceType, sourceId, account
           const rtp = await mtn.requestToPay({
             amount: amt,
             phone: wallet.phone,
-            description: `CPlus - Virement ${bank.inst_name}`,
+            description: `C-Pay - Virement ${bank.inst_name}`,
             externalId: ref,
           });
           steps.push({ step: 'momo_request', status: 'pending', ref: rtp.referenceId, at: new Date() });
@@ -197,7 +197,7 @@ const initiate = async ({ cardholderId, direction, sourceType, sourceId, account
               const disb = await mtn.transfer({
                 amount: amt,
                 phone: wallet.phone,
-                description: `CPlus - Reception ${bank.inst_name}`,
+                description: `C-Pay - Reception ${bank.inst_name}`,
                 externalId: ref + '-D',
               });
               steps.push({ step: 'momo_disburse', status: 'pending', ref: disb.referenceId, at: new Date() });

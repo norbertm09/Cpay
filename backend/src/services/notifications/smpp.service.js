@@ -85,11 +85,11 @@ const notifyMultiChannel = async ({ phone, email, text, subject }) => {
       const emailSvc = require('./email.service');
       await emailSvc.send({
         to: email,
-        subject: subject || 'CPlus — notification',
+        subject: subject || 'C-Pay — notification',
         html: `<div style="font-family:Arial,sans-serif;max-width:420px">
           <p style="white-space:pre-line;color:#1e2d3d;font-size:14px">${String(text).replace(/</g,'&lt;')}</p>
           <hr style="border:none;border-top:1px solid #e2e8f0">
-          <p style="color:#5a6677;font-size:12px">CPlus · c-pay.global</p></div>`,
+          <p style="color:#5a6677;font-size:12px">C-Pay · c-pay.global</p></div>`,
       });
       out.email = true;
     } catch (e) { console.error('[notify][email]', e.message); }

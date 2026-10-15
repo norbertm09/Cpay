@@ -641,10 +641,10 @@ const triggerMerchantWebhook = async (referenceOrId, event) => {
       timestamp: new Date().toISOString()
     });
 
-    const signature = 'sha256=' + crypto
-      .createHmac('sha256', txn.webhook_secret || 'cplus-default-secret')
-      .update(payload)
-      .digest('hex');
+    // WAVE-3 : signature + en-têtes partagés (services/webhooks/outgoing.js)
+    const headers = require('../services/webhooks/outgoing').buildHeaders({
+      secret: txn.webhook_secret || 'cplus-default-secret', rawBody: payload, event,
+    });
 
     // Envoyer le webhook (avec retry)
     const url = new URL(txn.webhook_url);
@@ -656,13 +656,7 @@ const triggerMerchantWebhook = async (referenceOrId, event) => {
         port:     url.port || (url.protocol === 'https:' ? 443 : 80),
         path:     url.pathname,
         method:   'POST',
-        headers:  {
-          'Content-Type':       'application/json',
-          'Content-Length':     Buffer.byteLength(payload),
-          'X-CPlus-Signature':  signature,
-          'X-CPlus-Event':      event,
-          'User-Agent':         'CPlus-Webhook/2.6.0',
-        },
+        headers:  { ...headers, 'Content-Length': Buffer.byteLength(payload) },
         timeout: 10000,
       }, (res) => {
         logger.info(`Webhook merchant ${event}: HTTP ${res.statusCode} (tentative ${attempt})`);

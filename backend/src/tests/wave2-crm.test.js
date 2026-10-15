@@ -158,4 +158,42 @@ describe('back office CRM', () => {
     expect((await request(app).patch('/api/v1/admin/crm/leads/' + CONV).set('x-test-role', 'ops_admin').send({ status: 'bogus' })).status).toBe(422);
     expect((await request(app).patch('/api/v1/admin/crm/leads/' + CONV).set('x-test-role', 'ops_admin').send({ status: 'contacted', notes: 'appelé' })).status).toBe(200);
   });
+
+  // WAVE-3 : PATCH — absent = inchangé, null/"" = effacé, valeur = remplacée (plus de COALESCE)
+  const ADMIN = '33333333-3333-4333-8333-333333333333';
+  const patchLead = (body) => request(app).patch('/api/v1/admin/crm/leads/' + CONV).set('x-test-role', 'ops_admin').send(body);
+  const patchClaim = (body) => request(app).patch('/api/v1/admin/crm/claims/' + CONV).set('x-test-role', 'ops_admin').send(body);
+  const lastUpdate = () => mockQuery.mock.calls.filter(([s]) => /^UPDATE crm_/.test(s)).at(-1);
+
+  test('leads : assignedTo null → assigned_to = NULL ; absent → inchangé ; uuid → remplacé ; notes "" → NULL', async () => {
+    mockQuery.mockResolvedValue({ rows: [{ lead_id: 'lead-1' }] });
+    expect((await patchLead({ assignedTo: null })).status).toBe(200);
+    let [sql, params] = lastUpdate();
+    expect(sql).toMatch(/SET assigned_to = \$1::uuid, updated_at = NOW\(\) WHERE lead_id = \$2/);
+    expect(sql).not.toMatch(/COALESCE/); expect(params).toEqual([null, CONV]);
+
+    expect((await patchLead({ status: 'contacted' })).status).toBe(200);
+    [sql, params] = lastUpdate();
+    expect(sql).not.toMatch(/assigned_to|notes/); expect(params).toEqual(['contacted', CONV]);
+
+    expect((await patchLead({ assignedTo: ADMIN, notes: '' })).status).toBe(200);
+    [sql, params] = lastUpdate();
+    expect(sql).toMatch(/assigned_to = \$1::uuid, notes = \$2/); expect(params).toEqual([ADMIN, null, CONV]);
+
+    expect((await patchLead({ assignedTo: 'nope' })).status).toBe(422);
+    expect((await patchLead({ notes: 42 })).status).toBe(422);
+    expect((await patchLead({})).status).toBe(422);
+  });
+
+  test('réclamations : désassignation, resolution null, resolved_at posé sur resolved/closed', async () => {
+    mockQuery.mockResolvedValue({ rows: [{ claim_id: 'claim-1' }] });
+    expect((await patchClaim({ status: 'resolved', assignedTo: null, resolution: null })).status).toBe(200);
+    const [sql, params] = lastUpdate();
+    expect(sql).toMatch(/status = \$1, assigned_to = \$2::uuid, resolution = \$3, resolved_at = COALESCE\(resolved_at, NOW\(\)\), updated_at = NOW\(\)/);
+    expect(params).toEqual(['resolved', null, null, CONV]);
+    expect((await patchClaim({ status: 'in_progress' })).status).toBe(200);
+    expect(lastUpdate()[0]).not.toMatch(/resolved_at = COALESCE/);
+    mockQuery.mockResolvedValue({ rows: [] });
+    expect((await patchClaim({ assignedTo: null })).status).toBe(404);
+  });
 });

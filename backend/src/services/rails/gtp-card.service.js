@@ -226,7 +226,7 @@ const fundTransfer = async ({ gtpCardId, cardholderId, amount, transferType, mem
     CustomerID:        gtpCardId,
     TransferAmount:    parseFloat(amount).toFixed(2),
     CurrencyCode:      currency || 'XAF',
-    ReferenceMemo:     (memo || 'CPlus').slice(0, 100),
+    ReferenceMemo:     (memo || 'C-Pay').slice(0, 100),
     MobilePhoneNumber: digits(mobilePhone),
     Last4Digits:       card.last4,
     ReturnNewBalance:  'true',
@@ -299,8 +299,8 @@ const payment = async ({ gtpCardId, cardholderId, toCustomerId, toLast4, amount,
     CurrencyCode:   'XAF',
     ToCustomerID:   toCustomerId,
     Last4Digits:    toLast4,
-    FromCardReferenceMemo: (description || 'Paiement CPlus').slice(0, 100),
-    ToCardReferenceMemo:   (description || 'Reception CPlus').slice(0, 100),
+    FromCardReferenceMemo: (description || 'Paiement C-Pay').slice(0, 100),
+    ToCardReferenceMemo:   (description || 'Reception C-Pay').slice(0, 100),
   };
   if (mobilePhone) body.MobilePhoneNumber = digits(mobilePhone);
 

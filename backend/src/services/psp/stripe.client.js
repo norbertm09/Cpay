@@ -71,7 +71,7 @@ const processPayment = async ({ amount, currency = 'xaf', tokenId, cardMasked, n
     return_url:           'https://app.c-pay.global/payment/complete',
     metadata_order_id:    orderId,
     'metadata[cplus_txn]': orderId,
-    description:          `CPlus Payment ${orderId}`,
+    description:          `C-Pay Payment ${orderId}`,
     receipt_email:        cardholder.email || undefined,
   });
 

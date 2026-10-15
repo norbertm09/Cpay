@@ -1,9 +1,9 @@
 'use strict';
 // Nettoyer les messages pour MTN (ASCII, max 160 car, pas de caracteres speciaux)
-const sanitizeMsg = (s) => String(s || 'Paiement CPlus')
+const sanitizeMsg = (s) => String(s || 'Paiement C-Pay')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // retirer accents
   .replace(/[^a-zA-Z0-9 .,-]/g, ' ')                    // garder ASCII simple
-  .replace(/\s+/g, ' ').trim().slice(0, 160) || 'Paiement CPlus';
+  .replace(/\s+/g, ' ').trim().slice(0, 160) || 'Paiement C-Pay';
 
 
 const https  = require('https');
@@ -116,8 +116,8 @@ const requestToPay = async ({ amount, phone, description, externalId }) => {
     currency:    CONFIG.currency,
     externalId:  (externalId ? externalId + '-' : '') + Date.now() + '-' + Math.random().toString(36).slice(2,6),
     payer:       { partyIdType: 'MSISDN', partyId: toMtnMsisdn(phone) },
-    payerMessage: sanitizeMsg(description) || 'CPlus Payment',
-    payeeNote:    'CPlus',
+    payerMessage: sanitizeMsg(description) || 'C-Pay Payment',
+    payeeNote:    'C-Pay',
   });
   const r = await rawRequest({
     hostname: MTN_HOST,
@@ -179,8 +179,8 @@ const transfer = async ({ amount, phone, description, externalId }) => {
     currency:    CONFIG.currency,
     externalId:  (externalId ? externalId + '-' : '') + Date.now() + '-' + Math.random().toString(36).slice(2,6),
     payee:       { partyIdType: 'MSISDN', partyId: toMtnMsisdn(phone) },
-    payerMessage: sanitizeMsg(description) || 'CPlus Payout',
-    payeeNote:    'CPlus',
+    payerMessage: sanitizeMsg(description) || 'C-Pay Payout',
+    payeeNote:    'C-Pay',
   });
   const r = await rawRequest({
     hostname: MTN_HOST,

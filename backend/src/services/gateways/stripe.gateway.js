@@ -117,7 +117,7 @@ const createIntent = async ({
       currency:            currency.toLowerCase(),
       payment_method_types: paymentMethodTypes,
       capture_method:      captureMethod,
-      description:         description || 'CPlus 2.6.0',
+      description:         description || 'C-Pay',
       metadata:            { internal_txn_id: txnId, ...metadata },
     });
 

@@ -145,7 +145,7 @@ const swaggerSpec = require('./swagger');
 app.use('/api/v1/docs', swaggerUi.serve);
 app.get('/api/v1/docs/', swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { background: #1d4f92; }',
-  customSiteTitle: 'CPlus API Documentation',
+  customSiteTitle: 'C-Pay API Documentation',
   swaggerOptions: {
     url: '/api/v1/docs.json',
     persistAuthorization: true,

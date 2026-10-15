@@ -1,6 +1,5 @@
 'use strict';
 
-const crypto = require('crypto');
 const net = require('net');
 const dns = require('dns').promises;
 const { query } = require('../../config/database');
@@ -189,8 +188,10 @@ const upsertIntegration = async ({ merchantId, integrationId, integrationType, p
   return maskAuth(result.rows[0]);
 };
 
-const signPayload = (secret, payload) =>
-  crypto.createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex');
+// WAVE-3 : signature/en-têtes partagés (X-CPay-* + X-CPlus-* de transition) — services/webhooks/outgoing.js
+const outgoing = require('../webhooks/outgoing');
+// Conservé pour compatibilité (hex nu, format historique des intégrations)
+const signPayload = (secret, payload) => outgoing.computeHmac(secret, JSON.stringify(payload));
 
 const deliverEvent = async ({ merchantId, eventType, payload }) => {
   const integrations = await query(
@@ -204,14 +205,12 @@ const deliverEvent = async ({ merchantId, eventType, payload }) => {
     try {
       // Garde SSRF + delai 10 s sur tout appel sortant
       const safeUrl = await assertSafeWebhookUrl(integration.endpoint_url);
+      const rawBody = JSON.stringify(body);
       const res = await fetchWithTimeout(safeUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CPlus-Event': eventType,
-          'X-CPlus-Signature': signPayload(integration.signing_secret, body),
-        },
-        body: JSON.stringify(body),
+        // legacyPrefixed:false — les intégrations recevaient un hex nu dans X-CPlus-Signature
+        headers: outgoing.buildHeaders({ secret: integration.signing_secret, rawBody, event: eventType, legacyPrefixed: false }),
+        body: rawBody,
       });
       const text = await res.text().catch(() => '');
       await query(

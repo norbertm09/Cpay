@@ -30,8 +30,8 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       currency,
       externalId:  ref,
       payer: { partyIdType: 'MSISDN', partyId: phone.replace('+', '') },
-      payerMessage: description || 'CPlus 2.6.0',
-      payeeNote:    description || 'CPlus 2.6.0',
+      payerMessage: description || 'C-Pay',
+      payeeNote:    description || 'C-Pay',
     },
     {
       'Authorization':              `Bearer ${token}`,
@@ -62,8 +62,8 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
       amount: String(amount), currency,
       externalId: ref,
       payee: { partyIdType: 'MSISDN', partyId: phone.replace('+', '') },
-      payerMessage: 'CPlus 2.6.0 retrait',
-      payeeNote:    'CPlus 2.6.0 retrait',
+      payerMessage: 'C-Pay retrait',
+      payeeNote:    'C-Pay retrait',
     },
     {
       'Authorization':             `Bearer ${token}`,
