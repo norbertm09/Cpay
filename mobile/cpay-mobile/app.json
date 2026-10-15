@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "CPlus 2.6.0",
-    "slug": "cplus-2-6-mobile",
-    "version": "2.6.0",
+    "name": "C-Pay",
+    "slug": "cpay-mobile",
+    "version": "2.7.0",
     "orientation": "portrait",
-    "scheme": "cplus",
+    "scheme": "cpay",
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "global.cpay.mobile",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "global.cpay.mobile",
-      "versionCode": 260,
+      "versionCode": 270,
       "permissions": ["INTERNET"]
     },
     "extra": {

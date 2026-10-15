@@ -45,7 +45,7 @@ Les 100+ routes d'`ApiService.kt` existent toutes côté backend. Seules diverge
 ### APK publié
 `portal/landing/downloads/cplus-v2.6.0-debug.apk` (30 Mo) : manifeste `debuggable`, `versionName 2.6.0-debug`, applicationId `global.cpay.app.debug`, pointe sur `https://api.c-pay.global/api/v1`. **Build debug de ce code, non minifié, logging HTTP BODY actif, téléchargeable par URL** (non lié depuis les pages HTML).
 
-## 2. App Expo (`mobile/cplus-mobile`)
+## 2. App Expo (`mobile/cpay-mobile`)
 - `App.js` (864 lignes, un fichier) : login marchand/admin, inscription, collect/payout legacy, QR/pay-link, historique, rails Visa, tokens, CRM, pilot, support, **mode admin complet** (`/admin/*`).
 - Base URL `EXPO_PUBLIC_API_BASE_URL || 'https://api.c-pay.global'` ; `.env.example` mentionné mais absent.
 - **Tokens en `AsyncStorage` en clair** (`App.js:17,60-68,143-144`) y compris sessions super_admin ; `expo-secure-store` en dépendance mais jamais importé.

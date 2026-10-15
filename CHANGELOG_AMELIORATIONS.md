@@ -50,7 +50,7 @@ Version cible: CPlus 2.6.0
 - Ajout de `SecureStorage.updateTokens`.
 - Rendu QR Code reel avec ZXing.
 - Partage Pay Link natif: WhatsApp, SMS et copie du lien.
-- Ajout d'une application mobile cross-platform Android/iOS sous `mobile/cplus-mobile`.
+- Ajout d'une application mobile cross-platform Android/iOS sous `mobile/cpay-mobile`.
 - App mobile: marchand, admin, collect, payout, QR, Pay Link, transactions, règlements, APIs, marchands, monitoring et rails Visa.
 
 ## Portail admin
