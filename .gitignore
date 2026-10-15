@@ -8,6 +8,9 @@ docker/dhparam.pem
 *.bak-*
 *.bak[0-9]
 reset-creds.js
+.env
+.env.*
+!.env.example
 docker/certbot/
 *.pem
 *.key

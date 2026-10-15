@@ -51,6 +51,15 @@ Base : `prod-hotfix-v1` (2.6.0 + vague 1). Backend : 18 suites / 446 tests verts
 
 ## 3. Déploiement
 
+Script tout-en-un (étapes 1 à 5 ci-dessous, idempotent, `--dry-run` pour prévisualiser) :
+
+```bash
+cd /opt/cplus && git fetch origin && git checkout main && git pull origin main
+./scripts/deploy-wave-2.sh --dry-run && ./scripts/deploy-wave-2.sh
+```
+
+Ou manuellement :
+
 ```bash
 cd /opt/cplus && git fetch origin && git checkout wave-2
 ./scripts/backup-db.sh --label pre-wave-2
