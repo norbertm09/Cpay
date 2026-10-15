@@ -2,7 +2,9 @@ package global.cpay.app.onboarding
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import global.cpay.app.common.ApiClient
 import global.cpay.app.R
 import global.cpay.app.databinding.ActivityProfileSelectBinding
 
@@ -14,6 +16,10 @@ class ProfileSelectActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityProfileSelectBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        if (intent.getBooleanExtra(ApiClient.EXTRA_SESSION_EXPIRED, false)) {
+            Toast.makeText(this, R.string.session_expired, Toast.LENGTH_LONG).show()
+        }
 
         binding.btnCardholder.setOnClickListener {
             startLogin("cardholder")

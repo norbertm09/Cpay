@@ -72,6 +72,6 @@ object SecurityManager {
 
     // Log sécurité (en prod, envoyer à un serveur de monitoring)
     fun logSecurityEvent(context: Context, event: String, details: String = "") {
-        Log.w("CPlus-Security", "[$event] $details")
+        Log.w("CPay-Security", "[$event] $details")
     }
 }

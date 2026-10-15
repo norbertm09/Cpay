@@ -16,7 +16,7 @@ object BiometricHelper {
 
     fun authenticate(
         activity: FragmentActivity,
-        title: String = "Authentification CPlus",
+        title: String = "Authentification C-Pay",
         subtitle: String = "Utilisez votre empreinte digitale",
         onSuccess: () -> Unit,
         onError: (String) -> Unit

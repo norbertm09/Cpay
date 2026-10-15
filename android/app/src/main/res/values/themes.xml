@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.CPlus" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.CPay" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/primary</item>
         <item name="colorPrimaryVariant">@color/primary_dark</item>
         <item name="colorOnPrimary">@color/white</item>
@@ -10,11 +10,11 @@
         <item name="android:textColor">@color/text</item>
     </style>
 
-    <style name="Theme.CPlus.Splash" parent="Theme.CPlus">
+    <style name="Theme.CPay.Splash" parent="Theme.CPay">
         <item name="android:windowBackground">@color/primary_dark</item>
         <item name="android:statusBarColor">@color/primary_dark</item>
     </style>
-    <style name="Theme.CPlus.NoActionBar" parent="Theme.CPlus">
+    <style name="Theme.CPay.NoActionBar" parent="Theme.CPay">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
     </style>

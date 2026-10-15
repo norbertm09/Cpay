@@ -238,7 +238,8 @@ class CollectFragment : Fragment() {
     }
 
     private fun doNFC() {
-        toast("NFC bientôt disponible")
+        // WAVE-3 : /merchant/collect/contactless repond 410 FEATURE_DISABLED cote backend.
+        toast(global.cpay.app.common.ApiErrors.FEATURE_DISABLED_MESSAGE)
     }
 
     private fun reset() {

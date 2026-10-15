@@ -26,7 +26,7 @@
             android:textColor="#B3FFFFFF" android:textSize="14sp" android:gravity="center"
             android:layout_marginBottom="8dp"/>
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="CPlus — Paiements sécurisés"
+            android:text="C-Pay — Paiements sécurisés"
             android:textColor="#80FFFFFF" android:textSize="12sp"/>
     </LinearLayout>
 </LinearLayout>

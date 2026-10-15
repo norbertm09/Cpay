@@ -5,11 +5,10 @@ import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import global.cpay.app.cardholder.CardholderMainActivity
 import global.cpay.app.common.ApiClient
-import global.cpay.app.common.SessionManager
+import global.cpay.app.common.ApiErrors
+import global.cpay.app.common.AuthFlow
 import global.cpay.app.databinding.ActivityRegisterBinding
-import global.cpay.app.merchant.MerchantMainActivity
 import kotlinx.coroutines.launch
 
 class RegisterActivity : AppCompatActivity() {
@@ -58,21 +57,12 @@ class RegisterActivity : AppCompatActivity() {
                     ApiClient.api.cardholderRegister(body)
 
                 if (response.isSuccessful && response.body() != null) {
-                    val body2 = response.body()!!
-                    val user = body2.effectiveUser
-                    if (user != null) {
-                        SessionManager.saveSession(body2.accessToken, user.effectiveId,
-                            user.displayName, user.email ?: email, userType)
-                        val next = if (userType == "merchant")
-                            Intent(this@RegisterActivity, MerchantMainActivity::class.java)
-                        else
-                            Intent(this@RegisterActivity, CardholderMainActivity::class.java)
-                        next.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                        startActivity(next)
+                    // WAVE-3 : { access_token, refresh_token, expires_in, user, mustChangePassword }
+                    if (!AuthFlow.saveAndEnter(this@RegisterActivity, response.body()!!, userType, email)) {
+                        showError("Réponse inattendue du serveur")
                     }
                 } else {
-                    val err = response.errorBody()?.string() ?: "Erreur inscription"
-                    showError(err)
+                    showError(ApiErrors.message(response, "Erreur inscription"))
                 }
             } catch(e: Exception) { showError("Erreur réseau: ${e.message}") }
             finally { setLoading(false) }

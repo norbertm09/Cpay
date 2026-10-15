@@ -13,7 +13,13 @@ interface ApiService {
     suspend fun merchantRegister(@Body body: Map<String, String>): Response<AuthResponse>
 
     @POST("merchant/auth/logout")
-    suspend fun merchantLogout(): Response<Map<String, Any>>
+    suspend fun merchantLogout(@Body body: RefreshRequest): Response<Map<String, Any>>
+
+    @POST("merchant/auth/2fa/validate")
+    suspend fun merchant2FAValidate(@Body body: MfaValidateRequest): Response<AuthResponse>
+
+    @GET("merchant/auth/me")
+    suspend fun merchantMe(): Response<AuthResponse>
 
     @POST("merchant/auth/forgot-password")
     suspend fun merchantForgotPassword(@Body body: Map<String, String>): Response<Map<String, Any>>
@@ -29,7 +35,13 @@ interface ApiService {
     suspend fun cardholderRegister(@Body body: Map<String, String>): Response<AuthResponse>
 
     @POST("cardholder/auth/logout")
-    suspend fun cardholderLogout(): Response<Map<String, Any>>
+    suspend fun cardholderLogout(@Body body: RefreshRequest): Response<Map<String, Any>>
+
+    @POST("cardholder/auth/2fa/validate")
+    suspend fun cardholder2FAValidate(@Body body: MfaValidateRequest): Response<AuthResponse>
+
+    @GET("cardholder/auth/me")
+    suspend fun cardholderMe(): Response<AuthResponse>
 
     @POST("cardholder/auth/forgot-password")
     suspend fun cardholderForgotPassword(@Body body: Map<String, String>): Response<Map<String, Any>>

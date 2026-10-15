@@ -18,7 +18,7 @@
                 android:layout_height="wrap_content" android:text="Créer un compte"
                 android:textSize="22sp" android:textStyle="bold" android:textColor="#FFFFFF"/>
             <TextView android:id="@+id/tv_subtitle" android:layout_width="wrap_content"
-                android:layout_height="wrap_content" android:text="Porteur de carte CPlus"
+                android:layout_height="wrap_content" android:text="Porteur de carte C-Pay"
                 android:textColor="#CCF0F4F8" android:textSize="13sp" android:layout_marginTop="4dp"/>
         </LinearLayout>
 

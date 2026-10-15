@@ -118,7 +118,7 @@ class DisburseFragment : Fragment() {
                     })
                     b.etAmountDisburse.text?.clear(); b.etPhoneDisburse.text?.clear()
                     b.etRefDisburse.setText(SecurityManager.generateRef("DSB"))
-                } else err(true, r.errorBody()?.string() ?: "Erreur")
+                } else err(true, ApiErrors.message(r))
             } catch (e: Exception) { err(true, "Erreur réseau") }
             finally { if (_b != null) b.progressDisburse.visibility = View.GONE }
         }
@@ -155,7 +155,11 @@ class DisburseFragment : Fragment() {
                     b.etAmountWithdraw.text?.clear(); b.etPhoneWithdraw.text?.clear()
                     b.etRefWithdraw.setText(SecurityManager.generateRef("WDR"))
                     loadBalance()
-                } else err(false, r.errorBody()?.string() ?: "Erreur")
+                } else {
+                    // WAVE-3 : /merchant/withdraw repond 410 FEATURE_DISABLED (hotfix v1).
+                    if (ApiErrors.isFeatureDisabled(r)) b.btnWithdraw.isEnabled = false
+                    err(false, ApiErrors.message(r))
+                }
             } catch (e: Exception) { err(false, "Erreur réseau") }
             finally { if (_b != null) b.progressWithdraw.visibility = View.GONE }
         }

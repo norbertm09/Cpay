@@ -9,15 +9,46 @@ data class LoginRequest(
     @SerializedName("mfaCode")      val mfaCode: String? = null,
 )
 
+/**
+ * Reponse de login / register / 2fa-validate / refresh / auth-me (WAVE-3).
+ *  - session : { access_token, refresh_token, expires_in, user|cardholder, mustChangePassword }
+ *  - 2FA requise au login : { mfaRequired: true, mfaToken } (aucune session)
+ *  - erreur : { error, code }
+ */
 data class AuthResponse(
-    @SerializedName("access_token")  val accessToken: String = "",
-    @SerializedName("refresh_token") val refreshToken: String? = null,
-    @SerializedName("user")          val user: UserInfo? = null,
-    @SerializedName("cardholder")    val cardholder: UserInfo? = null,
-    @SerializedName("mfaRequired")   val mfaRequired: Boolean = false,
+    @SerializedName("access_token")       val accessToken: String = "",
+    @SerializedName("refresh_token")      val refreshToken: String? = null,
+    @SerializedName("expires_in")         val expiresIn: Int = 0,
+    @SerializedName("user")               val user: UserInfo? = null,
+    @SerializedName("cardholder")         val cardholder: UserInfo? = null,
+    @SerializedName("mfaRequired")        val mfaRequired: Boolean = false,
+    @SerializedName("mfaToken")           val mfaToken: String? = null,
+    @SerializedName("mustChangePassword") val mustChangePassword: Boolean = false,
+    @SerializedName("error")              val error: String? = null,
+    @SerializedName("code")               val code: String? = null,
 ) {
     val effectiveUser: UserInfo? get() = user ?: cardholder
+    val hasSession: Boolean get() = accessToken.isNotBlank()
 }
+
+/** Corps de POST …/auth/refresh et …/auth/logout (refresh opaque, hors cookie). */
+data class RefreshRequest(
+    @SerializedName("refreshToken") val refreshToken: String,
+)
+
+/** Corps de POST …/auth/2fa/validate apres un login { mfaRequired: true }. */
+data class MfaValidateRequest(
+    @SerializedName("mfaToken") val mfaToken: String,
+    @SerializedName("code")     val code: String,
+)
+
+/** Corps d'erreur standard du backend : { error, code } (+ champs optionnels du login). */
+data class ApiError(
+    @SerializedName("error")        val error: String? = null,
+    @SerializedName("code")         val code: String? = null,
+    @SerializedName("attemptsLeft") val attemptsLeft: Int? = null,
+    @SerializedName("lockedUntil")  val lockedUntil: String? = null,
+)
 
 data class UserInfo(
     @SerializedName("userId")       val userId: String? = null,

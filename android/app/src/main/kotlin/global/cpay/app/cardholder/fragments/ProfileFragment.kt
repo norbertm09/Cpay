@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import global.cpay.app.common.ApiClient
+import global.cpay.app.common.ApiErrors
+import global.cpay.app.common.AuthFlow
 import global.cpay.app.common.SessionManager
 import global.cpay.app.common.TwoFAActivity
 import global.cpay.app.databinding.FragmentProfileBinding
@@ -133,12 +135,10 @@ class ProfileFragment : Fragment() {
                 val r = ApiClient.api.cardholderChangePassword(mapOf(
                     "currentPassword" to cur, "newPassword" to new))
                 if (r.isSuccessful) {
-                    toast("Mot de passe modifié ✅")
-                    b.etCurrentPassword.text?.clear()
-                    b.etNewPassword.text?.clear()
-                    b.etConfirmPassword.text?.clear()
-                    b.layoutPassword.visibility = View.GONE
-                } else toast(r.errorBody()?.string() ?: "Erreur")
+                    // WAVE-3 : le serveur revoque toutes les sessions → reconnexion.
+                    SessionManager.clearSession()
+                    AuthFlow.toLogin(requireContext(), "cardholder", "Mot de passe modifié ✅ — reconnectez-vous")
+                } else toast(ApiErrors.message(r))
             } catch (e: Exception) { toast("Erreur réseau") }
         }
     }
@@ -262,8 +262,8 @@ class ProfileFragment : Fragment() {
 
     private fun logout() {
         viewLifecycleOwner.lifecycleScope.launch {
-            try { ApiClient.api.cardholderLogout() } catch (e: Exception) { }
-            SessionManager.clearSession()
+            // POST /cardholder/auth/logout { refreshToken } + effacement local
+            try { ApiClient.logout() } catch (e: Exception) { SessionManager.clearSession() }
             startActivity(Intent(requireContext(), ProfileSelectActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             })

@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">CPay</string>
+    <string name="app_name">C-Pay</string>
+    <string name="app_editor">Calculus Plus SAS</string>
+    <string name="feature_disabled">Fonctionnalité en cours d\'intégration</string>
+    <string name="session_expired">Session expirée — veuillez vous reconnecter</string>
     <string name="app_description">Paiements Mobile Money — Zone CEMAC</string>
 </resources>

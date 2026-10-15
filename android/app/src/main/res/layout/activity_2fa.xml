@@ -14,11 +14,11 @@
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="vertical" android:background="@drawable/bg_balance_card"
             android:padding="20dp" android:layout_marginBottom="20dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            <TextView android:id="@+id/tv_2fa_title" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="🔐 Double Authentification"
                 android:textSize="20sp" android:textStyle="bold" android:textColor="#FFFFFF"/>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="Protégez votre compte avec Google Authenticator"
+            <TextView android:id="@+id/tv_2fa_subtitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Protégez votre compte avec une application d'authentification"
                 android:textColor="#CCF0F4F8" android:textSize="13sp" android:layout_marginTop="4dp"/>
         </LinearLayout>
 
@@ -56,7 +56,7 @@
             android:layout_height="wrap_content" android:orientation="vertical"
             android:background="@drawable/bg_card" android:padding="16dp"
             android:visibility="gone">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            <TextView android:id="@+id/tv_verify_label" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="3. Entrez le code à 6 chiffres"
                 android:textColor="@color/text" android:textSize="14sp" android:textStyle="bold"
                 android:layout_marginBottom="12dp"/>
