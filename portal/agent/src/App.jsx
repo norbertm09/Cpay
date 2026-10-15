@@ -130,7 +130,7 @@ const Layout = ({children}) => {
     <div style={{display:'flex',minHeight:'100vh',background:BG,fontFamily:FONT}}>
       <aside style={{width:220,background:TEAL,color:'#fff',display:'flex',flexDirection:'column',position:'fixed',top:0,bottom:0,zIndex:10}}>
         <div style={{padding:'20px 16px',borderBottom:'1px solid rgba(255,255,255,0.1)'}}>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{height:36,marginBottom:8}} onError={e=>e.target.style.display='none'} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{height:36,marginBottom:8}} onError={e=>e.target.style.display='none'} />
           <div style={{fontSize:11,opacity:.7}}>Portail Agent</div>
           <div style={{fontSize:13,fontWeight:700}}>{user?.firstName} {user?.lastName}</div>
           <div style={{fontSize:11,opacity:.6,marginTop:2}}>{user?.agency?.agencyName}</div>
@@ -170,7 +170,7 @@ const Login = () => {
       <div style={{width:400}}>
         <Box style={{marginBottom:0}}>
           <div style={{textAlign:'center',marginBottom:24}}>
-            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{height:48,marginBottom:12}} onError={e=>e.target.style.display='none'} />
+            <img src="/logo-calculus.png" alt="Calculus Plus" style={{height:48,marginBottom:12}} onError={e=>e.target.style.display='none'} />
             <div style={{fontSize:20,fontWeight:700,color:TEXT,fontFamily:FONT}}>Portail Agent</div>
             <div style={{fontSize:13,color:MUTED}}>C-Pay Distribution Network</div>
           </div>

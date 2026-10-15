@@ -6,7 +6,9 @@
   <title>Développeurs — API C-Pay</title>
   <meta name="description" content="Intégrez les paiements Mobile Money, QR et lien de paiement C-Pay : API REST, clés API, idempotence, webhooks, SDK Android et extension WooCommerce.">
   <link rel="canonical" href="https://c-pay.global/developers.html">
-  <link rel="icon" href="/logo-calculus.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/style.css">
   <meta name="cpay-api" content="https://api.c-pay.global">
   <meta name="theme-color" content="#1d4f92">
@@ -15,19 +17,19 @@
   <meta property="og:url" content="https://c-pay.global/developers.html">
   <meta property="og:title" content="Développeurs — API C-Pay">
   <meta property="og:description" content="API REST, SDK Android et extension WooCommerce pour encaisser par Mobile Money, QR et lien de paiement dans 5 pays.">
-  <meta property="og:image" content="https://c-pay.global/logo-calculus.png">
+  <meta property="og:image" content="https://c-pay.global/og-image.png">
   <meta property="og:locale" content="fr_FR">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Développeurs — API C-Pay">
   <meta name="twitter:description" content="API REST, SDK Android et extension WooCommerce pour encaisser par Mobile Money, QR et lien de paiement.">
-  <meta name="twitter:image" content="https://c-pay.global/logo-calculus.png">
+  <meta name="twitter:image" content="https://c-pay.global/og-image.png">
 </head>
 <body>
   <a class="skip-link" href="#main">Aller au contenu</a>
   <header class="site-header" id="site-header">
     <div class="container">
       <a class="brand" href="/" aria-label="C-Pay, accueil">
-        <img src="/logo-calculus.svg" alt="Calculus Plus" width="193" height="40">
+        <img src="/logo-calculus.png" alt="Calculus Plus" width="140" height="40">
         <span class="brand-product"><strong>C-Pay</strong><small>par Calculus Plus</small></span>
       </a>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Ouvrir le menu"><span></span></button>
@@ -264,9 +266,9 @@ function verify(rawBody, signatureHeader, secret) {
             <div>
               <h3>Extension WooCommerce</h3>
               <p>Ajoute C-Pay comme moyen de paiement dans WooCommerce 6.0+ (PHP 7.4+). Encaissement Mobile Money et lien de paiement ; configuration avec votre clé API et votre secret.</p>
-              <p class="note m-0">SHA-256 : <code>ca914b734fd16ecadca85f2382b46e363ca755414a5864f8595d09becc4afe8f</code></p>
+              <p class="note m-0">SHA-256 : <code>b71c8c66bdbc834dbb90fb56a60c0533e48448b07bc7f613d12abac272f5b89e</code></p>
             </div>
-            <a class="btn btn--primary" href="/downloads/cpay-payment-gateway-v2.7.0.zip">Télécharger (735 Ko)</a>
+            <a class="btn btn--primary" href="/downloads/cpay-payment-gateway-v2.7.0.zip">Télécharger (83 Ko)</a>
           </div>
           <pre class="mt-4"><code>1. WordPress → Extensions → Ajouter → Téléverser l'archive
 2. Activer, puis WooCommerce → Réglages → Paiements → C-Pay
@@ -310,7 +312,7 @@ CPay.collect(activity, amount = 5000.0, customerPhone = "+237670123456", referen
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <img src="/logo-calculus.svg" alt="Calculus Plus" width="164" height="34">
+          <img src="/logo-calculus.png" alt="Calculus Plus" width="119" height="34">
           <p>C-Pay est un produit de Calculus Plus SAS.</p>
         </div>
         <div><h3>Produit</h3><ul><li><a href="/#produits">Produits</a></li><li><a href="/#tarifs">Tarifs</a></li><li><a href="/#pays">Pays couverts</a></li></ul></div>

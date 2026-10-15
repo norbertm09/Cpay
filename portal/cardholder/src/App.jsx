@@ -504,7 +504,7 @@ const Layout = ({ children, lang, toggleLang }) => {
       {/* Sidebar */}
       <aside style={{ width:220, background:CARD, borderRight:`1px solid ${BORDER}`, display:'flex', flexDirection:'column', position:'fixed', top:bannerHeight, bottom:0, left:0, zIndex:100 }}>
         <div style={{ padding:'16px 16px 12px', borderBottom:`1px solid ${BORDER}` }}>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:'100%', maxWidth:175, height:'auto', objectFit:'contain' }} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width:'100%', maxWidth:175, height:'auto', objectFit:'contain' }} />
           <div style={{ fontSize:10, color:MUTED, marginTop:4, fontFamily:FONT }}>C-Pay — Espace Porteur</div>
         </div>
         <nav style={{ flex:1, padding:'10px 0', overflowY:'auto' }}>
@@ -564,7 +564,7 @@ const Register = ({ lang, toggleLang }) => {
     <div style={{ minHeight:'100vh', background:`linear-gradient(135deg, #1d4f92, ${P})`, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
       <div style={{ background:'#fff', borderRadius:20, padding:32, width:440, maxWidth:'100%', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ textAlign:'center', marginBottom:24 }}>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:180, height:'auto', marginBottom:12 }} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width:180, height:'auto', marginBottom:12 }} />
           <div style={{ fontSize:16, fontWeight:700, fontFamily:FONT }}>{lang==='fr'?'Créer un compte':'Create an account'}</div>
           <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}>
             {[1,2].map(s=>(
@@ -695,7 +695,7 @@ const ResetPassword = ({ lang }) => {
     <div style={{ minHeight:'100vh', background:`linear-gradient(135deg, #1d4f92, ${P})`, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
       <div style={{ background:'#fff', borderRadius:20, padding:32, width:400, maxWidth:'100%', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ textAlign:'center', marginBottom:24 }}>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:160, height:'auto', marginBottom:12 }} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width:160, height:'auto', marginBottom:12 }} />
           <div style={{ fontSize:16, fontWeight:700, fontFamily:FONT }}>🔐 {lang==='fr'?'Réinitialiser le mot de passe':'Reset password'}</div>
         </div>
 
@@ -772,7 +772,7 @@ const VerifyEmail = ({ lang }) => {
   return (
     <div style={{ minHeight:'100vh', background:`linear-gradient(135deg, #1d4f92, ${P})`, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
       <div style={{ background:'#fff', borderRadius:20, padding:32, width:400, maxWidth:'100%', boxShadow:'0 20px 60px rgba(0,0,0,0.2)', textAlign:'center' }}>
-        <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:160, height:'auto', marginBottom:20 }} />
+        <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width:160, height:'auto', marginBottom:20 }} />
         {state==='loading' && (
           <div style={{ fontSize:15, color:MUTED }}>{lang==='fr'?'Vérification en cours…':'Verifying…'}</div>
         )}
@@ -867,7 +867,7 @@ const Login = ({ lang, toggleLang }) => {
           <button onClick={toggleLang} style={{ background:'none', border:`1px solid ${BORDER}`, color:TEXT, padding:'5px 12px', borderRadius:20, cursor:'pointer', fontSize:12, fontFamily:FONT }}>🌐 {t('language')}</button>
         </div>
         <div style={{ textAlign:'center', marginBottom:24 }}>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width:210, height:'auto', display:'block', margin:'0 auto 10px', objectFit:'contain' }} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width:210, height:'auto', display:'block', margin:'0 auto 10px', objectFit:'contain' }} />
           <div style={{ color:MUTED, fontSize:13 }}>C-Pay — Espace Porteur de Carte</div>
         </div>
         <PciSecurityBadge />

@@ -426,7 +426,7 @@ const Layout = ({ children }) => {
       <aside style={{ width: 230, background: C.card, borderRight: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 100 }}>
         <div style={{ padding: '14px 16px 12px', borderBottom: `1px solid ${C.border}` }}>
           
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 200, height: 'auto', display: 'block', objectFit: 'contain' }} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 200, height: 'auto', display: 'block', objectFit: 'contain' }} />
           <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textAlign: 'center' }}>C-Pay — {t('administration')}</div>
         </div>
         <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
@@ -514,7 +514,7 @@ const Login = () => {
       <div style={{ width: 380 }}>
       <Card>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 200, height: "auto", display: "block", margin: "0 auto 8px", objectFit: "contain" }} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 200, height: "auto", display: "block", margin: "0 auto 8px", objectFit: "contain" }} />
           <div style={{ fontSize: 13, color: C.muted }}>C-Pay — Administration</div>
         </div>
         <form onSubmit={onSubmit}>

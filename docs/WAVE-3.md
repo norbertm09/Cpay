@@ -1,4 +1,4 @@
-# Vague 3 — reliquats backend (branche `wave-3`)
+# Vague 3 — apps mobiles, reliquats backend, portails/SDK, logo HD (branche `wave-3`)
 
 Base : `wave-2`. Backend : **20 suites / 475 tests verts** (18 / 446 avant), tous les fichiers touchés passent
 `node --check`. Aucune migration SQL, aucune nouvelle variable d'environnement obligatoire.
@@ -104,3 +104,26 @@ Puis :
   leur secret.
 - Les anciens en-têtes `X-CPlus-*` sont encore émis ; retrait = `legacy:false` dans `outgoing.js`.
 - Store partagé des rate limiters si passage à plusieurs nœuds (§1.5).
+
+## 5. Apps mobiles
+
+### 5.1 Android natif (`android/`, 2.7.0, versionCode 2) — détail dans `docs/WAVE-3-ANDROID.md`
+- Jetons d'accès 15 min : `SessionManager` stocke le refresh opaque et l'expiration ; `ApiClient` rafraîchit en amont (60 s avant expiration) et une fois sur 401 (verrou single-flight), puis rejoue la requête ; refus du refresh → session effacée, retour à l'écran de profil « Session expirée ».
+- Login : `mfaRequired` → `TwoFAActivity` en mode connexion (`/auth/2fa/validate`) ; `mustChangePassword` → `ChangePasswordActivity` forcée ; logout serveur (`/auth/logout { refreshToken }`).
+- 410 `FEATURE_DISABLED` (recharge, déchargement, retrait, sans contact) → message « Fonctionnalité en cours d'intégration », bouton désactivé.
+- Marque C-Pay (nom d'app, thèmes, reçus, User-Agent `CPay-Android/2.7.0`), icônes de lanceur et icône adaptative à partir du logo HD.
+- **Non compilé ici** (pas de SDK Android) : exécuter `./gradlew :app:assembleRelease` et le plan de test manuel de `docs/WAVE-3-ANDROID.md` avant publication. À la première ouverture après mise à jour depuis 2.6.0, l'utilisateur est déconnecté une fois (pas de refresh stocké).
+
+### 5.2 Expo (`mobile/cpay-mobile/`, ex-`cplus-mobile`, 2.7.0, versionCode 270)
+- Session dans `expo-secure-store` (`cpay.session`, `cpay.user`), refresh single-flight amont + sur 401, 2FA, mot de passe forcé, logout serveur, revalidation au démarrage via `/auth/me`.
+- Écrans alignés sur les routes actuelles : encaissement `POST /merchant/collect` avec suivi `GET /merchant/collect/:id/status` (3 s, 90 s max), liens/QR via `/merchant/pay-links`, retrait affiché « en cours d'intégration », onglet Rails déplacé côté admin.
+- Icône, icône adaptative et splash générés à partir du logo HD (`assets/`).
+- Vérifié par Babel + esbuild uniquement (pas de simulateur) ; `eas.json` sans `projectId` (à créer avec `eas init`).
+
+## 6. Portails, SDK, plugin
+- Profil chargé via `GET /auth/me` (marchand, admin, porteur, partenaires) avec repli sur le décodage local ; refresh 15 min via cookie `cp_rt_<portail>` sur les 7 portails (single-flight) ; QR codes générés localement (`qrcode.react`) au lieu d'un service tiers.
+- SDK JavaScript `@c-pay/sdk` 1.1.0 (`CPayClient`, alias `CPlusClient`), SDK PHP `calculus-plus/cpay-sdk` (namespace `CPay`, shims `CPlusSDK`), SDK Android (`typealias CPay`), plugin WooCommerce 2.7.0 (`WC_CPay_Gateway` + alias ; slug, identifiant `cplus` et métadonnées conservés pour ne pas casser les installations existantes ; webhook non signé refusé dès qu'un secret est configuré).
+- Archives `cpay-android-sdk-v2.7.0.zip` et `cpay-payment-gateway-v2.7.0.zip` reconstruites, empreintes SHA-256 publiées sur la page développeurs.
+
+## 7. Logo Calculus Plus HD
+Le logo fourni (PDF, image 1536×1024) remplace l'ancien logo vectoriel bleu/cyan partout : `logo-calculus.png` (fond transparent) dans la vitrine et les 7 portails, `favicon.ico`/`favicon.png`/`apple-touch-icon.png` générés à partir de l'emblème, `og-image.png` 1200×630 pour les partages, icônes Android (mipmaps + adaptive icon sur fond blanc), icônes Expo, logo du plugin WooCommerce allégé (600 px). Les anciens `logo-calculus.svg` et `favicon.svg` sont supprimés. La palette des sites (bleu `#1d4f92` / cyan) est conservée ; l'orange du logo (`#f07800`) peut devenir la couleur d'accent sur demande.

@@ -1305,7 +1305,7 @@ const Layout = ({ children, lang, toggleLang }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: CARD, borderBottom: `1px solid ${BORDER}`, padding: '10px 16px', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 200, height: 52 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => setMenuOpen(m => !m)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: TEXT, lineHeight: 1, padding: '2px 6px' }}>☰</button>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 32, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ height: 32, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: MUTED, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bizName}</span>
@@ -1544,7 +1544,7 @@ const Login = ({ lang, toggleLang }) => {
         </div>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 180, height: 'auto', display: 'block', margin: '0 auto 12px', objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
+            <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 180, height: 'auto', display: 'block', margin: '0 auto 12px', objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
             <div style={{ color: MUTED, fontSize: 13 }}>C-Pay — Espace Marchand</div>
           </div>
           <form onSubmit={onSubmit}>
@@ -1601,7 +1601,7 @@ const ForgotPassword = ({ lang, toggleLang }) => {
       <div style={{ width: '100%', maxWidth: 420, padding: 20 }}>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 48, marginBottom: 12 }} onError={e => e.target.style.display = 'none'} />
+            <img src="/logo-calculus.png" alt="Calculus Plus" style={{ height: 48, marginBottom: 12 }} onError={e => e.target.style.display = 'none'} />
             <div style={{ fontSize: 18, fontWeight: 700 }}>{lang === 'fr' ? 'Réinitialiser le mot de passe' : 'Reset password'}</div>
           </div>
           {sent ? (
@@ -1672,7 +1672,7 @@ const Register = ({ lang, toggleLang }) => {
       <div style={{ width: '100%', maxWidth: 480 }}>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 48, marginBottom: 10 }} onError={e => e.target.style.display = 'none'} />
+            <img src="/logo-calculus.png" alt="Calculus Plus" style={{ height: 48, marginBottom: 10 }} onError={e => e.target.style.display = 'none'} />
             <div style={{ fontSize: 18, fontWeight: 700 }}>{t('registerTitle') || 'Créer un compte marchand'}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>

@@ -446,7 +446,7 @@ const Login = () => {
         <div style={{ textAlign:'center', marginBottom:24 }}>
           {tenant?.logo_url
             ? <img src={tenant.logo_url} alt={tenant.display_name} style={{ height:52, marginBottom:12, objectFit:'contain' }} />
-            : <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height:48, marginBottom:12 }} />
+            : <img src="/logo-calculus.png" alt="Calculus Plus" style={{ height:48, marginBottom:12 }} />
           }
           <div style={{ fontSize:20, fontWeight:800, color:BLUE }}>
             {view==='forgot' ? '🔐 Réinitialisation' : view==='mfa' ? '🔐 Vérification en deux étapes' : view==='password' ? '🔐 Nouveau mot de passe requis' : (tenant?.display_name || 'C-Pay — Espace Partenaires')}
@@ -626,7 +626,7 @@ const Layout = ({ children }) => {
         <div style={{ padding:'20px 16px', borderBottom:`1px solid ${BORDER}` }}>
           {tenant?.logo_url
             ? <img src={tenant.logo_url} alt={tenant.display_name} style={{ height:36, marginBottom:16, display:'block', objectFit:'contain', maxWidth:160 }} />
-            : <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height:36, marginBottom:16, display:'block' }} />
+            : <img src="/logo-calculus.png" alt="Calculus Plus" style={{ height:36, marginBottom:16, display:'block' }} />
           }
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <div style={{ width:38, height:38, background:`${rc.color||P}20`, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20 }}>{rc.icon||'👤'}</div>
