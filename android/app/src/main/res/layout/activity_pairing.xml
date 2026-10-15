@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/bg"
+    android:gravity="center" android:padding="28dp">
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="🖥️" android:textSize="56sp" android:layout_marginBottom="16dp"/>
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Appairer ce terminal" android:textSize="24sp" android:textStyle="bold"
+        android:textColor="@color/text" android:layout_marginBottom="6dp"/>
+
+    <TextView android:id="@+id/tv_merchant" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:textSize="15sp"
+        android:textColor="@color/primary" android:textStyle="bold"
+        android:layout_marginBottom="20dp"/>
+
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="Saisissez le code à 6 chiffres affiché lors de la création du terminal dans l'espace marchand."
+        android:textSize="14sp" android:textColor="@color/text_secondary"
+        android:gravity="center" android:layout_marginBottom="28dp" android:lineSpacingExtra="3dp"/>
+
+    <EditText android:id="@+id/et_code" android:layout_width="match_parent"
+        android:layout_height="72dp" android:inputType="number" android:maxLength="6"
+        android:gravity="center" android:textSize="34sp" android:textStyle="bold"
+        android:letterSpacing="0.4" android:textColor="@color/primary"
+        android:textColorHint="@color/text_secondary" android:hint="000000"
+        android:background="@drawable/bg_card" android:layout_marginBottom="10dp"/>
+
+    <TextView android:id="@+id/tv_error" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:textColor="@color/danger"
+        android:textSize="13sp" android:gravity="center" android:visibility="gone"
+        android:layout_marginBottom="10dp"/>
+
+    <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:visibility="gone"
+        android:layout_marginBottom="10dp"/>
+
+    <TextView android:id="@+id/btn_pair" android:layout_width="match_parent"
+        android:layout_height="58dp" android:text="🔗  Appairer"
+        android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold"
+        android:background="@drawable/bg_btn_primary" android:gravity="center"
+        android:clickable="true" android:focusable="true" android:layout_marginTop="12dp"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView android:id="@+id/btn_skip" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:text="Continuer sans terminal"
+        android:textColor="@color/text_secondary" android:textSize="14sp"
+        android:padding="10dp" android:clickable="true" android:focusable="true"/>
+</LinearLayout>

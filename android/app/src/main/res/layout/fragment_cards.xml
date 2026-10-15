@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg" android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="💳 Mes cartes" android:textSize="20sp" android:textStyle="bold"
+            android:textColor="@color/text" android:layout_marginBottom="14dp"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:background="@drawable/bg_card"
+            android:padding="4dp" android:layout_marginBottom="16dp">
+            <TextView android:id="@+id/tab_created" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1"
+                android:text="✨ Créées" android:textColor="@color/primary"
+                android:textSize="13sp" android:textStyle="bold" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/tab_enrolled" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1"
+                android:text="📱 Enrôlées" android:textColor="@color/text_secondary"
+                android:textSize="13sp" android:textStyle="bold" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_gravity="center"
+            android:visibility="gone" android:layout_marginBottom="12dp"/>
+
+        <LinearLayout android:id="@+id/layout_created" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical">
+
+            <TextView android:id="@+id/tv_created_count" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+                android:textSize="13sp" android:layout_marginBottom="12dp"/>
+
+            <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_created"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false" android:layout_marginBottom="12dp"/>
+
+            <TextView android:id="@+id/tv_max_reached" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="⚠️ Maximum 3 cartes atteint"
+                android:textColor="@color/warning" android:textSize="13sp"
+                android:gravity="center" android:padding="16dp" android:visibility="gone"
+                android:background="@drawable/bg_card"/>
+
+            <TextView android:id="@+id/btn_create_card" android:layout_width="match_parent"
+                android:layout_height="52dp" android:text="✨ Créer une nouvelle carte"
+                android:textColor="#FFFFFF" android:textSize="15sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+
+            <LinearLayout android:id="@+id/layout_create_form" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical"
+                android:background="@drawable/bg_card" android:padding="16dp"
+                android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Nom de la carte" android:textSize="13sp"
+                    android:textStyle="bold" android:textColor="@color/text"
+                    android:layout_marginBottom="8dp"/>
+                <EditText android:id="@+id/et_card_label" android:layout_width="match_parent"
+                    android:layout_height="52dp" android:background="@drawable/bg_input"
+                    android:padding="12dp" android:textColor="@color/text"
+                    android:textColorHint="@color/text_secondary"
+                    android:hint="Ex: Carte shopping" android:layout_marginBottom="12dp"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+                    <TextView android:id="@+id/btn_confirm_create" android:layout_width="0dp"
+                        android:layout_height="48dp" android:layout_weight="1"
+                        android:text="✅ Créer" android:textColor="#FFFFFF" android:textSize="14sp"
+                        android:textStyle="bold" android:background="@drawable/bg_btn_primary"
+                        android:gravity="center" android:layout_marginEnd="8dp"
+                        android:clickable="true" android:focusable="true"/>
+                    <TextView android:id="@+id/btn_cancel_create" android:layout_width="0dp"
+                        android:layout_height="48dp" android:layout_weight="1"
+                        android:text="Annuler" android:textColor="@color/primary"
+                        android:textSize="14sp" android:background="@drawable/bg_btn_outline"
+                        android:gravity="center" android:clickable="true" android:focusable="true"/>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/layout_enrolled" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView android:id="@+id/tv_enrolled_count" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+                android:textSize="13sp" android:layout_marginBottom="12dp"/>
+
+            <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_enrolled"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false" android:layout_marginBottom="12dp"/>
+
+            <TextView android:id="@+id/btn_enroll_card" android:layout_width="match_parent"
+                android:layout_height="52dp" android:text="📱 Enrôler une carte existante"
+                android:textColor="@color/primary" android:textSize="15sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_outline" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+
+            <LinearLayout android:id="@+id/layout_enroll_form" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical"
+                android:background="@drawable/bg_card" android:padding="16dp"
+                android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="📱 Enrôler une carte bancaire" android:textSize="15sp"
+                    android:textStyle="bold" android:textColor="@color/primary_dark"
+                    android:layout_marginBottom="12dp"/>
+                <EditText android:id="@+id/et_card_number" android:layout_width="match_parent"
+                    android:layout_height="52dp" android:inputType="number" android:maxLength="19"
+                    android:background="@drawable/bg_input" android:padding="12dp"
+                    android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                    android:hint="Numéro de carte" android:layout_marginBottom="10dp"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:layout_marginBottom="10dp">
+                    <EditText android:id="@+id/et_expiry" android:layout_width="0dp"
+                        android:layout_height="52dp" android:layout_weight="1"
+                        android:background="@drawable/bg_input" android:padding="12dp"
+                        android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                        android:hint="MM/AA" android:maxLength="5" android:layout_marginEnd="8dp"/>
+                    <EditText android:id="@+id/et_cvv" android:layout_width="0dp"
+                        android:layout_height="52dp" android:layout_weight="1"
+                        android:inputType="numberPassword" android:maxLength="4"
+                        android:background="@drawable/bg_input" android:padding="12dp"
+                        android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                        android:hint="CVV"/>
+                </LinearLayout>
+                <EditText android:id="@+id/et_card_name" android:layout_width="match_parent"
+                    android:layout_height="52dp" android:background="@drawable/bg_input"
+                    android:padding="12dp" android:textColor="@color/text"
+                    android:textColorHint="@color/text_secondary"
+                    android:hint="Nom sur la carte" android:layout_marginBottom="12dp"/>
+                <TextView android:id="@+id/tv_enroll_error" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:textColor="@color/danger"
+                    android:textSize="12sp" android:visibility="gone"
+                    android:layout_marginBottom="8dp"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+                    <TextView android:id="@+id/btn_confirm_enroll" android:layout_width="0dp"
+                        android:layout_height="48dp" android:layout_weight="1"
+                        android:text="✅ Enrôler" android:textColor="#FFFFFF" android:textSize="14sp"
+                        android:textStyle="bold" android:background="@drawable/bg_btn_primary"
+                        android:gravity="center" android:layout_marginEnd="8dp"
+                        android:clickable="true" android:focusable="true"/>
+                    <TextView android:id="@+id/btn_cancel_enroll" android:layout_width="0dp"
+                        android:layout_height="48dp" android:layout_weight="1"
+                        android:text="Annuler" android:textColor="@color/primary"
+                        android:textSize="14sp" android:background="@drawable/bg_btn_outline"
+                        android:gravity="center" android:clickable="true" android:focusable="true"/>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

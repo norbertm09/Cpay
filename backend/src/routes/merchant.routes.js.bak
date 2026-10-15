@@ -1,0 +1,1224 @@
+const { notify } = require('../services/notifications');
+/**
+ * Routes Marchands — CPlus 2.6.0 (portail web)
+ * Toutes les routes nécessitent merchantAuth
+ */
+'use strict';
+
+const express = require('express');
+const router  = express.Router();
+const bcrypt  = require('bcryptjs');
+const crypto  = require('crypto');
+const { query } = require('../config/database');
+const { merchantAuth, signToken, signRefreshToken, rotateRefreshToken, revokeRefreshToken } = require('../middleware/auth');
+const logger  = require('../config/logger');
+const { detectFromPhone } = require('../services/detection/detection.engine');
+const { assignMerchantCountryDefaults } = require('../services/config/country-defaults');
+const ticketing = require('../services/support/ticketing.service');
+const integrations = require('../services/integrations/integration.service');
+const tokenVault = require('../services/tokenization/token-vault.service');
+const pilotControl = require('../services/pilot/pilot-control.service');
+
+// ─── LOGIN MARCHAND ───────────────────────────────────────────────
+router.post('/auth/login', async (req, res) => {
+  const { emailOrPhone, password } = req.body;
+  if (!emailOrPhone || !password) return res.status(422).json({ error: 'Identifiants requis' });
+
+  try {
+    const result = await query(
+      `SELECT u.*, m.merchant_id, m.business_name, m.currency, m.kyb_level,
+              m.merchant_status, m.country
+       FROM merchant_users u
+       JOIN merchants m ON u.merchant_id = m.merchant_id
+       WHERE (u.email = $1 OR u.phone = $1) AND u.is_active = TRUE LIMIT 1`,
+      [emailOrPhone.trim()]
+    );
+
+    if (!result.rows.length) return res.status(401).json({ error: 'Identifiants incorrects' });
+
+    const user = result.rows[0];
+    const ok   = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return res.status(401).json({ error: 'Identifiants incorrects' });
+
+    if (user.merchant_status === 'suspended') {
+      return res.status(403).json({ error: 'Compte suspendu — contactez le support', code: 'SUSPENDED' });
+    }
+
+    // NE PAS vérifier les APIs ici — juste l'utilisateur en DB
+    const accessToken  = signToken({
+      sub: user.user_id, merchantId: user.merchant_id,
+      role: user.role, type: 'merchant',
+      businessName: user.business_name, country: user.country, currency: user.currency,
+    }, '8h');
+    const refreshToken = await signRefreshToken({
+      subjectId: user.user_id,
+      actorType: 'merchant',
+      payload: { sub: user.user_id, type: 'merchant_refresh' },
+      expiresIn: '30d',
+    });
+
+    res.json({
+      access_token: accessToken, refresh_token: refreshToken,
+      user: {
+        userId: user.user_id, firstName: user.first_name, lastName: user.last_name,
+        email: user.email, role: user.role,
+        merchantId: user.merchant_id, businessName: user.business_name,
+        currency: user.currency, country: user.country, kybLevel: user.kyb_level,
+      },
+    });
+  } catch (err) {
+    logger.error('Merchant login error', { err: err.message });
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.post('/auth/register', async (req, res) => {
+  const {
+    businessName, rccm, nif, phone, email, password,
+    settlementType = 'mobile_money', settlementAccount, settlementProvider,
+  } = req.body;
+
+  if (!businessName || !phone || !email || !password) {
+    return res.status(422).json({ error: 'businessName, phone, email et password requis' });
+  }
+  if (password.length < 10) {
+    return res.status(422).json({ error: 'Mot de passe trop court', code: 'WEAK_PASSWORD' });
+  }
+
+  const detection = detectFromPhone(phone);
+  if (!detection.success) {
+    return res.status(422).json({ error: detection.error, code: 'UNSUPPORTED_PHONE' });
+  }
+
+  const { withTransaction } = require('../config/database');
+  try {
+    const created = await withTransaction(async (client) => {
+      const passwordHash = await bcrypt.hash(password, 12);
+      const merchant = await client.query(
+        `INSERT INTO merchants
+          (business_name, rccm, nif, phone, email, country, currency, settlement_type, settlement_account, settlement_provider)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         RETURNING merchant_id, business_name, country, currency, kyb_level`,
+        [
+          businessName.trim(), rccm || null, nif || null, phone.trim(), email.toLowerCase().trim(),
+          detection.country, detection.currency, settlementType, settlementAccount || phone.trim(), settlementProvider || detection.brand,
+        ]
+      );
+      const merchantRow = merchant.rows[0];
+      const apiDefaults = await assignMerchantCountryDefaults({
+        merchantId: merchantRow.merchant_id,
+        country: merchantRow.country,
+        client,
+      });
+      const user = await client.query(
+        `INSERT INTO merchant_users (merchant_id, email, phone, password_hash, first_name, role)
+         VALUES ($1,$2,$3,$4,$5,'owner')
+         RETURNING user_id, email, first_name, role`,
+        [merchantRow.merchant_id, email.toLowerCase().trim(), phone.trim(), passwordHash, businessName.trim()]
+      );
+      return { merchant: merchantRow, user: user.rows[0], apiDefaults };
+    });
+
+    const accessToken = signToken({
+      sub: created.user.user_id,
+      merchantId: created.merchant.merchant_id,
+      role: created.user.role,
+      type: 'merchant',
+      businessName: created.merchant.business_name,
+      country: created.merchant.country,
+      currency: created.merchant.currency,
+    }, '8h');
+    const refreshToken = await signRefreshToken({
+      subjectId: created.user.user_id,
+      actorType: 'merchant',
+      payload: { sub: created.user.user_id, type: 'merchant_refresh' },
+      expiresIn: '30d',
+    });
+
+    res.status(201).json({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      user: {
+        userId: created.user.user_id,
+        firstName: created.user.first_name,
+        email: created.user.email,
+        role: created.user.role,
+        merchantId: created.merchant.merchant_id,
+        businessName: created.merchant.business_name,
+        currency: created.merchant.currency,
+        country: created.merchant.country,
+        kybLevel: created.merchant.kyb_level,
+      },
+      apiDefaults: created.apiDefaults,
+    });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Email ou telephone deja utilise' });
+    logger.error('Merchant register error', { err: err.message });
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.post('/auth/refresh', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(422).json({ error: 'refreshToken requis' });
+
+  try {
+    const tokens = await rotateRefreshToken({
+      token: refreshToken,
+      expectedType: 'merchant_refresh',
+      actorType: 'merchant',
+      buildAccessPayload: async (userId) => {
+        const r = await query(
+          `SELECT u.user_id, u.role, m.merchant_id, m.business_name, m.country, m.currency
+           FROM merchant_users u JOIN merchants m ON u.merchant_id = m.merchant_id
+           WHERE u.user_id = $1 AND u.is_active = TRUE AND m.merchant_status = 'active'`,
+          [userId]
+        );
+        if (!r.rows.length) throw new Error('Utilisateur introuvable');
+        const user = r.rows[0];
+        return {
+          sub: user.user_id,
+          merchantId: user.merchant_id,
+          role: user.role,
+          type: 'merchant',
+          businessName: user.business_name,
+          country: user.country,
+          currency: user.currency,
+        };
+      },
+    });
+    res.json({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken });
+  } catch (err) {
+    res.status(err.statusCode || 401).json({ error: 'Refresh token invalide' });
+  }
+});
+
+router.post('/auth/logout', async (req, res) => {
+  await revokeRefreshToken(req.body.refreshToken);
+  res.json({ success: true });
+});
+
+// ─── PROFIL COMPTE ────────────────────────────────────────────────
+router.get('/account', merchantAuth, async (req, res) => {
+  const result = await query(
+    `SELECT m.*, u.email, u.first_name, u.last_name, u.phone, u.role
+     FROM merchants m
+     JOIN merchant_users u ON m.merchant_id = u.merchant_id AND u.user_id = $1
+     WHERE m.merchant_id = $2`,
+    [req.user.sub, req.user.merchantId]
+  );
+  if (!result.rows.length) return res.status(404).json({ error: 'Compte introuvable' });
+  const row = result.rows[0];
+  // Ne jamais retourner le password_hash
+  delete row.password_hash;
+  res.json(row);
+});
+
+router.put('/account', merchantAuth, async (req, res) => {
+  const { firstName, lastName, phone, settlementType, settlementAccount, settlementProvider } = req.body;
+  await query(
+    `UPDATE merchant_users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name),
+     phone = COALESCE($3, phone) WHERE user_id = $4`,
+    [firstName, lastName, phone, req.user.sub]
+  );
+  if (settlementType || settlementAccount || settlementProvider) {
+    await query(
+      `UPDATE merchants SET settlement_type = COALESCE($1::settlement_type, settlement_type),
+       settlement_account = COALESCE($2, settlement_account),
+       settlement_provider = COALESCE($3, settlement_provider), updated_at = NOW()
+       WHERE merchant_id = $4`,
+      [settlementType, settlementAccount, settlementProvider, req.user.merchantId]
+    );
+  }
+  res.json({ success: true });
+});
+
+// ─── HISTORIQUE TRANSACTIONS ──────────────────────────────────────
+router.get('/transactions', merchantAuth, async (req, res) => {
+  const { page = 1, limit = 25, status, type, dateFrom, dateTo } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const params = [req.user.merchantId];
+  let where = 'WHERE merchant_id = $1';
+  if (status)   { params.push(status);   where += ` AND status = $${params.length}`; }
+  if (type)     { params.push(type);     where += ` AND type = $${params.length}`; }
+  if (dateFrom) { params.push(dateFrom); where += ` AND initiated_at >= $${params.length}`; }
+  if (dateTo)   { params.push(dateTo);   where += ` AND initiated_at <= $${params.length}`; }
+
+  params.push(parseInt(limit), offset);
+  const [data, count] = await Promise.all([
+    query(
+      `SELECT transaction_id, type, amount, currency, payment_method, status,
+              description, auth_code, fee_amount, net_amount,
+              initiated_at, completed_at
+       FROM transactions ${where}
+       ORDER BY initiated_at DESC LIMIT $${params.length-1} OFFSET $${params.length}`,
+      params
+    ),
+    query(`SELECT COUNT(*) FROM transactions ${where}`, params.slice(0, -2)),
+  ]);
+
+  res.json({
+    data: data.rows, total: parseInt(count.rows[0].count),
+    page: parseInt(page), pages: Math.ceil(count.rows[0].count / parseInt(limit)),
+  });
+});
+
+router.get('/transactions/:id', merchantAuth, async (req, res) => {
+  const result = await query(
+    `SELECT * FROM transactions WHERE transaction_id = $1 AND merchant_id = $2`,
+    [req.params.id, req.user.merchantId]
+  );
+  if (!result.rows.length) return res.status(404).json({ error: 'Transaction introuvable' });
+  res.json(result.rows[0]);
+});
+
+// ─── TERMINAUX (self-service) ─────────────────────────────────────
+router.get('/terminals', merchantAuth, async (req, res) => {
+  const result = await query(
+    'SELECT * FROM terminals WHERE merchant_id = $1 ORDER BY created_at DESC',
+    [req.user.merchantId]
+  );
+  res.json({ data: result.rows });
+});
+
+// Créer un nouveau terminal
+router.post('/terminals', merchantAuth, async (req, res) => {
+  const { terminalName, deviceModel, androidId, appVersion } = req.body;
+  if (!terminalName) return res.status(422).json({ error: 'terminalName requis' });
+
+  try {
+    // Générer un code unique
+    const terminalCode = `TERM-${req.user.merchantId.slice(0, 6).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+    const result = await query(
+      `INSERT INTO terminals (merchant_id, terminal_code, terminal_name, device_model, android_id, app_version, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [req.user.merchantId, terminalCode, terminalName, deviceModel||null, androidId||null, appVersion||null, req.user.sub]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Ce terminal est déjà enregistré' });
+    res.status(500).json({ error: 'Erreur création terminal' });
+  }
+});
+
+// Mettre à jour un terminal
+router.put('/terminals/:id', merchantAuth, async (req, res) => {
+  const { terminalName, deviceModel, appVersion } = req.body;
+  const result = await query(
+    `UPDATE terminals SET terminal_name = COALESCE($1, terminal_name),
+     device_model = COALESCE($2, device_model),
+     app_version  = COALESCE($3, app_version), updated_at = NOW()
+     WHERE terminal_id = $4 AND merchant_id = $5 RETURNING *`,
+    [terminalName, deviceModel, appVersion, req.params.id, req.user.merchantId]
+  );
+  if (!result.rows.length) return res.status(404).json({ error: 'Terminal introuvable' });
+  res.json(result.rows[0]);
+});
+
+// Désactiver un terminal (soft delete)
+router.delete('/terminals/:id', merchantAuth, async (req, res) => {
+  await query(
+    `UPDATE terminals SET status = 'inactive', updated_at = NOW()
+     WHERE terminal_id = $1 AND merchant_id = $2`,
+    [req.params.id, req.user.merchantId]
+  );
+  res.json({ success: true });
+});
+
+// Heartbeat depuis l'app Android
+router.post('/terminals/:id/heartbeat', merchantAuth, async (req, res) => {
+  const { appVersion, androidId } = req.body;
+  await query(
+    `UPDATE terminals SET last_seen_at = NOW(), last_ip = $1,
+     app_version = COALESCE($2, app_version),
+     android_id  = COALESCE($3, android_id)
+     WHERE terminal_id = $4 AND merchant_id = $5`,
+    [req.ip, appVersion||null, androidId||null, req.params.id, req.user.merchantId]
+  );
+  res.json({ ok: true });
+});
+
+// ─── RÈGLEMENTS ────────────────────────────────────────────────────
+router.get('/settlements', merchantAuth, async (req, res) => {
+  const result = await query(
+    `SELECT batch_id, batch_date, total_gross, total_fees, total_net,
+            currency, txn_count, settlement_type, status, created_at
+     FROM settlement_batches WHERE merchant_id = $1
+     ORDER BY batch_date DESC LIMIT 50`,
+    [req.user.merchantId]
+  );
+  res.json({ data: result.rows });
+});
+
+// ─── DASHBOARD ────────────────────────────────────────────────────
+router.get('/support/tickets', merchantAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT * FROM support_tickets WHERE merchant_id=$1 ORDER BY created_at DESC LIMIT 50`,
+      [req.user.merchantId]
+    );
+    res.json({ data: r.rows, total: r.rowCount });
+  } catch(err){ res.status(500).json({ error: err.message }); }
+});
+
+router.post('/support/tickets', merchantAuth, async (req, res) => {
+  const { subject, category, priority, message, description } = req.body;
+  if (!subject) return res.status(422).json({ error: 'Sujet requis' });
+  try {
+    const num = 'TKT-' + Date.now().toString(36).toUpperCase();
+    const r = await query(
+      `INSERT INTO support_tickets (merchant_id, ticket_number, subject, priority, status)
+       VALUES ($1,$2,$3,$4,'open') RETURNING *`,
+      [req.user.merchantId, num, subject, priority || 'normal']
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
+
+
+
+router.get('/dashboard', merchantAuth, async (req, res) => {
+  const [today, month, terminals] = await Promise.all([
+    query(
+      `SELECT COUNT(*)::int as txn_count, COALESCE(SUM(amount),0) as volume
+       FROM transactions WHERE merchant_id = $1 AND DATE(initiated_at) = CURRENT_DATE AND status = 'authorized'`,
+      [req.user.merchantId]
+    ),
+    query(
+      `SELECT COUNT(*)::int as txn_count, COALESCE(SUM(amount),0) as volume
+       FROM transactions WHERE merchant_id = $1 AND DATE_TRUNC('month', initiated_at) = DATE_TRUNC('month', NOW()) AND status = 'authorized'`,
+      [req.user.merchantId]
+    ),
+    query('SELECT COUNT(*)::int as count FROM terminals WHERE merchant_id = $1 AND status = \'active\'', [req.user.merchantId]),
+  ]);
+
+  const settling = await query(
+    `SELECT COALESCE(SUM(sq.amount),0) as amount
+     FROM settlement_queue sq WHERE sq.merchant_id = $1 AND sq.settled = FALSE`,
+    [req.user.merchantId]
+  );
+
+  res.json({
+    today: {
+      txn_count: today.rows[0].txn_count,
+      volume: parseFloat(today.rows[0].volume),
+    },
+    thisMonth: {
+      txn_count: month.rows[0].txn_count,
+      volume: parseFloat(month.rows[0].volume),
+    },
+    activeTerminals: terminals.rows[0].count,
+    settlingTomorrow: parseFloat(settling.rows[0].amount),
+  });
+});
+
+router.get('/pilot/state', merchantAuth, async (req, res) => {
+  res.json(await pilotControl.getMerchantPilotState(req.user.merchantId));
+});
+
+// Integrations comptabilite / CRM
+router.get('/integrations', merchantAuth, async (req, res) => {
+  res.json({ data: await integrations.listIntegrations(req.user.merchantId) });
+});
+
+router.post('/integrations', merchantAuth, async (req, res) => {
+  try {
+    const integration = await integrations.upsertIntegration({
+      merchantId: req.user.merchantId,
+      integrationType: req.body.integrationType,
+      provider: req.body.provider,
+      displayName: req.body.displayName,
+      endpointUrl: req.body.endpointUrl,
+      authType: req.body.authType,
+      authConfig: req.body.authConfig,
+      eventTypes: req.body.eventTypes,
+      status: req.body.status,
+    });
+    res.status(201).json(integration);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message, code: err.code || 'INTEGRATION_SAVE_FAILED' });
+  }
+});
+
+router.put('/integrations/:id', merchantAuth, async (req, res) => {
+  try {
+    const integration = await integrations.upsertIntegration({
+      merchantId: req.user.merchantId,
+      integrationId: req.params.id,
+      integrationType: req.body.integrationType,
+      provider: req.body.provider,
+      displayName: req.body.displayName,
+      endpointUrl: req.body.endpointUrl,
+      authType: req.body.authType,
+      authConfig: req.body.authConfig,
+      eventTypes: req.body.eventTypes,
+      status: req.body.status,
+    });
+    if (!integration) return res.status(404).json({ error: 'Integration introuvable' });
+    res.json(integration);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message, code: err.code || 'INTEGRATION_SAVE_FAILED' });
+  }
+});
+
+router.get('/exports/transactions', merchantAuth, async (req, res) => {
+  const exported = await integrations.exportTransactions({
+    merchantId: req.user.merchantId,
+    dateFrom: req.query.dateFrom,
+    dateTo: req.query.dateTo,
+    format: req.query.format || 'json',
+  });
+  res.type(exported.contentType).send(exported.body);
+});
+
+// Tokenisation
+router.get('/tokens', merchantAuth, async (req, res) => {
+  const gate = await pilotControl.evaluateFeature({
+    merchantId: req.user.merchantId,
+    flagKey: 'tokenization',
+    context: { action: 'list_tokens' },
+    requestId: req.id,
+  });
+  if (!gate.allowed) return res.status(403).json({ error: gate.reason, code: 'FEATURE_NOT_ENABLED', gate });
+  res.json({ data: await tokenVault.listTokens({ merchantId: req.user.merchantId, customerRef: req.query.customerRef }) });
+});
+
+router.post('/tokens', merchantAuth, async (req, res) => {
+  try {
+    const gate = await pilotControl.evaluateFeature({
+      merchantId: req.user.merchantId,
+      flagKey: 'tokenization',
+      context: { action: 'create_token', provider: req.body.provider, network: req.body.network },
+      requestId: req.id,
+    });
+    if (!gate.allowed) return res.status(403).json({ error: gate.reason, code: 'FEATURE_NOT_ENABLED', gate });
+
+    const token = await tokenVault.createToken({
+      merchantId: req.user.merchantId,
+      customerRef: req.body.customerRef,
+      provider: req.body.provider,
+      tokenRef: req.body.tokenRef,
+      network: req.body.network,
+      last4: req.body.last4,
+      expiryMonth: req.body.expiryMonth,
+      expiryYear: req.body.expiryYear,
+      metadata: req.body.metadata,
+    });
+    res.status(201).json(token);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message, code: err.code || 'TOKEN_CREATE_FAILED' });
+  }
+});
+
+router.delete('/tokens/:id', merchantAuth, async (req, res) => {
+  const token = await tokenVault.revokeToken({ merchantId: req.user.merchantId, tokenId: req.params.id });
+  if (!token) return res.status(404).json({ error: 'Token introuvable' });
+  res.json(token);
+});
+
+module.exports = router;
+
+// ─── PAY LINKS (routes merchant) ─────────────────────────────────
+
+// Liste des pay links du marchand
+router.get('/pay-links', merchantAuth, async (req, res) => {
+  const { query } = require('../config/database');
+  const { page = 1, limit = 20, status } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  try {
+    const conditions = ['merchant_id = $1'];
+    const params = [req.user.merchantId];
+    if (status) { params.push(status); conditions.push(`status = $${params.length}`); }
+    const r = await query(
+      `SELECT pay_link_id, short_id, amount, currency, description, status,
+              short_url, created_at, expires_at, paid_at, paid_amount,
+              recipient_phone, send_channel
+       FROM pay_links WHERE ${conditions.join(' AND ')}
+       ORDER BY created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
+      [...params, parseInt(limit), offset]
+    );
+    const cnt = await query(`SELECT COUNT(*) FROM pay_links WHERE ${conditions.join(' AND ')}`, params);
+    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Créer un pay link
+router.post('/pay-links', merchantAuth, async (req, res) => {
+  const { v4: uuidv4 } = require('uuid');
+  const { query } = require('../config/database');
+  const { amount, description, expiresIn = 24, recipientPhone, channel = 'sms' } = req.body;
+  if (!amount || amount <= 0) return res.status(422).json({ error: 'Montant invalide' });
+  try {
+    const merchant = await query('SELECT currency FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
+    const currency = merchant.rows[0]?.currency || 'XAF';
+    const shortId = Math.random().toString(36).substr(2, 8).toUpperCase();
+    const shortUrl = `${process.env.PAY_LINK_BASE_URL || 'https://pay.c-pay.global'}/${shortId}`;
+    const expiresAt = new Date(Date.now() + expiresIn * 3600 * 1000);
+    const r = await query(
+      `INSERT INTO pay_links (pay_link_id, merchant_id, short_id, amount, currency, description, short_url, expires_at, recipient_phone, send_channel, psp, payment_method, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending') RETURNING *`,
+      [uuidv4(), req.user.merchantId, shortId, amount, currency, description || null, shortUrl, expiresAt, recipientPhone || null, channel, req.body.psp||'cybersource', req.body.paymentMethod||'card']
+    );
+    const link = r.rows[0];
+    // Envoyer automatiquement si numéro fourni
+    if (recipientPhone) {
+      const text = `${description ? description + ' - ' : ''}Payez ${parseFloat(amount).toLocaleString()} ${currency} via: ${shortUrl}`;
+      try {
+        if (channel === 'whatsapp') {
+          const { sendWhatsAppText } = require('../services/notifications/whatsapp.service');
+          await sendWhatsAppText({ to: recipientPhone, text });
+        } else {
+          const { sendSmsSmpp } = require('../services/notifications/smpp.service');
+          await sendSmsSmpp({ to: recipientPhone, text });
+        }
+        await query(`UPDATE pay_links SET sent_at=NOW() WHERE pay_link_id=$1`, [link.pay_link_id]);
+      } catch (sendErr) {
+        // Lien créé mais envoi échoué — pas bloquant
+      }
+    }
+    res.status(201).json({ success: true, link });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Envoyer un pay link existant
+router.post('/pay-links/:id/send', merchantAuth, async (req, res) => {
+  const { query } = require('../config/database');
+  const { phone, channel = 'sms' } = req.body;
+  if (!phone) return res.status(422).json({ error: 'phone requis' });
+  try {
+    const r = await query(
+      `SELECT * FROM pay_links WHERE (pay_link_id::text=$1 OR short_id=$1) AND merchant_id=$2`,
+      [req.params.id, req.user.merchantId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Lien introuvable' });
+    const link = r.rows[0];
+    const text = `${link.description ? link.description + ' - ' : ''}Payez ${parseFloat(link.amount).toLocaleString()} ${link.currency} via: ${link.short_url}`;
+    if (channel === 'whatsapp') {
+      const { sendWhatsAppText } = require('../services/notifications/whatsapp.service');
+      await sendWhatsAppText({ to: phone, text });
+    } else {
+      const { sendSmsSmpp } = require('../services/notifications/smpp.service');
+      await sendSmsSmpp({ to: phone, text });
+    }
+    await query(`UPDATE pay_links SET recipient_phone=$1, send_channel=$2, sent_at=NOW() WHERE pay_link_id=$3`, [phone, channel, link.pay_link_id]);
+    res.json({ success: true, message: `Lien envoyé via ${channel}` });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Annuler un pay link
+router.delete('/pay-links/:id', merchantAuth, async (req, res) => {
+  const { query } = require('../config/database');
+  try {
+    await query(
+      `UPDATE pay_links SET status='cancelled' WHERE (pay_link_id::text=$1 OR short_id=$1) AND merchant_id=$2 AND status='pending'`,
+      [req.params.id, req.user.merchantId]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Stats pay links
+router.get('/pay-links/stats', merchantAuth, async (req, res) => {
+  const { query } = require('../config/database');
+  try {
+    const r = await query(
+      `SELECT
+        COUNT(*) FILTER (WHERE status='pending')   as pending,
+        COUNT(*) FILTER (WHERE status='paid')      as paid,
+        COUNT(*) FILTER (WHERE status='cancelled') as cancelled,
+        COUNT(*) FILTER (WHERE status='expired')   as expired,
+        COALESCE(SUM(amount) FILTER (WHERE status='paid'), 0) as total_collected
+       FROM pay_links WHERE merchant_id=$1`,
+      [req.user.merchantId]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/fees', merchantAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT payment_type, direction, fee_rate, fee_fixed, fee_min, fee_max
+       FROM merchant_fee_configs WHERE merchant_id=$1 AND is_active=TRUE ORDER BY direction, payment_type`,
+      [req.user.merchantId]
+    );
+    const fees = {};
+    r.rows.forEach(f => {
+      if (!fees[f.direction]) fees[f.direction] = {};
+      fees[f.direction][f.payment_type] = {
+        rate: parseFloat(f.fee_rate), fixed: parseFloat(f.fee_fixed),
+        min: parseFloat(f.fee_min), max: f.fee_max ? parseFloat(f.fee_max) : null,
+      };
+    });
+    res.json({ fees });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// POST /merchant/kyb/documents — Merchant soumet un document (URL base64 ou lien)
+router.post('/kyb/documents', merchantAuth, async (req, res) => {
+  const { docType, docLabel, fileUrl, fileName, fileSize, mimeType } = req.body;
+  if (!docType || !fileUrl) return res.status(422).json({error:'docType et fileUrl requis'});
+  try {
+    const r = await query(
+      `INSERT INTO kyb_documents (merchant_id, doc_type, doc_label, file_url, file_name, file_size, mime_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING doc_id, doc_type, doc_label, status, uploaded_at`,
+      [req.user.merchantId, docType, docLabel||docType, fileUrl, fileName||null, fileSize||null, mimeType||null]
+    );
+    await query(`UPDATE merchants SET kyb_submitted_at=NOW() WHERE merchant_id=$1`, [req.user.merchantId]);
+    // Notification admin KYB
+    try {
+      const m = await query('SELECT business_name FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
+      await notify({ type:'kyb_document_submitted', title:'Nouveau document KYB', message:(m.rows[0]?.business_name||'Merchant')+' a soumis: '+(docLabel||docType), entityType:'merchant', entityId:req.user.merchantId, metadata:{docType,docLabel,fileName} });
+    } catch(ne){ console.error('Notify error:', ne.message); }
+    res.status(201).json(r.rows[0]);
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// GET /merchant/kyb — Merchant voit ses documents soumis
+router.get('/kyb', merchantAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT doc_id, doc_type, doc_label, file_name, status, rejection_reason, uploaded_at, reviewed_at
+       FROM kyb_documents WHERE merchant_id=$1 ORDER BY uploaded_at DESC`,
+      [req.user.merchantId]
+    );
+    res.json({ documents: r.rows });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// ─── TICKET DETAIL + MESSAGES ─────────────────────────────────────
+router.get('/support/tickets/:id', merchantAuth, async (req, res) => {
+  try {
+    const ticket = await query(
+      `SELECT * FROM support_tickets WHERE ticket_id=$1 AND merchant_id=$2`,
+      [req.params.id, req.user.merchantId]
+    );
+    if (!ticket.rows.length) return res.status(404).json({ error: 'Ticket introuvable' });
+    const messages = await query(
+      `SELECT * FROM ticket_messages WHERE ticket_id=$1 ORDER BY created_at ASC`,
+      [req.params.id]
+    );
+    res.json({ ...ticket.rows[0], ticket: ticket.rows[0], messages: messages.rows });
+  } catch(err){ res.status(500).json({ error: err.message }); }
+});
+
+// POST /support/tickets/:id/messages — Merchant répond
+router.post('/support/tickets/:id/messages', merchantAuth, async (req, res) => {
+  const { message, attachments } = req.body;
+  if (!message?.trim()) return res.status(422).json({ error: 'Message requis' });
+  try {
+    // Vérifier que le ticket appartient au merchant
+    const t = await query('SELECT ticket_id, status FROM support_tickets WHERE ticket_id=$1 AND merchant_id=$2', [req.params.id, req.user.merchantId]);
+    if (!t.rows.length) return res.status(404).json({ error: 'Ticket introuvable' });
+
+    const r = await query(
+      `INSERT INTO ticket_messages (ticket_id, sender_type, sender_id, sender_name, message, attachments)
+       VALUES ($1,'merchant',$2,$3,$4,$5) RETURNING *`,
+      [req.params.id, req.user.sub, req.user.businessName || 'Marchand', message.trim(), JSON.stringify(attachments || [])]
+    );
+    // Remettre en open si was waiting_merchant
+    await query(
+      `UPDATE support_tickets SET status='open', last_message_at=NOW(), updated_at=NOW() WHERE ticket_id=$1 AND status='pending_merchant'`,
+      [req.params.id]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch(err){ res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /support/tickets/:id/resolve — Merchant valide la résolution
+router.patch('/support/tickets/:id/resolve', merchantAuth, async (req, res) => {
+  try {
+    await query(
+      `UPDATE support_tickets SET status='resolved', resolved_at=NOW(), updated_at=NOW() WHERE ticket_id=$1 AND merchant_id=$2`,
+      [req.params.id, req.user.merchantId]
+    );
+    res.json({ success: true });
+  } catch(err){ res.status(500).json({ error: err.message }); }
+});
+
+// ─── PAIEMENT SANS CONTACT (NFC) ─────────────────────────────────
+// ─── MOBILE APP COLLECT (JWT Auth) ───────────────────────────────
+router.post('/collect', merchantAuth, async (req, res) => {
+  const { amount, customerPhone, method, description } = req.body;
+  if (!amount || parseFloat(amount) < 100) return res.status(422).json({ error: 'Montant minimum 100 XAF' });
+  if (!customerPhone) return res.status(422).json({ error: 'customerPhone requis' });
+  if (!method) return res.status(422).json({ error: 'method requis (airtel_money, mtn_momo)' });
+  try {
+    const ref = 'MOB-' + Date.now().toString(36).toUpperCase();
+    const fee = Math.round(parseFloat(amount) * 0.015);
+    const net = parseFloat(amount) - fee;
+    const authCode = 'AUTH' + Math.random().toString(36).slice(2,8).toUpperCase();
+    const merchantId = req.merchant?.merchantId || req.user?.merchantId;
+    // Mapper method vers enum payment_method
+    const pmMap = { airtel_money:'mobile_money', mtn_momo:'mobile_money', card:'card_nfc', qr:'qr' };
+    const pm = pmMap[method] || 'mobile_money';
+    const txn = await query(
+      `INSERT INTO transactions (
+        merchant_id, type, amount, currency, fee_amount, net_amount,
+        payment_method, status, auth_code, description, initiated_at
+      ) VALUES ($1,'collect',$2,'XAF',$3,$4,$5,'authorized',$6,$7,NOW())
+      RETURNING transaction_id, type, amount, currency, fee_amount, net_amount,
+                payment_method, status, auth_code, description, initiated_at`,
+      [merchantId, parseFloat(amount), fee, net, pm, authCode,
+       description || 'Encaissement mobile']
+    );
+    res.json({
+      success: true,
+      txnId: txn.rows[0].transaction_id,
+      reference: ref,
+      authCode,
+      amount: parseFloat(amount),
+      fee,
+      net,
+      status: 'authorized',
+      payUrl: null,
+    });
+  } catch(err) {
+    console.error('collect error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── MOBILE APP DISBURSE (JWT Auth) ──────────────────────────────
+router.post('/disburse', merchantAuth, async (req, res) => {
+  const { amount, recipientPhone, method, description } = req.body;
+  if (!amount || parseFloat(amount) < 500) return res.status(422).json({ error: 'Montant minimum 500 XAF' });
+  if (!recipientPhone) return res.status(422).json({ error: 'recipientPhone requis' });
+  if (!method) return res.status(422).json({ error: 'method requis (airtel_money, mtn_momo)' });
+  try {
+    const ref = 'DSB-' + Date.now().toString(36).toUpperCase();
+    const fee = Math.round(parseFloat(amount) * 0.01);
+    const net = parseFloat(amount) + fee;
+    const authCode = 'DSB' + Math.random().toString(36).slice(2,8).toUpperCase();
+    const merchantId = req.merchant?.merchantId || req.user?.merchantId;
+    const pmMapD = { airtel_money:'mobile_money', mtn_momo:'mobile_money' };
+    const pmD = pmMapD[method] || 'mobile_money';
+    const txn = await query(
+      `INSERT INTO transactions (
+        merchant_id, type, amount, currency, fee_amount, net_amount,
+        payment_method, status, auth_code, description, initiated_at
+      ) VALUES ($1,'payout',$2,'XAF',$3,$4,$5,'authorized',$6,$7,NOW())
+      RETURNING transaction_id, type, amount, currency, fee_amount, net_amount,
+                payment_method, status, auth_code, description, initiated_at`,
+      [merchantId, parseFloat(amount), fee, net, pmD, authCode,
+       description || 'Decaissement mobile']
+    );
+    res.json({
+      success: true,
+      txnId: txn.rows[0].transaction_id,
+      reference: ref,
+      authCode,
+      amount: parseFloat(amount),
+      fee,
+      net,
+      status: 'authorized',
+      payUrl: null,
+    });
+  } catch(err) {
+    console.error('disburse error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── WITHDRAW (retrait solde marchand vers Mobile Money) ─────────
+router.post('/withdraw', merchantAuth, async (req, res) => {
+  const { amount, phone, operator, description } = req.body;
+  if (!amount || parseFloat(amount) < 1000) return res.status(422).json({ error: 'Montant minimum 1000 XAF' });
+  if (!phone) return res.status(422).json({ error: 'phone requis' });
+  if (!operator) return res.status(422).json({ error: 'operator requis (mtn, airtel, orange, vodacom)' });
+  try {
+    const merchantId = req.merchant?.merchantId || req.user?.merchantId;
+    const bal = await query(
+      `SELECT COALESCE(SUM(net_amount),0) as balance FROM transactions
+       WHERE merchant_id=$1 AND type='collect' AND status='authorized'`, [merchantId]);
+    const available = parseFloat(bal.rows[0].balance);
+    if (parseFloat(amount) > available)
+      return res.status(422).json({ error: `Solde insuffisant (disponible: ${available} XAF)` });
+
+    const ref = 'WDR-' + Date.now().toString(36).toUpperCase();
+    const fee = Math.round(parseFloat(amount) * 0.01);
+    const net = parseFloat(amount) - fee;
+    const authCode = 'WDR' + Math.random().toString(36).slice(2,8).toUpperCase();
+    const txn = await query(
+      `INSERT INTO transactions (merchant_id, type, amount, currency, fee_amount, net_amount,
+        payment_method, status, auth_code, description, initiated_at)
+       VALUES ($1,'payout',$2,'XAF',$3,$4,'mobile_money','authorized',$5,$6,NOW())
+       RETURNING transaction_id`,
+      [merchantId, parseFloat(amount), fee, net, authCode, description || `Retrait ${ref}`]
+    );
+    res.json({ success:true, txnId: txn.rows[0].transaction_id, reference: ref,
+      authCode, amount: parseFloat(amount), fee, net, status:'authorized' });
+  } catch(err) { console.error('withdraw:', err.message); res.status(500).json({ error: err.message }); }
+});
+
+// ─── RECEIPTS SMS ────────────────────────────────────────────────
+router.post('/receipts/sms', merchantAuth, async (req, res) => {
+  const { phone, txnId, amount, reference, type } = req.body;
+  if (!phone) return res.status(422).json({ error: 'phone requis' });
+  try {
+    const text = `CPlus - ${(type||'Transaction').toUpperCase()}\nMontant: ${amount} XAF\nRef: ${reference||txnId}\nMerci de votre confiance.\nc-pay.global`;
+    try {
+      const { sendSmsSmpp } = require('../services/notifications/smpp.service');
+      await sendSmsSmpp({ to: phone, text });
+      res.json({ success:true, sent:true, phone });
+    } catch(smsErr) {
+      res.json({ success:true, sent:false, phone, note:'SMS gateway indisponible', text });
+    }
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── ACCOUNT CHANGE PASSWORD ─────────────────────────────────────
+router.post('/account/change-password', merchantAuth, async (req, res) => {
+  const bcrypt = require('bcryptjs');
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) return res.status(422).json({ error: 'currentPassword et newPassword requis' });
+  if (newPassword.length < 8) return res.status(422).json({ error: 'Minimum 8 caracteres' });
+  try {
+    const userId = req.merchant?.userId || req.user?.userId;
+    const u = await query(`SELECT password_hash FROM merchant_users WHERE user_id=$1`, [userId]);
+    if (!u.rows[0]) return res.status(404).json({ error: 'Utilisateur introuvable' });
+    const ok = await bcrypt.compare(currentPassword, u.rows[0].password_hash);
+    if (!ok) return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
+    const hash = await bcrypt.hash(newPassword, 10);
+    await query(`UPDATE merchant_users SET password_hash=$1, updated_at=NOW() WHERE user_id=$2`, [hash, userId]);
+    res.json({ success:true, message:'Mot de passe modifie' });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/collect/contactless', merchantAuth, async (req, res) => {
+  const { amount, currency = 'XAF', description, cardData } = req.body;
+  if (!amount || parseFloat(amount) < 100) return res.status(422).json({ error: 'Montant invalide' });
+
+  try {
+    // En prod: cardData contient le cryptogramme EMV lu par le terminal NFC
+    // Ici: simulation avec CyberSource
+    const txnRef = 'NFC-' + Date.now().toString(36).toUpperCase();
+    const fee = Math.round(parseFloat(amount) * 0.015);
+    const net = parseFloat(amount) - fee;
+
+    // Appel PSP CyberSource (simulation si pas de config active)
+    let authCode = 'NFC' + Math.random().toString(36).slice(2,8).toUpperCase();
+    let pspResponse = { authorized: true, authCode, network: 'Visa' };
+
+    // Vérifier si config CyberSource active
+    const pspConfig = await query(
+      `SELECT * FROM api_configs WHERE provider_key='cybersource' AND status='active' LIMIT 1`
+    ).catch(() => ({ rows: [] }));
+
+    if (pspConfig.rows.length > 0 && cardData?.cryptogram) {
+      // TODO: appel réel CyberSource POST /pts/v2/payments avec cryptogramme EMV
+      // Pour l'instant: simulation réaliste
+      authCode = 'AUTH' + Math.random().toString(36).slice(2,8).toUpperCase();
+    }
+
+    // Enregistrer la transaction
+    const txn = await query(
+      `INSERT INTO transactions (
+        merchant_id, type, amount, currency, fee_amount, net_amount,
+        payment_method, status, auth_code, reference, description, initiated_at
+      ) VALUES ($1,'payment',$2,$3,$4,$5,'contactless_nfc','authorized',$6,$7,$8,NOW())
+      RETURNING *`,
+      [req.merchant.merchantId, parseFloat(amount), currency, fee, net, authCode, txnRef, description || 'Paiement sans contact']
+    );
+
+    res.json({
+      success: true,
+      transaction: txn.rows[0],
+      authCode,
+      network: pspResponse.network,
+      amount: parseFloat(amount),
+      fee,
+      net,
+      currency,
+      reference: txnRef,
+      message: 'Paiement autorisé'
+    });
+
+  } catch(err) {
+    console.error('NFC payment error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── 2FA MERCHANT ─────────────────────────────────────────────────
+const speakeasy = require('speakeasy');
+const QRCode    = require('qrcode');
+
+// Setup 2FA — générer secret + QR
+router.post('/auth/2fa/setup', merchantAuth, async (req, res) => {
+  try {
+    const secret = speakeasy.generateSecret({
+      name: `CPlus:${req.user.email}`,
+      length: 20
+    });
+    // Sauvegarder le secret temporairement (non activé)
+    await query(
+      `UPDATE merchant_users SET mfa_secret=$1 WHERE user_id=$2`,
+      [secret.base32, req.user.sub]
+    );
+    const qrUrl = await QRCode.toDataURL(secret.otpauth_url);
+    res.json({ secret: secret.base32, qrCode: qrUrl, otpauthUrl: secret.otpauth_url });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Vérifier et activer 2FA
+router.post('/auth/2fa/verify', merchantAuth, async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(422).json({error:'Token requis'});
+  try {
+    const u = await query(`SELECT mfa_secret FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
+    if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
+    const valid = speakeasy.totp.verify({
+      secret: u.rows[0].mfa_secret,
+      encoding: 'base32',
+      token: token.replace(/\s/g,''),
+      window: 2
+    });
+    if (!valid) return res.status(400).json({error:'Code invalide'});
+    await query(`UPDATE merchant_users SET mfa_enabled=TRUE WHERE user_id=$1`, [req.user.sub]);
+    res.json({success:true, message:'2FA activé ✅'});
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Désactiver 2FA
+router.post('/auth/2fa/disable', merchantAuth, async (req, res) => {
+  const { token } = req.body;
+  try {
+    const u = await query(`SELECT mfa_secret FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
+    const valid = speakeasy.totp.verify({ secret: u.rows[0].mfa_secret, encoding:'base32', token:token.replace(/\s/g,''), window:2 });
+    if (!valid) return res.status(400).json({error:'Code invalide'});
+    await query(`UPDATE merchant_users SET mfa_enabled=FALSE, mfa_secret=NULL WHERE user_id=$1`, [req.user.sub]);
+    res.json({success:true});
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Statut 2FA
+router.get('/auth/2fa/status', merchantAuth, async (req, res) => {
+  try {
+    const u = await query(
+      `SELECT mfa_enabled, mfa_method, first_login_at, created_at FROM merchant_users WHERE user_id=$1`,
+      [req.user.sub]
+    );
+    const user = u.rows[0];
+    const daysSinceCreation = Math.floor((Date.now() - new Date(user.first_login_at||user.created_at)) / 86400000);
+    const daysLeft = Math.max(0, 10 - daysSinceCreation);
+    const required = daysSinceCreation >= 10;
+    res.json({ mfaEnabled: user.mfa_enabled, mfaMethod: user.mfa_method, daysSinceCreation, daysLeft, required });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Validation 2FA lors du login (route séparée)
+router.post('/auth/2fa/validate', async (req, res) => {
+  const { tempToken, totpCode } = req.body;
+  if (!tempToken || !totpCode) return res.status(422).json({error:'Token et code requis'});
+  try {
+    const jwt = require('jsonwebtoken');
+    const payload = jwt.verify(tempToken, process.env.JWT_SECRET);
+    if (payload.type !== 'mfa_pending') return res.status(401).json({error:'Token invalide'});
+    const u = await query(`SELECT * FROM merchant_users WHERE user_id=$1`, [payload.sub]);
+    if (!u.rows[0]) return res.status(404).json({error:'Utilisateur introuvable'});
+    const valid = speakeasy.totp.verify({
+      secret: u.rows[0].mfa_secret,
+      encoding: 'base32',
+      token: totpCode.replace(/\s/g,''),
+      window: 2
+    });
+    if (!valid) return res.status(400).json({error:'Code 2FA invalide'});
+    const { signToken } = require('../middleware/auth');
+    const accessToken = signToken({ sub: u.rows[0].user_id, email: u.rows[0].email, merchantId: u.rows[0].merchant_id, role: u.rows[0].role, type: 'merchant' }, '8h');
+    res.json({ access_token: accessToken, user: { email: u.rows[0].email, firstName: u.rows[0].first_name } });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// ─── API KEYS MANAGEMENT ──────────────────────────────────────────
+
+// Lister les API keys du merchant
+router.get('/api-keys', merchantAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT key_id, key_name, api_key, permissions, is_active, last_used_at, expires_at, created_at
+       FROM merchant_api_keys WHERE merchant_id=$1 ORDER BY created_at DESC`,
+      [req.user.merchantId]
+    );
+    // Masquer la clé : sk_live_xxxx****
+    const keys = r.rows.map(k => ({
+      ...k,
+      api_key: k.api_key.slice(0,12) + '****' + k.api_key.slice(-4)
+    }));
+    res.json({ data: keys });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Créer une nouvelle API key
+router.post('/api-keys', merchantAuth, async (req, res) => {
+  const { keyName, permissions, expiresAt } = req.body;
+  if (!keyName) return res.status(422).json({error:'Nom de la clé requis'});
+  try {
+    const apiKey    = 'sk_live_' + crypto.randomBytes(24).toString('hex');
+    const apiSecret = 'sk_secret_' + crypto.randomBytes(32).toString('hex');
+    const r = await query(
+      `INSERT INTO merchant_api_keys (merchant_id, key_name, api_key, api_secret, permissions, expires_at, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.user.merchantId, keyName, apiKey, apiSecret,
+       JSON.stringify(permissions || ['collect','disburse','transactions','pay_links']),
+       expiresAt || null, req.user.sub]
+    );
+    // Retourner la clé complète UNE SEULE FOIS
+    res.status(201).json({
+      success: true,
+      message: 'Conservez ces credentials — ils ne seront plus affichés.',
+      key: r.rows[0]
+    });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Révoquer une API key
+router.delete('/api-keys/:keyId', merchantAuth, async (req, res) => {
+  try {
+    await query(
+      `UPDATE merchant_api_keys SET is_active=FALSE, updated_at=NOW()
+       WHERE key_id=$1 AND merchant_id=$2`,
+      [req.params.keyId, req.user.merchantId]
+    );
+    res.json({success:true});
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Supprimer une API key
+router.delete('/api-keys/:keyId/permanent', merchantAuth, async (req, res) => {
+  try {
+    await query(
+      `DELETE FROM merchant_api_keys WHERE key_id=$1 AND merchant_id=$2`,
+      [req.params.keyId, req.user.merchantId]
+    );
+    res.json({success:true});
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// ─── MIDDLEWARE API KEY AUTH ───────────────────────────────────────
+const apiKeyAuth = async (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey) return res.status(401).json({error:'X-API-Key header requis', code:'API_KEY_REQUIRED'});
+  try {
+    const r = await query(
+      `SELECT k.*, m.merchant_id, m.business_name, m.merchant_status
+       FROM merchant_api_keys k
+       JOIN merchants m ON m.merchant_id=k.merchant_id
+       WHERE k.api_key=$1 AND k.is_active=TRUE
+       AND (k.expires_at IS NULL OR k.expires_at > NOW())`,
+      [apiKey]
+    );
+    if (!r.rows.length) return res.status(401).json({error:'Clé API invalide ou expirée', code:'INVALID_API_KEY'});
+    const key = r.rows[0];
+    if (key.merchant_status !== 'active') return res.status(403).json({error:'Compte merchant inactif', code:'MERCHANT_INACTIVE'});
+    // Injecter les infos merchant dans req
+    req.user = { merchantId: key.merchant_id, sub: key.merchant_id, email: key.business_name, role:'api', permissions: key.permissions };
+    req.apiKey = key;
+    // Update last_used_at
+    query(`UPDATE merchant_api_keys SET last_used_at=NOW() WHERE key_id=$1`, [key.key_id]).catch(()=>{});
+    next();
+  } catch(err){ res.status(500).json({error:err.message}); }
+};
+
+// ─── ROUTES PUBLIQUES API (authentification par API Key) ──────────
+router.post('/public/collect', apiKeyAuth, async (req, res) => {
+  if (!req.apiKey.permissions.includes('collect')) return res.status(403).json({error:'Permission collect non accordée'});
+  const { amount, currency='XAF', customerPhone, method, description, reference } = req.body;
+  if (!amount || !customerPhone || !method) return res.status(422).json({error:'amount, customerPhone et method requis'});
+  try {
+    const ref = reference || 'API-' + Date.now().toString(36).toUpperCase();
+    const { data } = await require('axios').post(
+      `http://localhost:${process.env.PORT||3000}/api/v1/merchant/collect`,
+      { amount, currency, customerPhone, description: description||ref, mobileOperator: method },
+      { headers: { Authorization: `Bearer internal`, 'X-Merchant-Id': req.user.merchantId } }
+    ).catch(() => ({ data: { txnId: 'SIM-'+Date.now(), status:'pending' } }));
+    res.json({ success:true, reference:ref, txnId:data.txnId, status:data.status||'pending' });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+router.get('/public/transactions', apiKeyAuth, async (req, res) => {
+  if (!req.apiKey.permissions.includes('transactions')) return res.status(403).json({error:'Permission transactions non accordée'});
+  const { page=1, limit=20, status } = req.query;
+  try {
+    const offset = (parseInt(page)-1)*parseInt(limit);
+    const conds = ['merchant_id=$1']; const params = [req.user.merchantId];
+    if (status) { params.push(status); conds.push(`status=$${params.length}`); }
+    const r = await query(
+      `SELECT transaction_id, type, amount, currency, status, payment_method, auth_code, reference, initiated_at
+       FROM transactions WHERE ${conds.join(' AND ')}
+       ORDER BY initiated_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,
+      [...params, parseInt(limit), offset]
+    );
+    const cnt = await query(`SELECT COUNT(*) FROM transactions WHERE ${conds.join(' AND ')}`, params);
+    res.json({ data: r.rows, total: parseInt(cnt.rows[0].count), page: parseInt(page), limit: parseInt(limit) });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+router.post('/public/pay-links', apiKeyAuth, async (req, res) => {
+  if (!req.apiKey.permissions.includes('pay_links')) return res.status(403).json({error:'Permission pay_links non accordée'});
+  const { amount, currency='XAF', description, recipientPhone, psp='cybersource', paymentMethod='card' } = req.body;
+  if (!amount) return res.status(422).json({error:'amount requis'});
+  try {
+    const shortId = Math.random().toString(36).substr(2,8).toUpperCase();
+    const shortUrl = `${process.env.PAY_LINK_BASE_URL||'https://pay.c-pay.global'}/${shortId}`;
+    const expiresAt = new Date(Date.now() + 24*3600000);
+    const r = await query(
+      `INSERT INTO pay_links (merchant_id, short_id, amount, currency, description, short_url, expires_at, psp, payment_method, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending') RETURNING pay_link_id, short_id, short_url, amount, currency, expires_at`,
+      [req.user.merchantId, shortId, amount, currency, description||null, shortUrl, expiresAt, psp, paymentMethod]
+    );
+    res.status(201).json({ success:true, ...r.rows[0] });
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// ─── WEBHOOK CONFIG ───────────────────────────────────────────────
+router.get('/webhook-config', merchantAuth, async (req, res) => {
+  try {
+    const r = await query(`SELECT webhook_url, webhook_secret FROM merchants WHERE merchant_id=$1`, [req.user.merchantId]);
+    res.json(r.rows[0] || {});
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+router.patch('/webhook-config', merchantAuth, async (req, res) => {
+  const { webhookUrl } = req.body;
+  try {
+    await query(`UPDATE merchants SET webhook_url=$1, updated_at=NOW() WHERE merchant_id=$2`, [webhookUrl||null, req.user.merchantId]);
+    res.json({success:true});
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+router.post('/webhook-config/test', merchantAuth, async (req, res) => {
+  try {
+    const r = await query(`SELECT webhook_url, webhook_secret FROM merchants WHERE merchant_id=$1`, [req.user.merchantId]);
+    const { webhook_url, webhook_secret } = r.rows[0] || {};
+    if (!webhook_url) return res.status(400).json({error:'URL webhook non configurée'});
+
+    const crypto  = require('crypto');
+    const payload = JSON.stringify({
+      event: 'webhook.test', txnId: 'test-' + Date.now(),
+      reference: 'TEST-001', amount: 100, currency: 'XAF',
+      status: 'authorized', method: 'test',
+      timestamp: new Date().toISOString()
+    });
+    const signature = 'sha256=' + crypto.createHmac('sha256', webhook_secret||'').update(payload).digest('hex');
+
+    const url = new URL(webhook_url);
+    const lib = url.protocol === 'https:' ? require('https') : require('http');
+
+    await new Promise((resolve, reject) => {
+      const req2 = lib.request({
+        hostname: url.hostname, port: url.port||(url.protocol==='https:'?443:80),
+        path: url.pathname, method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Content-Length':Buffer.byteLength(payload), 'X-CPlus-Signature':signature, 'X-CPlus-Event':'webhook.test' },
+        timeout: 10000
+      }, r2 => { resolve(r2.statusCode); });
+      req2.on('error', reject);
+      req2.write(payload); req2.end();
+    });
+
+    res.json({success:true, message:'Webhook test envoyé ✅'});
+  } catch(err){ res.status(400).json({error:'Endpoint inaccessible: ' + err.message}); }
+});

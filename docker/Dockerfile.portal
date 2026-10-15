@@ -1,0 +1,23 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+ARG APP_DIR
+ARG REACT_APP_API_BASE_URL=https://api.c-pay.global
+ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
+# Empeche CRA d'inliner le runtime chunk dans index.html.
+# Sans cela, index.html contient un <script> inline que la CSP
+# script-src 'self' bloque -> portail casse en mode enforce.
+ENV INLINE_RUNTIME_CHUNK=false
+# Les warnings ESLint ne doivent pas faire echouer le build en CI.
+ENV CI=false
+COPY ${APP_DIR}/package*.json ./
+RUN npm install
+COPY ${APP_DIR}/public ./public
+COPY ${APP_DIR}/src ./src
+RUN npm run build
+
+FROM nginx:1.25-alpine
+COPY --from=builder /app/build /usr/share/nginx/html
+COPY docker/nginx-spa.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=10s \
+  CMD wget -qO- http://localhost/ || exit 1

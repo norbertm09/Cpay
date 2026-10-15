@@ -1,0 +1,624 @@
+// backend/src/services/rails/gtp-card.service.js
+// ================================================================
+// CPlus 2.6 — GTP Card Service (CEMAC / GIMAC)
+//
+// Fonctions :
+//   issueCard()        — Émettre une carte virtuelle via GTP
+//   getCardDetails()   — Détail carte GTP
+//   getBalance()       — Solde en temps réel GTP
+//   payment()          — Paiement marchand (Schéma 1 : débit direct)
+//   paymentToken()     — Paiement tokenisé (Schéma 2 : token CPlus)
+//   topUp()            — Chargement Mobile Money → Carte GTP
+//   unload()           — Déchargement Carte GTP → Mobile Money
+//   freezeCard()       — Geler la carte
+//   unfreezeCard()     — Activer la carte
+//   changePin()        — Changer le PIN via GTP
+//   getTransactions()  — Historique GTP
+//   cancelCard()       — Annuler la carte définitivement
+// ================================================================
+
+'use strict';
+
+const crypto  = require('crypto');
+const bcrypt  = require('bcryptjs');
+const { v4: uuidv4 } = require('uuid');
+const { request, getConfig, stan, rrn, localDateTime } = require('./gtp.client');
+const { query, withTransaction } = require('../../config/database');
+const { auditLog, PCI_EVENTS } = require('../../middleware/pci.middleware');
+
+// ─── Pays CEMAC et leurs codes ISO ───────────────────────────────
+const CEMAC_COUNTRIES = {
+  CM: { name: 'Cameroun',       iso3166: '120', currency: '950', currencyAlpha: 'XAF', mcc: '120' },
+  CG: { name: 'Congo',          iso3166: '178', currency: '950', currencyAlpha: 'XAF', mcc: '178' },
+  GA: { name: 'Gabon',          iso3166: '266', currency: '950', currencyAlpha: 'XAF', mcc: '266' },
+  CF: { name: 'RCA',            iso3166: '140', currency: '950', currencyAlpha: 'XAF', mcc: '140' },
+  TD: { name: 'Tchad',          iso3166: '148', currency: '950', currencyAlpha: 'XAF', mcc: '148' },
+  GQ: { name: 'Guinée Éq.',     iso3166: '226', currency: '950', currencyAlpha: 'XAF', mcc: '226' },
+  CD: { name: 'RD Congo',       iso3166: '180', currency: '976', currencyAlpha: 'CDF', mcc: '180' },
+};
+
+// ─── ÉMISSION DE CARTE ───────────────────────────────────────────
+
+/**
+ * Émettre une carte virtuelle CPlus via GTP
+ * Appelle le BIN dédié CEMAC pour créer un PAN GTP
+ */
+const issueCard = async ({
+  cardholderId,
+  firstName,
+  lastName,
+  dateOfBirth,     // YYYY-MM-DD
+  idType,          // passport|national_id
+  idNumber,
+  phone,
+  email,
+  country = 'CM',
+  initialLoad = 0, // Solde initial en XAF
+  ip,
+}) => {
+  const cfg     = getConfig();
+  const cemac   = CEMAC_COUNTRIES[country] || CEMAC_COUNTRIES.CM;
+  const refId   = uuidv4();
+
+  const payload = {
+    requestId:        refId,
+    institutionId:    cfg.institutionId,
+    binPrefix:        cfg.binPrefix,         // BIN dédié CPlus CEMAC
+    cardType:         'VIRTUAL',
+    currency:         cemac.currency,         // 950 = XAF
+    country:          cemac.iso3166,
+    // Données cardholder (KYC GTP)
+    cardholder: {
+      firstName:      firstName.toUpperCase().trim(),
+      lastName:       lastName.toUpperCase().trim(),
+      dateOfBirth:    dateOfBirth,            // YYYY-MM-DD
+      idType:         idType || 'NATIONAL_ID',
+      idNumber:       idNumber,
+      phone:          phone,
+      email:          email,
+      address: {
+        country:      cemac.iso3166,
+      },
+    },
+    // Paramètres carte
+    cardParams: {
+      expiryMonths:   36,    // Validité 3 ans
+      embossName:     `${firstName.slice(0,13).toUpperCase()} ${lastName.slice(0,13).toUpperCase()}`,
+      deliveryMode:   'VIRTUAL',
+      pinMailer:      false, // PIN créé via API
+    },
+    // Chargement initial optionnel
+    initialLoad: initialLoad > 0 ? {
+      amount:   Math.round(initialLoad * 100), // en centimes
+      currency: cemac.currency,
+      source:   'INSTITUTION_ACCOUNT',
+    } : undefined,
+    // GIMAC routing
+    network:    'GIMAC',
+    scheme:     'BOTH',   // Visa + GIMAC accepté
+  };
+
+  const { data } = await request({ method: 'POST', path: '/cards/issue', body: payload });
+
+  // Persister la carte GTP dans notre DB
+  const cardNum = data.cardNumber;                         // PAN complet — chiffrer immédiatement
+  const encPan  = _encryptPan(cardNum);
+  const masked  = _maskPan(cardNum);
+  const last4   = cardNum.slice(-4);
+
+  const dbResult = await query(
+    `INSERT INTO gtp_cards
+       (gtp_card_id, cardholder_id, gtp_reference, pan_encrypted, pan_masked, last4,
+        expiry_month, expiry_year, cvv2_encrypted, cardholder_name, status,
+        currency, country, bin_prefix, network, issued_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,$12,$13,'GIMAC',NOW())
+     RETURNING gtp_card_id, pan_masked, last4, expiry_month, expiry_year, status`,
+    [
+      uuidv4(), cardholderId, data.cardReference,
+      encPan, masked, last4,
+      parseInt(data.expiryMonth), parseInt(data.expiryYear),
+      data.cvv2 ? _encryptPan(data.cvv2) : null,
+      payload.cardParams.embossName,
+      cemac.currency, country, cfg.binPrefix,
+    ]
+  );
+
+  await auditLog({ eventType: 'GTP_CARD_ISSUED', actorType: 'cardholder', actorId: cardholderId, entityType: 'gtp_card', entityId: dbResult.rows[0].gtp_card_id, ipAddress: ip, success: true, details: { country, masked, last4 } });
+
+  return {
+    gtpCardId:     dbResult.rows[0].gtp_card_id,
+    gtpReference:  data.cardReference,
+    cardMasked:    masked,
+    last4,
+    expiryMonth:   data.expiryMonth,
+    expiryYear:    data.expiryYear,
+    network:       'GIMAC',
+    status:        'active',
+    currency:      cemac.currencyAlpha,
+    // CVV affiché UNE SEULE FOIS à l'émission, jamais restitué ensuite
+    cvv2:          data.cvv2 || null,
+  };
+};
+
+// ─── SOLDE EN TEMPS RÉEL ─────────────────────────────────────────
+const getBalance = async (gtpCardId, cardholderId) => {
+  const card = await _getGtpCard(gtpCardId, cardholderId);
+  const pan  = _decryptPan(card.pan_encrypted);
+  try {
+    const { data } = await request({ method: 'GET', path: `/cards/${card.gtp_reference}/balance` });
+    return {
+      balance:       data.availableBalance / 100, // centimes → XAF
+      ledgerBalance: data.ledgerBalance / 100,
+      currency:      data.currencyAlpha || 'XAF',
+      asOf:          data.timestamp || new Date().toISOString(),
+    };
+  } finally { /* pan zéroïsé */ }
+};
+
+// ─── DÉTAIL CARTE ─────────────────────────────────────────────────
+const getCardDetails = async (gtpCardId, cardholderId) => {
+  const card = await _getGtpCard(gtpCardId, cardholderId);
+  return {
+    gtpCardId:     card.gtp_card_id,
+    gtpReference:  card.gtp_reference,
+    cardMasked:    card.pan_masked,
+    last4:         card.last4,
+    expiryMonth:   card.expiry_month,
+    expiryYear:    card.expiry_year,
+    cardholderName: card.cardholder_name,
+    status:        card.status,
+    currency:      card.currency === '950' ? 'XAF' : 'CDF',
+    network:       card.network,
+    country:       card.country,
+    issuedAt:      card.issued_at,
+    frozenAt:      card.frozen_at,
+  };
+};
+
+// ─── SCHÉMA 1 : PAIEMENT DIRECT (débit carte GTP) ────────────────
+/**
+ * Le cardholder paye un marchand CPlus en débitant sa carte GTP
+ * directement via l'API GTP → réseau GIMAC
+ */
+const payment = async ({
+  gtpCardId,
+  cardholderId,
+  amount,          // en XAF
+  merchantId,
+  merchantName,
+  description,
+  pin,             // PIN carte (chiffré, vérifié localement)
+  mcc = '5999',   // Merchant Category Code
+  ip,
+}) => {
+  const card  = await _getGtpCard(gtpCardId, cardholderId);
+  if (card.status !== 'active') throw Object.assign(new Error(`Carte ${card.status}`), { statusCode: 422 });
+
+  // Vérifier PIN local (bcrypt)
+  if (card.pin_hash) {
+    const ok = await bcrypt.compare(pin, card.pin_hash);
+    if (!ok) {
+      await _logPinAttempt(card.gtp_card_id, false, ip);
+      throw Object.assign(new Error('PIN incorrect'), { statusCode: 422, code: 'WRONG_PIN' });
+    }
+    await _logPinAttempt(card.gtp_card_id, true, ip);
+  }
+
+  const cfg       = getConfig();
+  const amountCents = Math.round(amount * 100);
+  const cemac     = CEMAC_COUNTRIES[card.country] || CEMAC_COUNTRIES.CM;
+
+  const payload = {
+    requestId:   uuidv4(),
+    messageType: '0200',       // ISO 8583 Authorization Request
+    processingCode: '000000',  // Purchase
+    amount:      amountCents,
+    currency:    cemac.currency,
+    cardReference: card.gtp_reference,
+    stan:        stan(),
+    rrn:         rrn(),
+    localDateTime: localDateTime(),
+    terminalId:  cfg.terminalId,
+    merchantId:  merchantId || cfg.institutionId,
+    merchantName: merchantName || 'CPLUS MERCHANT',
+    mcc,
+    posEntryMode: '010',       // Manual entry (virtual card)
+    network:     'GIMAC',
+    description,
+  };
+
+  const { data } = await request({ method: 'POST', path: '/transactions/purchase', body: payload });
+
+  // Vérifier code réponse GTP/ISO 8583
+  if (data.responseCode !== '00') {
+    const reason = _iso8583ResponseDesc(data.responseCode);
+    await _logGtpTxn(card, 'payment', amount, 'failed', data, ip, { reason });
+    throw Object.assign(new Error(reason), { statusCode: 422, code: `ISO8583_${data.responseCode}`, gtpCode: data.responseCode });
+  }
+
+  await _logGtpTxn(card, 'payment', amount, 'completed', data, ip, { merchantId, merchantName, mcc });
+  await auditLog({ eventType: PCI_EVENTS.PAYMENT_SUCCESS, actorType: 'cardholder', actorId: cardholderId, ipAddress: ip, success: true, details: { amount, authCode: data.authCode, gtpRef: data.transactionId } });
+
+  return {
+    success:        true,
+    authCode:       data.authCode,
+    stan:           data.stan,
+    rrn:            data.rrn,
+    transactionId:  data.transactionId,
+    amount,
+    currency:       'XAF',
+    responseCode:   data.responseCode,
+    responseDesc:   'Approuvé',
+    network:        'GIMAC',
+    schema:         'DIRECT',
+  };
+};
+
+// ─── SCHÉMA 2 : PAIEMENT TOKENISÉ (token CPlus → débit GTP) ──────
+/**
+ * Le cardholder paye via son token CPlus qui est résolu vers la carte GTP
+ * Avantage : le PAN GTP ne transite jamais côté frontend
+ */
+const paymentToken = async ({
+  tokenId,         // Token CPlus (tok_xxxxxxx)
+  cardholderId,
+  amount,
+  merchantId,
+  merchantName,
+  description,
+  pin,
+  mcc = '5999',
+  ip,
+}) => {
+  // 1. Résoudre le token → enrollment → gtp_card_id
+  const tokenHash = crypto.createHash('sha256').update(tokenId).digest('hex');
+  const enrollRes = await query(
+    `SELECT ec.*, gc.gtp_card_id, gc.gtp_reference, gc.status as card_status,
+            gc.pan_encrypted, gc.pin_hash, gc.country, gc.currency
+     FROM enrolled_cards ec
+     JOIN gtp_cards gc ON gc.gtp_card_id = ec.gtp_card_id
+     WHERE ec.token_hash=$1 AND ec.cardholder_id=$2 AND ec.status='active'`,
+    [tokenHash, cardholderId]
+  );
+  if (!enrollRes.rows.length) throw Object.assign(new Error('Token invalide ou révoqué'), { statusCode: 422, code: 'INVALID_TOKEN' });
+
+  const enrollment = enrollRes.rows[0];
+  if (enrollment.card_status !== 'active') throw Object.assign(new Error('Carte GTP non active'), { statusCode: 422 });
+
+  // 2. Vérifier PIN
+  if (enrollment.pin_hash) {
+    const ok = await bcrypt.compare(pin, enrollment.pin_hash);
+    if (!ok) {
+      await _logPinAttempt(enrollment.gtp_card_id, false, ip);
+      throw Object.assign(new Error('PIN incorrect'), { statusCode: 422, code: 'WRONG_PIN' });
+    }
+    await _logPinAttempt(enrollment.gtp_card_id, true, ip);
+  }
+
+  // 3. Payer via GTP (même appel que schéma 1)
+  const result = await payment({
+    gtpCardId:   enrollment.gtp_card_id,
+    cardholderId,
+    amount,
+    merchantId,
+    merchantName,
+    description,
+    pin:         null, // PIN déjà vérifié ci-dessus
+    mcc,
+    ip,
+    _skipPinCheck: true,
+  });
+
+  // 4. Incrémenter usage du token
+  await query(
+    `UPDATE enrolled_cards SET usage_count=usage_count+1, last_used_at=NOW() WHERE token_hash=$1`,
+    [tokenHash]
+  );
+
+  return { ...result, schema: 'TOKENIZED', tokenId, cardMasked: enrollment.card_masked };
+};
+
+// ─── TOP-UP (Mobile Money → Carte GTP) ───────────────────────────
+const topUp = async ({
+  gtpCardId,
+  cardholderId,
+  amount,
+  operator,        // mtn|orange|airtel
+  mmPhone,
+  ip,
+}) => {
+  const card      = await _getGtpCard(gtpCardId, cardholderId);
+  if (card.status === 'cancelled') throw new Error('Carte annulée');
+
+  const fee       = Math.round(amount * 0.01); // 1%
+  const credited  = amount - fee;
+  const amountCents = Math.round(credited * 100);
+  const cemac     = CEMAC_COUNTRIES[card.country] || CEMAC_COUNTRIES.CM;
+
+  const payload = {
+    requestId:     uuidv4(),
+    messageType:   '0200',
+    processingCode: '260000',   // Load / Top-up
+    amount:        amountCents,
+    currency:      cemac.currency,
+    cardReference: card.gtp_reference,
+    stan:          stan(),
+    rrn:           rrn(),
+    localDateTime: localDateTime(),
+    fundingSource: {
+      type:        'MOBILE_MONEY',
+      operator:    operator.toUpperCase(),
+      phone:       mmPhone,
+      country:     cemac.iso3166,
+    },
+    network:       'GIMAC',
+  };
+
+  const { data } = await request({ method: 'POST', path: '/transactions/load', body: payload });
+
+  if (data.responseCode !== '00') {
+    throw Object.assign(new Error(_iso8583ResponseDesc(data.responseCode)), { statusCode: 422, code: `ISO8583_${data.responseCode}` });
+  }
+
+  await _logGtpTxn(card, 'topup', amount, 'completed', data, ip, { operator, mmPhone, fee, credited });
+
+  return {
+    success:       true,
+    transactionId: data.transactionId,
+    amount,
+    fee,
+    credited,
+    currency:      'XAF',
+    authCode:      data.authCode,
+    mmReference:   data.externalReference || `MM${operator.toUpperCase()}${Date.now()}`,
+    network:       'GIMAC',
+  };
+};
+
+// ─── UNLOAD (Carte GTP → Mobile Money) ───────────────────────────
+const unload = async ({
+  gtpCardId,
+  cardholderId,
+  amount,
+  operator,
+  mmPhone,
+  pin,
+  ip,
+}) => {
+  const card = await _getGtpCard(gtpCardId, cardholderId);
+  if (card.status !== 'active') throw new Error('Carte non active');
+
+  // PIN obligatoire pour unload
+  if (card.pin_hash) {
+    const ok = await bcrypt.compare(pin, card.pin_hash);
+    if (!ok) {
+      await _logPinAttempt(card.gtp_card_id, false, ip);
+      throw Object.assign(new Error('PIN incorrect'), { statusCode: 422 });
+    }
+  }
+
+  const fee         = Math.round(amount * 0.015); // 1.5%
+  const total       = amount + fee;
+  const amountCents = Math.round(amount * 100);
+  const cemac       = CEMAC_COUNTRIES[card.country] || CEMAC_COUNTRIES.CM;
+
+  const payload = {
+    requestId:     uuidv4(),
+    messageType:   '0200',
+    processingCode: '280000',   // Unload / Cash-out
+    amount:        amountCents,
+    currency:      cemac.currency,
+    cardReference: card.gtp_reference,
+    stan:          stan(),
+    rrn:           rrn(),
+    localDateTime: localDateTime(),
+    disbursement: {
+      type:        'MOBILE_MONEY',
+      operator:    operator.toUpperCase(),
+      phone:       mmPhone,
+      country:     cemac.iso3166,
+    },
+    network:       'GIMAC',
+  };
+
+  const { data } = await request({ method: 'POST', path: '/transactions/unload', body: payload });
+  if (data.responseCode !== '00') throw Object.assign(new Error(_iso8583ResponseDesc(data.responseCode)), { statusCode: 422 });
+
+  await _logGtpTxn(card, 'unload', amount, 'completed', data, ip, { operator, mmPhone, fee });
+
+  return {
+    success:       true,
+    transactionId: data.transactionId,
+    sent:          amount,
+    fee,
+    total,
+    currency:      'XAF',
+    mmReference:   data.externalReference,
+    network:       'GIMAC',
+  };
+};
+
+// ─── GESTION CARTE ────────────────────────────────────────────────
+const freezeCard = async (gtpCardId, cardholderId, ip) => {
+  const card = await _getGtpCard(gtpCardId, cardholderId);
+  await request({ method: 'PUT', path: `/cards/${card.gtp_reference}/status`, body: { action: 'BLOCK', reason: 'CARDHOLDER_REQUEST' } });
+  await query(`UPDATE gtp_cards SET status='frozen', frozen_at=NOW() WHERE gtp_card_id=$1`, [gtpCardId]);
+  await auditLog({ eventType: 'GTP_CARD_FROZEN', actorType: 'cardholder', actorId: cardholderId, entityType: 'gtp_card', entityId: gtpCardId, ipAddress: ip, success: true });
+  return { success: true, status: 'frozen' };
+};
+
+const unfreezeCard = async (gtpCardId, cardholderId, ip) => {
+  const card = await _getGtpCard(gtpCardId, cardholderId);
+  await request({ method: 'PUT', path: `/cards/${card.gtp_reference}/status`, body: { action: 'UNBLOCK', reason: 'CARDHOLDER_REQUEST' } });
+  await query(`UPDATE gtp_cards SET status='active', frozen_at=NULL WHERE gtp_card_id=$1`, [gtpCardId]);
+  await auditLog({ eventType: 'GTP_CARD_UNFROZEN', actorType: 'cardholder', actorId: cardholderId, entityType: 'gtp_card', entityId: gtpCardId, ipAddress: ip, success: true });
+  return { success: true, status: 'active' };
+};
+
+const changePin = async (gtpCardId, cardholderId, currentPin, newPin, ip) => {
+  if (!/^\d{4}$/.test(newPin)) throw Object.assign(new Error('PIN doit être 4 chiffres'), { statusCode: 422 });
+  const card = await _getGtpCard(gtpCardId, cardholderId);
+
+  // Vérifier l'ancien PIN
+  if (card.pin_hash) {
+    const ok = await bcrypt.compare(currentPin, card.pin_hash);
+    if (!ok) throw Object.assign(new Error('PIN actuel incorrect'), { statusCode: 401 });
+  }
+
+  // Changer le PIN via GTP (PINBlock chiffré)
+  const pinBlock = _buildPinBlock(newPin, card.last4);
+  await request({
+    method: 'PUT',
+    path:   `/cards/${card.gtp_reference}/pin`,
+    body:   { pinBlock, format: 'ISO0', algorithm: 'RSA_OAEP' },
+  });
+
+  // Mettre à jour le hash local
+  const newHash = await bcrypt.hash(newPin, 12);
+  await query(`UPDATE gtp_cards SET pin_hash=$1 WHERE gtp_card_id=$2`, [newHash, gtpCardId]);
+  await auditLog({ eventType: 'GTP_PIN_CHANGED', actorType: 'cardholder', actorId: cardholderId, entityType: 'gtp_card', entityId: gtpCardId, ipAddress: ip, success: true });
+
+  return { success: true };
+};
+
+const cancelCard = async (gtpCardId, cardholderId, reason, ip) => {
+  const card = await _getGtpCard(gtpCardId, cardholderId);
+  await request({ method: 'PUT', path: `/cards/${card.gtp_reference}/status`, body: { action: 'CANCEL', reason: reason || 'CARDHOLDER_REQUEST' } });
+  await query(`UPDATE gtp_cards SET status='cancelled' WHERE gtp_card_id=$1`, [gtpCardId]);
+  await auditLog({ eventType: 'GTP_CARD_CANCELLED', actorType: 'cardholder', actorId: cardholderId, entityType: 'gtp_card', entityId: gtpCardId, ipAddress: ip, success: true, details: { reason } });
+  return { success: true, status: 'cancelled' };
+};
+
+// ─── HISTORIQUE TRANSACTIONS GTP ─────────────────────────────────
+const getTransactions = async (gtpCardId, cardholderId, { page = 1, limit = 20, dateFrom, dateTo } = {}) => {
+  const card = await _getGtpCard(gtpCardId, cardholderId);
+
+  // D'abord essayer GTP API
+  try {
+    const params = new URLSearchParams({ page, limit });
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo)   params.set('dateTo', dateTo);
+    const { data } = await request({ method: 'GET', path: `/cards/${card.gtp_reference}/transactions?${params}` });
+    return { data: data.transactions || [], total: data.total || 0, source: 'GTP' };
+  } catch {
+    // Fallback : transactions stockées localement
+    const r = await query(
+      `SELECT * FROM gtp_card_transactions WHERE gtp_card_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [gtpCardId, limit, (page - 1) * limit]
+    );
+    const cnt = await query(`SELECT COUNT(*) FROM gtp_card_transactions WHERE gtp_card_id=$1`, [gtpCardId]);
+    return { data: r.rows, total: parseInt(cnt.rows[0].count), source: 'LOCAL' };
+  }
+};
+
+// ─── Helpers internes ─────────────────────────────────────────────
+
+const _getGtpCard = async (gtpCardId, cardholderId) => {
+  const r = await query(
+    `SELECT * FROM gtp_cards WHERE gtp_card_id=$1 AND cardholder_id=$2`,
+    [gtpCardId, cardholderId]
+  );
+  if (!r.rows.length) throw Object.assign(new Error('Carte GTP introuvable'), { statusCode: 404 });
+  return r.rows[0];
+};
+
+// Chiffrement AES-256-GCM du PAN pour stockage DB
+const _encryptPan = (pan) => {
+  const keyHex = process.env.CARD_ENCRYPTION_KEY;
+  if (!keyHex) throw new Error('CARD_ENCRYPTION_KEY manquante');
+  const key  = Buffer.from(keyHex, 'hex');
+  const iv   = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc  = Buffer.concat([cipher.update(pan, 'utf8'), cipher.final()]);
+  const tag  = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${enc.toString('hex')}:${tag.toString('hex')}`;
+};
+
+const _decryptPan = (encrypted) => {
+  const [ivHex, dataHex, tagHex] = encrypted.split(':');
+  const key = Buffer.from(process.env.CARD_ENCRYPTION_KEY, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+};
+
+const _maskPan = (pan) => {
+  const c = pan.replace(/\D/g, '');
+  return (c.slice(0,4) + '*'.repeat(c.length-8) + c.slice(-4)).match(/.{1,4}/g).join(' ');
+};
+
+// PIN Block ISO Format 0
+const _buildPinBlock = (pin, pan) => {
+  // F = 0 (format) | L = longueur PIN | PIN + padding F
+  const pinPadded  = `0${pin.length}${pin}${'F'.repeat(14-pin.length)}`;
+  // PAN block : 0000 + 12 chiffres PAN (positions 2-13)
+  const panBlock   = `0000${pan.slice(1, 13)}`;
+  // XOR
+  const pinBuf = Buffer.from(pinPadded, 'hex');
+  const panBuf = Buffer.from(panBlock, 'hex');
+  return Buffer.from(pinBuf.map((b, i) => b ^ panBuf[i])).toString('hex').toUpperCase();
+};
+
+const _logPinAttempt = async (gtpCardId, success, ip) => {
+  await query(
+    `INSERT INTO pin_attempts (card_id, ip_address, success) VALUES ($1,$2,$3)`,
+    [gtpCardId, ip, success]
+  ).catch(() => {});
+};
+
+const _logGtpTxn = async (card, type, amount, status, gtpData, ip, extra = {}) => {
+  await query(
+    `INSERT INTO gtp_card_transactions
+       (gtp_card_id, type, amount, currency, status, gtp_transaction_id, auth_code,
+        response_code, rrn, stan, details, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
+    [
+      card.gtp_card_id, type, amount, card.currency || '950', status,
+      gtpData.transactionId || null, gtpData.authCode || null,
+      gtpData.responseCode || '00', gtpData.rrn || null, gtpData.stan || null,
+      JSON.stringify({ ip, ...extra }),
+    ]
+  ).catch(() => {});
+};
+
+// Codes de réponse ISO 8583 → description
+const _iso8583ResponseDesc = (code) => ({
+  '00': 'Approuvé',
+  '01': 'Référer à l\'émetteur',
+  '05': 'Ne pas honorer',
+  '06': 'Erreur générale',
+  '12': 'Transaction invalide',
+  '13': 'Montant invalide',
+  '14': 'Numéro de carte invalide',
+  '30': 'Erreur de format',
+  '41': 'Carte perdue',
+  '43': 'Carte volée',
+  '51': 'Solde insuffisant',
+  '54': 'Carte expirée',
+  '55': 'PIN incorrect',
+  '57': 'Transaction non autorisée',
+  '58': 'Terminal non autorisé',
+  '61': 'Plafond dépassé',
+  '62': 'Carte restreinte',
+  '65': 'Dépassement fréquence',
+  '75': 'PIN essais dépassés',
+  '76': 'PIN incorrect — carte bloquée',
+  '91': 'Émetteur indisponible',
+  '96': 'Erreur système',
+}[code] || `Code refus ${code}`);
+
+module.exports = {
+  issueCard,
+  getBalance,
+  getCardDetails,
+  payment,
+  paymentToken,
+  topUp,
+  unload,
+  freezeCard,
+  unfreezeCard,
+  changePin,
+  cancelCard,
+  getTransactions,
+  CEMAC_COUNTRIES,
+};

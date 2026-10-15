@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/bg">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:background="@color/card"
+        android:elevation="2dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="52dp"
+            android:orientation="horizontal">
+            <LinearLayout android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+                <TextView android:id="@+id/tab_pay" android:layout_width="wrap_content"
+                    android:layout_height="0dp" android:layout_weight="1"
+                    android:text="💳 Payer" android:textColor="@color/primary"
+                    android:textSize="15sp" android:textStyle="bold" android:gravity="center"
+                    android:clickable="true" android:focusable="true"/>
+                <View android:id="@+id/indicator_pay" android:layout_width="match_parent"
+                    android:layout_height="3dp" android:background="@color/primary"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+                <TextView android:id="@+id/tab_bank" android:layout_width="wrap_content"
+                    android:layout_height="0dp" android:layout_weight="1"
+                    android:text="🏦 Banque" android:textColor="@color/text_secondary"
+                    android:textSize="15sp" android:gravity="center"
+                    android:clickable="true" android:focusable="true"/>
+                <View android:id="@+id/indicator_bank" android:layout_width="match_parent"
+                    android:layout_height="3dp" android:background="@color/primary"
+                    android:visibility="invisible"/>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <FrameLayout android:id="@+id/sub_container"
+        android:layout_width="match_parent" android:layout_height="match_parent"/>
+</LinearLayout>

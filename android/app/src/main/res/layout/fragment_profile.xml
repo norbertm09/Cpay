@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg" android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_balance_card"
+            android:padding="22dp" android:gravity="center" android:layout_marginBottom="16dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="👤" android:textSize="40sp" android:layout_marginBottom="8dp"/>
+            <TextView android:id="@+id/tv_name" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="#FFFFFF"
+                android:textSize="19sp" android:textStyle="bold"/>
+            <TextView android:id="@+id/tv_email" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="#CCFFFFFF"
+                android:textSize="13sp" android:layout_marginTop="3dp"/>
+            <TextView android:id="@+id/tv_card_info" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="#99FFFFFF"
+                android:textSize="12sp" android:layout_marginTop="6dp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/btn_edit_profile" android:layout_width="match_parent"
+            android:layout_height="54dp" android:orientation="horizontal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:gravity="center_vertical" android:layout_marginBottom="8dp"
+            android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="✏️ Modifier mes informations"
+                android:textColor="@color/text" android:textSize="15sp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="›" android:textColor="@color/text_secondary" android:textSize="20sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/layout_edit_profile" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:layout_marginBottom="8dp" android:visibility="gone">
+            <EditText android:id="@+id/et_phone" android:layout_width="match_parent"
+                android:layout_height="48dp" android:inputType="phone"
+                android:background="@drawable/bg_input" android:padding="12dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Téléphone" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_address" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_input"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary"
+                android:hint="Adresse" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_city" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_input"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary"
+                android:hint="Ville" android:layout_marginBottom="12dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Compte de règlement" android:textColor="@color/primary"
+                android:textSize="13sp" android:textStyle="bold" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_wallet_mtn" android:layout_width="match_parent"
+                android:layout_height="48dp" android:inputType="phone"
+                android:background="@drawable/bg_input" android:padding="12dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Wallet MTN MoMo (+242...)" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_wallet_airtel" android:layout_width="match_parent"
+                android:layout_height="48dp" android:inputType="phone"
+                android:background="@drawable/bg_input" android:padding="12dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Wallet Airtel Money (+242...)" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_bank_account" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_input"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary"
+                android:hint="Compte bancaire (optionnel)" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_bank_name" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_input"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary"
+                android:hint="Nom de la banque" android:layout_marginBottom="12dp"/>
+            <TextView android:id="@+id/btn_save_profile" android:layout_width="match_parent"
+                android:layout_height="46dp" android:text="Enregistrer"
+                android:textColor="#FFFFFF" android:textSize="14sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/btn_change_password" android:layout_width="match_parent"
+            android:layout_height="54dp" android:orientation="horizontal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:gravity="center_vertical" android:layout_marginBottom="8dp"
+            android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="🔑 Changer le mot de passe"
+                android:textColor="@color/text" android:textSize="15sp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="›" android:textColor="@color/text_secondary" android:textSize="20sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/layout_password" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:layout_marginBottom="8dp" android:visibility="gone">
+            <EditText android:id="@+id/et_current_password" android:layout_width="match_parent"
+                android:layout_height="48dp" android:inputType="textPassword"
+                android:background="@drawable/bg_input" android:padding="12dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Mot de passe actuel" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_new_password" android:layout_width="match_parent"
+                android:layout_height="48dp" android:inputType="textPassword"
+                android:background="@drawable/bg_input" android:padding="12dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Nouveau mot de passe" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_confirm_password" android:layout_width="match_parent"
+                android:layout_height="48dp" android:inputType="textPassword"
+                android:background="@drawable/bg_input" android:padding="12dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Confirmer" android:layout_marginBottom="12dp"/>
+            <TextView android:id="@+id/btn_confirm_password" android:layout_width="match_parent"
+                android:layout_height="46dp" android:text="Modifier"
+                android:textColor="#FFFFFF" android:textSize="14sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/btn_2fa" android:layout_width="match_parent"
+            android:layout_height="54dp" android:orientation="horizontal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:gravity="center_vertical" android:layout_marginBottom="8dp"
+            android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="🔐 Double authentification"
+                android:textColor="@color/text" android:textSize="15sp"/>
+            <TextView android:id="@+id/tv_2fa_status" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textSize="12sp"
+                android:textColor="@color/text_secondary" android:layout_marginEnd="6dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="›" android:textColor="@color/text_secondary" android:textSize="20sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/btn_kyb" android:layout_width="match_parent"
+            android:layout_height="54dp" android:orientation="horizontal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:gravity="center_vertical" android:layout_marginBottom="8dp"
+            android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="📄 Documents KYB"
+                android:textColor="@color/text" android:textSize="15sp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="›" android:textColor="@color/text_secondary" android:textSize="20sp"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btn_kyc" android:layout_width="match_parent"
+            android:layout_height="54dp" android:orientation="horizontal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:gravity="center_vertical" android:layout_marginBottom="8dp"
+            android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="📋 Vérification d'identité (KYC)"
+                android:textColor="@color/text" android:textSize="15sp"/>
+            <TextView android:id="@+id/tv_kyc_level" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textSize="12sp"
+                android:textColor="@color/accent" android:layout_marginEnd="6dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="›" android:textColor="@color/text_secondary" android:textSize="20sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/layout_kyc" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:layout_marginBottom="8dp" android:visibility="gone">
+            <TextView android:id="@+id/tv_kyc_status" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+                android:textSize="13sp" android:layout_marginBottom="14dp"/>
+
+            <ProgressBar android:id="@+id/progress_kyc" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:layout_gravity="center"
+                android:visibility="gone" android:layout_marginBottom="10dp"/>
+
+            <TextView android:id="@+id/btn_upload_id" android:layout_width="match_parent"
+                android:layout_height="48dp" android:text="🪪 Pièce d'identité"
+                android:textColor="@color/primary" android:textSize="14sp"
+                android:background="@drawable/bg_btn_outline" android:gravity="center"
+                android:clickable="true" android:focusable="true" android:layout_marginBottom="8dp"/>
+            <TextView android:id="@+id/btn_upload_proof" android:layout_width="match_parent"
+                android:layout_height="48dp" android:text="🏠 Justificatif de domicile"
+                android:textColor="@color/primary" android:textSize="14sp"
+                android:background="@drawable/bg_btn_outline" android:gravity="center"
+                android:clickable="true" android:focusable="true" android:layout_marginBottom="8dp"/>
+            <TextView android:id="@+id/btn_upload_selfie" android:layout_width="match_parent"
+                android:layout_height="48dp" android:text="🤳 Selfie"
+                android:textColor="@color/primary" android:textSize="14sp"
+                android:background="@drawable/bg_btn_outline" android:gravity="center"
+                android:clickable="true" android:focusable="true" android:layout_marginBottom="8dp"/>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Formats acceptés: JPG, PNG, PDF · Max 5 Mo"
+                android:textColor="@color/text_secondary" android:textSize="11sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/btn_security" android:layout_width="match_parent"
+            android:layout_height="54dp" android:orientation="horizontal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:gravity="center_vertical" android:layout_marginBottom="8dp"
+            android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="🛡️ Activité de sécurité"
+                android:textColor="@color/text" android:textSize="15sp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="›" android:textColor="@color/text_secondary" android:textSize="20sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/layout_security" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:layout_marginBottom="8dp" android:visibility="gone">
+            <TextView android:id="@+id/tv_security_events" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+                android:textSize="12sp" android:lineSpacingExtra="4dp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/btn_support" android:layout_width="match_parent"
+            android:layout_height="54dp" android:orientation="horizontal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:gravity="center_vertical" android:layout_marginBottom="8dp"
+            android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="💬 Support"
+                android:textColor="@color/text" android:textSize="15sp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="›" android:textColor="@color/text_secondary" android:textSize="20sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/layout_support" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:layout_marginBottom="8dp" android:visibility="gone">
+            <EditText android:id="@+id/et_ticket_subject" android:layout_width="match_parent"
+                android:layout_height="46dp" android:background="@drawable/bg_input"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary"
+                android:hint="Sujet" android:layout_marginBottom="8dp"/>
+            <EditText android:id="@+id/et_ticket_message" android:layout_width="match_parent"
+                android:layout_height="90dp" android:background="@drawable/bg_input"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary" android:gravity="top"
+                android:hint="Votre message" android:layout_marginBottom="12dp"/>
+            <TextView android:id="@+id/btn_create_ticket" android:layout_width="match_parent"
+                android:layout_height="46dp" android:text="Envoyer"
+                android:textColor="#FFFFFF" android:textSize="14sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/btn_logout" android:layout_width="match_parent"
+            android:layout_height="54dp" android:orientation="horizontal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:gravity="center" android:layout_marginTop="12dp"
+            android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="⏻ Déconnexion" android:textColor="@color/danger"
+                android:textSize="15sp" android:textStyle="bold"/>
+        </LinearLayout>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="CPlus v2.6.0 — Calculus Plus SAS"
+            android:textColor="@color/text_secondary" android:textSize="11sp"
+            android:layout_gravity="center" android:layout_marginTop="16dp"/>
+    </LinearLayout>
+</ScrollView>

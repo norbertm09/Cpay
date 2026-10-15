@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="24dp">
+
+        <TextView android:id="@+id/tv_back" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="← Retour"
+            android:textColor="@color/primary" android:textSize="14sp"
+            android:layout_marginTop="16dp" android:layout_marginBottom="24dp"
+            android:clickable="true" android:focusable="true"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_balance_card"
+            android:padding="24dp" android:layout_marginBottom="24dp">
+            <TextView android:id="@+id/tv_title" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Créer un compte"
+                android:textSize="22sp" android:textStyle="bold" android:textColor="#FFFFFF"/>
+            <TextView android:id="@+id/tv_subtitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Porteur de carte CPlus"
+                android:textColor="#CCF0F4F8" android:textSize="13sp" android:layout_marginTop="4dp"/>
+        </LinearLayout>
+
+        <!-- Fields -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="12dp">
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical" android:layout_marginEnd="8dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Prénom *" android:textSize="12sp" android:textColor="@color/text"
+                    android:layout_marginBottom="4dp"/>
+                <EditText android:id="@+id/et_first_name" android:layout_width="match_parent"
+                    android:layout_height="48dp" android:background="@drawable/bg_card"
+                    android:padding="12dp" android:textColor="@color/text"
+                    android:textColorHint="@color/text_secondary" android:hint="Jean"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Nom *" android:textSize="12sp" android:textColor="@color/text"
+                    android:layout_marginBottom="4dp"/>
+                <EditText android:id="@+id/et_last_name" android:layout_width="match_parent"
+                    android:layout_height="48dp" android:background="@drawable/bg_card"
+                    android:padding="12dp" android:textColor="@color/text"
+                    android:textColorHint="@color/text_secondary" android:hint="Dupont"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Email *" android:textSize="12sp" android:textColor="@color/text"
+            android:layout_marginBottom="4dp"/>
+        <EditText android:id="@+id/et_email" android:layout_width="match_parent"
+            android:layout_height="48dp" android:inputType="textEmailAddress"
+            android:background="@drawable/bg_card" android:padding="12dp"
+            android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+            android:hint="email@exemple.com" android:layout_marginBottom="12dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Téléphone *" android:textSize="12sp" android:textColor="@color/text"
+            android:layout_marginBottom="4dp"/>
+        <EditText android:id="@+id/et_phone" android:layout_width="match_parent"
+            android:layout_height="48dp" android:inputType="phone"
+            android:background="@drawable/bg_card" android:padding="12dp"
+            android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+            android:hint="+242060000001" android:layout_marginBottom="12dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Mot de passe *" android:textSize="12sp" android:textColor="@color/text"
+            android:layout_marginBottom="4dp"/>
+        <EditText android:id="@+id/et_password" android:layout_width="match_parent"
+            android:layout_height="48dp" android:inputType="textPassword"
+            android:background="@drawable/bg_card" android:padding="12dp"
+            android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+            android:hint="Min 8 caractères" android:layout_marginBottom="12dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Confirmer *" android:textSize="12sp" android:textColor="@color/text"
+            android:layout_marginBottom="4dp"/>
+        <EditText android:id="@+id/et_confirm" android:layout_width="match_parent"
+            android:layout_height="48dp" android:inputType="textPassword"
+            android:background="@drawable/bg_card" android:padding="12dp"
+            android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+            android:hint="••••••••" android:layout_marginBottom="20dp"/>
+
+        <TextView android:id="@+id/tv_error" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textColor="#CC0000"
+            android:textSize="13sp" android:visibility="gone" android:layout_marginBottom="8dp"/>
+
+        <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_gravity="center"
+            android:visibility="gone" android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/btn_register" android:layout_width="match_parent"
+            android:layout_height="52dp" android:text="✅ Créer mon compte"
+            android:textColor="#FFFFFF" android:textSize="15sp" android:textStyle="bold"
+            android:background="@drawable/bg_btn_primary" android:gravity="center"
+            android:clickable="true" android:focusable="true"/>
+    </LinearLayout>
+</ScrollView>

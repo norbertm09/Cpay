@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#12b6c7</color>
+    <color name="primary_dark">#1d4f92</color>
+    <color name="accent">#00c896</color>
+    <color name="warning">#ff9500</color>
+    <color name="danger">#ff3b30</color>
+    <color name="bg">#f0f4f8</color>
+    <color name="card">#FFFFFF</color>
+    <color name="border">#dce3ed</color>
+    <color name="text">#1e2d3d</color>
+    <color name="text_secondary">#5a6677</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <!-- Aliases -->
+    <color name="primary_cyan">#12b6c7</color>
+    <color name="primary_blue">#1d4f92</color>
+    <color name="success">#00c896</color>
+    <color name="background">#f0f4f8</color>
+    <color name="muted">#5a6677</color>
+</resources>

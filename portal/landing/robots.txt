@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /downloads/
+
+# Le back-office ne doit jamais etre indexe.
+Disallow: /admin
+
+Sitemap: https://c-pay.global/sitemap.xml

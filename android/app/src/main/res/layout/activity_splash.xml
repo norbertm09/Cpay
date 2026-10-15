@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:gravity="center"
+    android:background="#FFFFFF">
+
+    <ImageView android:layout_width="140dp" android:layout_height="140dp"
+        android:src="@mipmap/ic_launcher_round"
+        android:scaleType="fitCenter"
+        android:layout_marginBottom="24dp"/>
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="CPay" android:textColor="@color/primary_dark"
+        android:textSize="24sp" android:textStyle="bold" android:letterSpacing="0.12"/>
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Paiements Digitaux — Zone CEMAC"
+        android:textColor="@color/text_secondary" android:textSize="13sp"
+        android:layout_marginTop="6dp" android:layout_marginBottom="48dp"/>
+
+    <ProgressBar android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:indeterminateTint="@color/primary"/>
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="v2.6.0" android:textColor="@color/border"
+        android:textSize="11sp" android:layout_marginTop="48dp"/>
+</LinearLayout>

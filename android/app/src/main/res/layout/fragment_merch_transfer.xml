@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg" android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="💰 Retraits" android:textSize="20sp" android:textStyle="bold"
+            android:textColor="@color/text" android:layout_marginBottom="14dp"/>
+
+        <!-- Solde -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_balance_card"
+            android:padding="20dp" android:layout_marginBottom="16dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Solde disponible" android:textColor="#B3FFFFFF" android:textSize="13sp"/>
+            <TextView android:id="@+id/tv_available" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="— XAF"
+                android:textColor="#FFFFFF" android:textSize="30sp" android:textStyle="bold"
+                android:layout_marginTop="4dp" android:layout_marginBottom="10dp"/>
+            <TextView android:id="@+id/tv_pending" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="#99FFFFFF"
+                android:textSize="12sp"/>
+            <TextView android:id="@+id/tv_withdrawn" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="#99FFFFFF"
+                android:textSize="12sp" android:layout_marginTop="2dp"/>
+        </LinearLayout>
+
+        <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_gravity="center"
+            android:visibility="gone" android:layout_marginBottom="10dp"/>
+
+        <!-- Destination -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="Retirer vers" android:textSize="14sp"
+                android:textStyle="bold" android:textColor="@color/text"/>
+            <TextView android:id="@+id/btn_add_wallet" android:layout_width="34dp"
+                android:layout_height="34dp" android:text="📱" android:textSize="16sp"
+                android:gravity="center" android:background="@drawable/bg_input"
+                android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/btn_add_dest" android:layout_width="34dp"
+                android:layout_height="34dp" android:text="+" android:textSize="20sp"
+                android:textStyle="bold" android:textColor="@color/primary"
+                android:gravity="center" android:background="@drawable/bg_input"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tv_no_dest" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Aucun compte enregistré&#10;Appuyez sur + pour en ajouter"
+            android:textColor="@color/text_secondary" android:textSize="13sp"
+            android:gravity="center" android:padding="18dp" android:visibility="gone"
+            android:background="@drawable/bg_card" android:layout_marginBottom="16dp"/>
+
+        <Spinner android:id="@+id/spinner_dest" android:layout_width="match_parent"
+            android:layout_height="56dp" android:background="@drawable/bg_spinner"
+            android:popupBackground="#FFFFFF" android:layout_marginBottom="16dp"/>
+
+        <!-- Formulaire d'ajout -->
+        <LinearLayout android:id="@+id/layout_form" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:layout_marginBottom="16dp" android:visibility="gone">
+
+            <TextView android:id="@+id/tv_form_title" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textSize="15sp"
+                android:textStyle="bold" android:textColor="@color/text"
+                android:layout_marginBottom="14dp"/>
+
+            <LinearLayout android:id="@+id/layout_bank_fields" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical"
+                android:visibility="gone">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:layout_marginBottom="12dp">
+                    <TextView android:id="@+id/btn_country_cg" android:layout_width="0dp"
+                        android:layout_height="46dp" android:layout_weight="1"
+                        android:text="🇨🇬 Congo" android:textColor="@color/primary"
+                        android:textSize="13sp" android:textStyle="bold"
+                        android:background="@drawable/bg_input" android:gravity="center"
+                        android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+                    <TextView android:id="@+id/btn_country_cm" android:layout_width="0dp"
+                        android:layout_height="46dp" android:layout_weight="1"
+                        android:text="🇨🇲 Cameroun" android:textColor="@color/text_secondary"
+                        android:textSize="13sp" android:background="@drawable/bg_input"
+                        android:gravity="center" android:clickable="true" android:focusable="true"/>
+                </LinearLayout>
+                <Spinner android:id="@+id/spinner_institution" android:layout_width="match_parent"
+                    android:layout_height="50dp" android:background="@drawable/bg_spinner"
+                    android:popupBackground="#FFFFFF" android:layout_marginBottom="12dp"/>
+                <EditText android:id="@+id/et_account_number" android:layout_width="match_parent"
+                    android:layout_height="50dp" android:background="@drawable/bg_input"
+                    android:padding="12dp" android:textColor="@color/text"
+                    android:textColorHint="@color/text_secondary"
+                    android:hint="Numéro de compte" android:layout_marginBottom="10dp"/>
+                <EditText android:id="@+id/et_account_name" android:layout_width="match_parent"
+                    android:layout_height="50dp" android:inputType="textPersonName"
+                    android:background="@drawable/bg_input" android:padding="12dp"
+                    android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                    android:hint="Nom du titulaire" android:layout_marginBottom="12dp"/>
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/layout_wallet_fields" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical"
+                android:visibility="gone">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:layout_marginBottom="12dp">
+                    <TextView android:id="@+id/btn_op_mtn" android:layout_width="0dp"
+                        android:layout_height="46dp" android:layout_weight="1"
+                        android:text="🟡 MTN" android:textColor="@color/primary"
+                        android:textSize="13sp" android:textStyle="bold"
+                        android:background="@drawable/bg_input" android:gravity="center"
+                        android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+                    <TextView android:id="@+id/btn_op_airtel" android:layout_width="0dp"
+                        android:layout_height="46dp" android:layout_weight="1"
+                        android:text="🔴 Airtel" android:textColor="@color/text_secondary"
+                        android:textSize="13sp" android:background="@drawable/bg_input"
+                        android:gravity="center" android:clickable="true" android:focusable="true"/>
+                </LinearLayout>
+                <EditText android:id="@+id/et_wallet_phone" android:layout_width="match_parent"
+                    android:layout_height="50dp" android:inputType="phone"
+                    android:background="@drawable/bg_input" android:padding="12dp"
+                    android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                    android:hint="Numéro Mobile Money" android:layout_marginBottom="12dp"/>
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView android:id="@+id/btn_confirm_form" android:layout_width="0dp"
+                    android:layout_height="46dp" android:layout_weight="1"
+                    android:text="✅ Ajouter" android:textColor="#FFFFFF" android:textSize="14sp"
+                    android:textStyle="bold" android:background="@drawable/bg_btn_primary"
+                    android:gravity="center" android:layout_marginEnd="8dp"
+                    android:clickable="true" android:focusable="true"/>
+                <TextView android:id="@+id/btn_cancel_form" android:layout_width="0dp"
+                    android:layout_height="46dp" android:layout_weight="1"
+                    android:text="Annuler" android:textColor="@color/primary"
+                    android:textSize="14sp" android:background="@drawable/bg_btn_outline"
+                    android:gravity="center" android:clickable="true" android:focusable="true"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Montant -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Montant" android:textSize="14sp" android:textStyle="bold"
+            android:textColor="@color/text" android:layout_marginBottom="8dp"/>
+        <EditText android:id="@+id/et_amount" android:layout_width="match_parent"
+            android:layout_height="66dp" android:inputType="numberDecimal"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:textSize="26sp" android:textStyle="bold" android:textColor="@color/primary"
+            android:textColorHint="@color/text_secondary" android:hint="0"
+            android:layout_marginBottom="6dp"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Minimum 1000 XAF · Frais 1%" android:textColor="@color/text_secondary"
+            android:textSize="12sp" android:layout_marginBottom="16dp"/>
+
+        <TextView android:id="@+id/tv_error" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textColor="@color/danger"
+            android:textSize="13sp" android:visibility="gone" android:layout_marginBottom="10dp"/>
+
+        <TextView android:id="@+id/btn_payout" android:layout_width="match_parent"
+            android:layout_height="58dp" android:text="💸  Demander le retrait"
+            android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold"
+            android:background="@drawable/bg_btn_primary" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:layout_marginBottom="26dp"/>
+
+        <!-- Historique -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Historique" android:textSize="14sp" android:textStyle="bold"
+            android:textColor="@color/text" android:layout_marginBottom="10dp"/>
+        <TextView android:id="@+id/tv_no_history" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Aucun retrait"
+            android:textColor="@color/text_secondary" android:textSize="13sp"
+            android:gravity="center" android:padding="18dp" android:visibility="gone"
+            android:background="@drawable/bg_card" android:layout_marginBottom="20dp"/>
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_history"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:nestedScrollingEnabled="false" android:layout_marginBottom="20dp"/>
+    </LinearLayout>
+</ScrollView>

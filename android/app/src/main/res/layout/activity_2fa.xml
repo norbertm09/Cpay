@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg" android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView android:id="@+id/tv_back" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="← Retour"
+            android:textColor="@color/primary" android:textSize="14sp"
+            android:layout_marginTop="16dp" android:layout_marginBottom="20dp"
+            android:clickable="true" android:focusable="true"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_balance_card"
+            android:padding="20dp" android:layout_marginBottom="20dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="🔐 Double Authentification"
+                android:textSize="20sp" android:textStyle="bold" android:textColor="#FFFFFF"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Protégez votre compte avec Google Authenticator"
+                android:textColor="#CCF0F4F8" android:textSize="13sp" android:layout_marginTop="4dp"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tv_2fa_status" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textSize="15sp"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:layout_marginBottom="16dp" android:textStyle="bold"/>
+
+        <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_gravity="center"
+            android:visibility="gone" android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/btn_setup_2fa" android:layout_width="match_parent"
+            android:layout_height="52dp" android:text="⚙️ Configurer la 2FA"
+            android:textColor="#FFFFFF" android:textSize="15sp" android:textStyle="bold"
+            android:background="@drawable/bg_btn_primary" android:gravity="center"
+            android:layout_marginBottom="16dp" android:clickable="true" android:focusable="true"/>
+
+        <LinearLayout android:id="@+id/layout_setup" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:layout_marginBottom="12dp" android:visibility="gone" android:gravity="center">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="1. Installez Google Authenticator\n2. Scannez ce QR Code"
+                android:textColor="@color/text" android:textSize="14sp"
+                android:layout_marginBottom="16dp" android:gravity="center"/>
+            <ImageView android:id="@+id/iv_qr_2fa" android:layout_width="200dp"
+                android:layout_height="200dp" android:layout_marginBottom="12dp"/>
+            <TextView android:id="@+id/tv_secret" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+                android:textSize="12sp" android:fontFamily="monospace"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/layout_verify" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="16dp"
+            android:visibility="gone">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="3. Entrez le code à 6 chiffres"
+                android:textColor="@color/text" android:textSize="14sp" android:textStyle="bold"
+                android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_2fa_code" android:layout_width="match_parent"
+                android:layout_height="60dp" android:inputType="numberDecimal"
+                android:background="@drawable/bg_input" android:padding="12dp"
+                android:textSize="28sp" android:textColor="@color/text" android:gravity="center"
+                android:textColorHint="@color/text_secondary" android:hint="000000"
+                android:maxLength="6" android:layout_marginBottom="12dp"/>
+            <TextView android:id="@+id/btn_verify_2fa" android:layout_width="match_parent"
+                android:layout_height="52dp" android:text="✅ Vérifier et activer"
+                android:textColor="#FFFFFF" android:textSize="15sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>
