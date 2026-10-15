@@ -26,34 +26,37 @@
 
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
-const jwt      = require('jsonwebtoken');
 const crypto   = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { v4: uuidv4 } = require('uuid');
 const { query, withTransaction } = require('../config/database');
 const email    = require('../services/email.service');
 
 // ─── Auth middlewares ─────────────────────────────────────────────
-const adminAuth = async (req, res, next) => {
-  try {
-    const h = req.headers.authorization;
-    if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const d = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-    if (d.type !== 'admin') return res.status(403).json({ error: 'Accès refusé' });
-    req.admin = d;
-    next();
-  } catch { res.status(401).json({ error: 'Token invalide' }); }
-};
+// WAVE-2 : module d'auth unique (audit §1.1). aliasUser conserve req.admin /
+// req.agent pour les handlers existants.
+const {
+  adminAuth: adminJwt, requireType, aliasUser, issueSession, revokeAll,
+} = require('../middleware/auth');
+const adminAuth = [adminJwt, aliasUser('admin')];
+const agentAuth = [requireType('agent'), aliasUser('agent')];
 
-const agentAuth = async (req, res, next) => {
-  try {
-    const h = req.headers.authorization;
-    if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const d = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-    if (d.type !== 'agent') return res.status(403).json({ error: 'Accès refusé' });
-    req.agent = d;
-    next();
-  } catch { res.status(401).json({ error: 'Token invalide' }); }
-};
+// Rate limits forgot-password (audit §2.15, §2.19) : 5 / h / IP et 3 / h / email
+// (cle = email normalise). Une instance par routeur (compteurs separes).
+const forgotPasswordLimiters = () => [
+  rateLimit({
+    windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false,
+    handler: (req, res) => res.status(429).json({ error: 'Trop de demandes, réessayez plus tard', code: 'RATE_LIMITED' }),
+  }),
+  rateLimit({
+    windowMs: 60 * 60 * 1000, limit: 3, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `email:${String(req.body?.email || '').toLowerCase().trim()}`,
+    skip: (req) => !req.body?.email,
+    // la cle n'est pas l'IP : les validations liees a l'IP / au proxy ne s'appliquent pas
+    validate: { ip: false, trustProxy: false, xForwardedForHeader: false },
+    handler: (req, res) => res.status(429).json({ error: 'Trop de demandes pour cet email, réessayez plus tard', code: 'RATE_LIMITED' }),
+  }),
+];
 
 // Pagination bornée : limit ∈ [1,100], page ≥ 1
 const parsePagination = (q = {}) => {
@@ -102,7 +105,7 @@ const sendResetEmail = async ({ to, firstName, resetUrl, actorType }) => {
 const cardholderResetRouter = express.Router();
 
 // POST /cardholder/auth/forgot-password
-cardholderResetRouter.post('/auth/forgot-password', async (req, res) => {
+cardholderResetRouter.post('/auth/forgot-password', ...forgotPasswordLimiters(), async (req, res) => {
   const { email: emailInput } = req.body;
   if (!emailInput) return res.status(422).json({ error: 'Email requis' });
 
@@ -153,9 +156,9 @@ cardholderResetRouter.post('/auth/reset-password', async (req, res) => {
     const pwdHash = await bcrypt.hash(newPassword, 12);
 
     await withTransaction(async client => {
-      // Changer le mot de passe
+      // Changer le mot de passe (leve aussi temp_password)
       await client.query(
-        `UPDATE cardholders SET password_hash=$1, failed_attempts=0, locked_until=NULL, updated_at=NOW() WHERE cardholder_id=$2`,
+        `UPDATE cardholders SET password_hash=$1, temp_password=FALSE, failed_attempts=0, locked_until=NULL, updated_at=NOW() WHERE cardholder_id=$2`,
         [pwdHash, resetRecord.actor_id]
       );
       // Marquer le token comme utilisé
@@ -163,8 +166,10 @@ cardholderResetRouter.post('/auth/reset-password', async (req, res) => {
       // Invalider tous les autres tokens pour cet utilisateur
       await client.query(`UPDATE password_reset_tokens SET used_at=NOW() WHERE actor_id=$1 AND actor_type='cardholder' AND token_id!=$2`, [resetRecord.actor_id, resetRecord.token_id]);
     });
+    // WAVE-2 (audit §2.15) : revocation de toutes les sessions apres reset
+    await revokeAll('cardholder', resetRecord.actor_id);
 
-    res.json({ success: true, message: 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.' });
+    res.json({ success: true, message: 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.', sessionsRevoked: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -174,7 +179,7 @@ cardholderResetRouter.post('/auth/reset-password', async (req, res) => {
 const merchantResetRouter = express.Router();
 
 // POST /merchant/auth/forgot-password
-merchantResetRouter.post('/auth/forgot-password', async (req, res) => {
+merchantResetRouter.post('/auth/forgot-password', ...forgotPasswordLimiters(), async (req, res) => {
   const { email: emailInput } = req.body;
   if (!emailInput) return res.status(422).json({ error: 'Email requis' });
 
@@ -224,14 +229,16 @@ merchantResetRouter.post('/auth/reset-password', async (req, res) => {
 
     await withTransaction(async client => {
       await client.query(
-        `UPDATE merchant_users SET password_hash=$1, updated_at=NOW() WHERE user_id=$2`,
+        `UPDATE merchant_users SET password_hash=$1, temp_password=FALSE, failed_attempts=0, locked_until=NULL, updated_at=NOW() WHERE user_id=$2`,
         [pwdHash, resetRecord.actor_id]
       );
       await client.query(`UPDATE password_reset_tokens SET used_at=NOW() WHERE token_id=$1`, [resetRecord.token_id]);
       await client.query(`UPDATE password_reset_tokens SET used_at=NOW() WHERE actor_id=$1 AND actor_type='merchant_user' AND token_id!=$2`, [resetRecord.actor_id, resetRecord.token_id]);
     });
+    // WAVE-2 (audit §2.15) : revocation de toutes les sessions apres reset
+    await revokeAll('merchant', resetRecord.actor_id);
 
-    res.json({ success: true, message: 'Mot de passe réinitialisé avec succès.' });
+    res.json({ success: true, message: 'Mot de passe réinitialisé avec succès.', sessionsRevoked: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -380,10 +387,15 @@ agentRouter.post('/auth/login', async (req, res) => {
     }
 
     await query(`UPDATE distribution_agents SET failed_attempts=0, locked_until=NULL, last_login_at=NOW() WHERE agent_id=$1`, [agent.agent_id]);
-    const token = jwt.sign({ sub: agent.agent_id, agencyId: agent.agency_id, bankId: agent.bank_id, type: 'agent' }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    // WAVE-2 : access 15 min (etait 8 h) + refresh opaque en cookie cp_rt_agent
+    const session = await issueSession({
+      actorType: 'agent', actorId: agent.agent_id,
+      claims: { type: 'agent', agencyId: agent.agency_id, bankId: agent.bank_id }, req, res,
+    });
 
     res.json({
-      access_token: token,
+      ...session,
+      mustChangePassword: !!agent.temp_password,
       agent: {
         agentId: agent.agent_id, agentCode: agent.agent_code,
         firstName: agent.first_name, lastName: agent.last_name,

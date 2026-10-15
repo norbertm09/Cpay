@@ -1,0 +1,408 @@
+/* C-Pay — scripts de la vitrine (démo détection, simulateur, formulaires, navigation).
+   Vanilla JS, aucune dépendance. Tous les appels réseau ciblent l'API publique
+   dont la base est lue dans <meta name="cpay-api">. */
+(function () {
+  'use strict';
+
+  var API_BASE = (function () {
+    var m = document.querySelector('meta[name="cpay-api"]');
+    var v = m && m.getAttribute('content');
+    return (v || 'https://api.c-pay.global').replace(/\/+$/, '');
+  })();
+
+  var ROUTES = {
+    detect: API_BASE + '/api/v1/detect/phone',       // POST { phone } — public, 30 req/min
+    leads:  API_BASE + '/api/v1/public/leads',       // POST lead
+    claims: API_BASE + '/api/v1/public/claims'       // POST claim → { reference }
+  };
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+  function fetchJSON(url, opts, timeoutMs) {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs || 8000) : null;
+    var o = opts || {};
+    if (ctrl) o.signal = ctrl.signal;
+    return fetch(url, o).then(function (res) {
+      if (timer) clearTimeout(timer);
+      return res.text().then(function (txt) {
+        var data = null;
+        try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = null; }
+        return { ok: res.ok, status: res.status, data: data };
+      });
+    }, function (err) {
+      if (timer) clearTimeout(timer);
+      throw err;
+    });
+  }
+
+  /* ── Navigation mobile ──────────────────────────────────── */
+  (function nav() {
+    var header = $('site-header');
+    var toggle = $('nav-toggle');
+    if (!header || !toggle) return;
+    toggle.addEventListener('click', function () {
+      var open = header.classList.toggle('is-open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.setAttribute('aria-label', open ? 'Fermer le menu' : 'Ouvrir le menu');
+    });
+    header.addEventListener('click', function (e) {
+      if (e.target.tagName === 'A' && header.classList.contains('is-open')) {
+        header.classList.remove('is-open');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+    });
+  })();
+
+  /* ── Table locale de détection (repli hors ligne) ─────────
+     Copie indicative de la table du moteur serveur. Le serveur fait foi. */
+  var LOCAL = {
+    countries: {
+      '221': { country: 'SN', name: 'Sénégal', currency: 'XOF', alternatives: ['Wave'] },
+      '225': { country: 'CI', name: "Côte d'Ivoire", currency: 'XOF', alternatives: ['Wave'] },
+      '237': { country: 'CM', name: 'Cameroun', currency: 'XAF', alternatives: ['Express Union'] },
+      '242': { country: 'CG', name: 'Congo-Brazzaville', currency: 'XAF', alternatives: [] },
+      '243': { country: 'CD', name: 'RDC', currency: 'CDF', alternatives: [] }
+    },
+    operators: {
+      SN: [
+        [/^221(76|77|78)\d{7}$/, 'Orange Money'],
+        [/^221(70|75)\d{7}$/, 'Free Money'],
+        [/^221\d{9}$/, 'Orange Money']
+      ],
+      CI: [
+        [/^225(07|08|09|77|78|79)\d{7,9}$/, 'Orange Money'],
+        [/^225(05|06|55|56|57|58)\d{7,9}$/, 'MTN Mobile Money'],
+        [/^225(01|02|03)\d{7,9}$/, 'Moov Money'],
+        [/^225\d{9,11}$/, 'Orange Money']
+      ],
+      CM: [
+        [/^237(67|68)\d{6}$/, 'MTN Mobile Money'],
+        [/^237(69)\d{6}$/, 'Orange Money'],
+        [/^237(55|56|57)\d{6}$/, 'Moov Money'],
+        [/^237\d{9}$/, 'MTN Mobile Money']
+      ],
+      CG: [
+        [/^242(06)\d{6}$/, 'MTN Mobile Money'],
+        [/^242(05|55)\d{6}$/, 'Airtel Money'],
+        [/^242(04|03|02)\d{6}$/, 'Orange Money'],
+        [/^242\d{9}$/, 'MTN Mobile Money']
+      ],
+      CD: [
+        [/^243(81|82|83|84|89)\d{7}$/, 'Vodacom M-Pesa'],
+        [/^243(97|98|99|90|91|92)\d{7}$/, 'Airtel Money'],
+        [/^243(85|86|87|88)\d{7}$/, 'Orange Money'],
+        [/^243(80)\d{7}$/, 'Africell Money'],
+        [/^243\d{10}$/, 'Vodacom M-Pesa']
+      ]
+    }
+  };
+
+  function normalizePhone(raw) {
+    var s = String(raw || '').replace(/[\s\-().]/g, '');
+    if (s.indexOf('00') === 0) s = '+' + s.slice(2);
+    if (s.charAt(0) === '0' && s.length <= 10) return null; // numéro local sans indicatif
+    if (s.charAt(0) !== '+') s = '+' + s;
+    if (!/^\+\d{8,15}$/.test(s)) return null;
+    return s;
+  }
+
+  function detectLocally(raw) {
+    var phone = normalizePhone(raw);
+    if (!phone) return { success: false, error: 'Numéro invalide. Saisissez-le avec son indicatif, par exemple +221 77 123 45 67.' };
+    var digits = phone.slice(1);
+    var cc = digits.slice(0, 3);
+    var c = LOCAL.countries[cc];
+    if (!c) return { success: false, error: 'Indicatif +' + cc + ' non couvert. C-Pay couvre +221, +225, +237, +242 et +243.' };
+    var ops = LOCAL.operators[c.country] || [];
+    for (var i = 0; i < ops.length; i++) {
+      if (ops[i][0].test(digits)) {
+        return { success: true, phone: phone, country: c.country, countryName: c.name, currency: c.currency, brand: ops[i][1], alternatives: c.alternatives };
+      }
+    }
+    return { success: false, error: 'Longueur de numéro inattendue pour ' + c.name + '.', countryInfo: c };
+  }
+
+  /* ── Démo détection ─────────────────────────────────────── */
+  (function detectDemo() {
+    var form = $('detect-form');
+    var input = $('detect-phone');
+    var btn = $('detect-btn');
+    var out = $('detect-result');
+    if (!form || !input || !out) return;
+
+    var COUNTRY_NAMES = { SN: 'Sénégal', CI: "Côte d'Ivoire", CM: 'Cameroun', CG: 'Congo-Brazzaville', CD: 'RDC' };
+    var ALT_BY_COUNTRY = { SN: ['Wave'], CI: ['Wave'], CM: ['Express Union'] };
+
+    function altLabel(a) {
+      if (!a) return '';
+      if (typeof a === 'string') return a;
+      return a.brand || a.name || a.label || a.operator || '';
+    }
+
+    function render(result, source) {
+      clear(out);
+      if (!result || !result.success) {
+        var msg = (result && result.error) || 'Détection impossible.';
+        var a = el('div', 'alert alert--err', msg);
+        a.setAttribute('role', 'alert');
+        out.appendChild(a);
+        if (result && result.countryInfo) {
+          var dl0 = el('dl', 'result-rows');
+          addRow(dl0, 'Pays reconnu', result.countryInfo.name || result.countryInfo.country);
+          addRow(dl0, 'Devise', result.countryInfo.currency);
+          out.appendChild(dl0);
+        }
+        out.appendChild(el('p', 'result-source', source));
+        return;
+      }
+      var ok = el('div', 'alert alert--ok', 'Opérateur détecté — le marchand n’a rien eu à choisir.');
+      out.appendChild(ok);
+      var dl = el('dl', 'result-rows');
+      addRow(dl, 'Numéro normalisé', result.phone || '');
+      addRow(dl, 'Pays', (result.countryName || COUNTRY_NAMES[result.country] || result.country || '') + (result.country ? ' (' + result.country + ')' : ''));
+      addRow(dl, 'Devise', result.currency || '');
+      addRow(dl, 'Opérateur', result.brand || result.operator || '');
+      var alts = Array.isArray(result.alternatives) ? result.alternatives.map(altLabel).filter(Boolean)
+               : (ALT_BY_COUNTRY[result.country] || []);
+      if (alts.length) addRow(dl, 'Au choix du client', alts.join(', '));
+      out.appendChild(dl);
+      out.appendChild(el('p', 'result-source', source));
+    }
+
+    function addRow(dl, k, v) {
+      var row = el('div');
+      row.appendChild(el('dt', null, k));
+      row.appendChild(el('dd', null, v == null ? '' : String(v)));
+      dl.appendChild(row);
+    }
+
+    function setBusy(b) {
+      btn.disabled = b;
+      btn.textContent = b ? 'Détection…' : 'Détecter';
+    }
+
+    function run(raw) {
+      var phone = String(raw || '').trim();
+      if (!phone) { input.focus(); return; }
+      setBusy(true);
+      fetchJSON(ROUTES.detect, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ phone: phone })
+      }, 6000).then(function (r) {
+        setBusy(false);
+        if (r.status === 429) {
+          render({ success: false, error: 'Trop de tentatives depuis votre adresse. Réessayez dans une minute.' }, 'Source : API C-Pay (limite de débit).');
+          return;
+        }
+        if (r.status === 400) {
+          render({ success: false, error: (r.data && r.data.error) || 'Numéro requis.' }, 'Source : API C-Pay.');
+          return;
+        }
+        if (!r.ok || !r.data || typeof r.data !== 'object') {
+          render(detectLocally(phone), 'Source : table locale indicative (réponse API inattendue, code ' + r.status + ').');
+          return;
+        }
+        render(r.data, 'Source : moteur de détection C-Pay (api.c-pay.global).');
+      }).catch(function () {
+        setBusy(false);
+        render(detectLocally(phone), 'Source : table locale indicative — l’API n’est pas joignable depuis votre navigateur.');
+      });
+    }
+
+    form.addEventListener('submit', function (e) { e.preventDefault(); run(input.value); });
+    var chips = document.querySelectorAll('.chip[data-phone]');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].addEventListener('click', function () {
+        input.value = this.getAttribute('data-phone');
+        run(input.value);
+      });
+    }
+  })();
+
+  /* ── Simulateur de frais ────────────────────────────────── */
+  (function simulator() {
+    var form = $('sim-form');
+    if (!form) return;
+    var RATES = { mobile_money: [1.5, 1.2, 1.0], card: [2.5, 2.0, 1.8] };
+    var amount = $('sim-amount'), currency = $('sim-currency'), method = $('sim-method'), level = $('sim-level');
+    var outNet = $('sim-net'), outGross = $('sim-gross'), outRate = $('sim-rate'), outFee = $('sim-fee');
+    var nf = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
+    var pf = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+    function money(v, cur) { return nf.format(Math.round(v)) + ' ' + cur; }
+    function update() {
+      var a = parseFloat(amount.value);
+      if (!isFinite(a) || a < 0) a = 0;
+      var cur = currency.value;
+      var rate = RATES[method.value][parseInt(level.value, 10) || 0];
+      var fee = Math.round(a * rate) / 100;
+      outGross.textContent = money(a, cur);
+      outRate.textContent = pf.format(rate) + ' %';
+      outFee.textContent = money(fee, cur);
+      outNet.textContent = money(a - fee, cur);
+    }
+    ['input', 'change'].forEach(function (evt) { form.addEventListener(evt, update); });
+    form.addEventListener('submit', function (e) { e.preventDefault(); update(); });
+    update();
+  })();
+
+  /* ── Formulaires contact (lead) et réclamation (claim) ──── */
+  function bindForm(opts) {
+    var form = $(opts.formId);
+    var status = $(opts.statusId);
+    if (!form || !status) return;
+    var submitBtn = form.querySelector('button[type="submit"]');
+    var submitLabel = submitBtn ? submitBtn.textContent : '';
+
+    function setStatus(kind, text, extraNode) {
+      clear(status);
+      var box = el('div', 'alert alert--' + kind);
+      box.appendChild(document.createTextNode(text));
+      if (extraNode) box.appendChild(extraNode);
+      status.appendChild(box);
+    }
+
+    function invalidMessage() {
+      var fields = form.querySelectorAll('[required]');
+      for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        if (f.type === 'checkbox' && !f.checked) return { f: f, m: 'Merci de cocher la case de consentement.' };
+        if (!f.checkValidity()) {
+          var label = form.querySelector('label[for="' + f.id + '"]');
+          var name = label ? label.textContent.replace(/\*/g, '').trim() : 'Ce champ';
+          if (f.validity.valueMissing) return { f: f, m: name + ' : champ obligatoire.' };
+          if (f.validity.typeMismatch) return { f: f, m: name + ' : format invalide.' };
+          if (f.validity.tooShort) return { f: f, m: name + ' : trop court (10 caractères minimum).' };
+          return { f: f, m: name + ' : valeur invalide.' };
+        }
+      }
+      return null;
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var bad = invalidMessage();
+      if (bad) { setStatus('err', bad.m); bad.f.focus(); return; }
+      var payload = opts.payload(form);
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Envoi…'; }
+      setStatus('info', 'Envoi en cours…');
+      fetchJSON(opts.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+      }, 12000).then(function (r) {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = submitLabel; }
+        if (r.ok) {
+          opts.onSuccess(r.data || {}, setStatus);
+          form.reset();
+          return;
+        }
+        if (r.status === 429) { setStatus('err', 'Trop de demandes depuis votre adresse. Réessayez dans quelques minutes.'); return; }
+        var serverMsg = r.data && (r.data.error || r.data.message);
+        if (r.status === 400 || r.status === 422) { setStatus('err', 'Formulaire refusé : ' + (serverMsg || 'vérifiez les champs saisis.')); return; }
+        setStatus('err', 'Le service est momentanément indisponible (code ' + r.status + '). ' + opts.fallbackText);
+      }).catch(function () {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = submitLabel; }
+        setStatus('err', 'Impossible de joindre le serveur. ' + opts.fallbackText);
+      });
+    });
+  }
+
+  function val(form, name) {
+    var f = form.elements[name];
+    return f ? String(f.value || '').trim() : '';
+  }
+
+  bindForm({
+    formId: 'lead-form', statusId: 'lead-status', url: ROUTES.leads,
+    fallbackText: 'Vous pouvez nous écrire à support@c-pay.global.',
+    payload: function (form) {
+      return {
+        name: val(form, 'name'),
+        email: val(form, 'email'),
+        phone: val(form, 'phone') || null,
+        company: val(form, 'company') || null,
+        country: val(form, 'country') || null,
+        message: val(form, 'message'),
+        consent: !!form.elements.consent.checked,
+        source: 'landing'
+      };
+    },
+    onSuccess: function (data, setStatus) {
+      var id = data.leadId || data.id || data.reference;
+      setStatus('ok', 'Merci, votre demande a bien été transmise' + (id ? ' (référence ' + id + ')' : '') + '. Nous revenons vers vous par e-mail.');
+    }
+  });
+
+  bindForm({
+    formId: 'claim-form', statusId: 'claim-status', url: ROUTES.claims,
+    fallbackText: 'Vous pouvez envoyer votre réclamation à support@c-pay.global en indiquant la référence de la transaction.',
+    payload: function (form) {
+      // Contrat backend (docs/ASSISTANT-API.md) : category ∈ payment|settlement|account|fraud|other,
+      // transactionRef, merchantRef ; le montant/la devise sont repris dans la description.
+      var amt = val(form, 'amount'), cur = val(form, 'currency'), type = val(form, 'type');
+      var CATEGORY = { not_received: 'payment', double_charge: 'payment', refund: 'payment', settlement: 'settlement', other: 'other' };
+      var TYPE_LABEL = {
+        not_received: 'Paiement débité mais non reçu', double_charge: 'Double prélèvement',
+        refund: 'Demande de remboursement', settlement: 'Règlement non reçu', other: 'Autre'
+      };
+      var desc = '[' + (TYPE_LABEL[type] || 'Autre') + (amt ? ' – ' + amt + ' ' + (cur || '') : '') + '] ' + val(form, 'description');
+      return {
+        name: val(form, 'name'),
+        email: val(form, 'email'),
+        phone: val(form, 'phone') || null,
+        transactionRef: val(form, 'transactionReference') || null,
+        category: CATEGORY[type] || 'other',
+        description: desc.trim(),
+        consent: !!form.elements.consent.checked,
+        source: 'landing'
+      };
+    },
+    onSuccess: function (data, setStatus) {
+      var ref = data.reference || data.claimReference || data.claimId || data.id;
+      var strong = null;
+      if (ref) { strong = el('strong', null, ' ' + ref); }
+      setStatus('ok', 'Réclamation enregistrée.' + (ref ? ' Votre numéro de dossier :' : ' Conservez l’e-mail de confirmation.'), strong);
+    }
+  });
+
+  /* ── Onglets (page développeurs) ────────────────────────── */
+  (function tabs() {
+    var lists = document.querySelectorAll('[role="tablist"]');
+    for (var i = 0; i < lists.length; i++) {
+      (function (list) {
+        var tabs = list.querySelectorAll('[role="tab"]');
+        function activate(tab) {
+          for (var j = 0; j < tabs.length; j++) {
+            var t = tabs[j];
+            var sel = t === tab;
+            t.setAttribute('aria-selected', sel ? 'true' : 'false');
+            t.tabIndex = sel ? 0 : -1;
+            var panel = document.getElementById(t.getAttribute('aria-controls'));
+            if (panel) panel.hidden = !sel;
+          }
+        }
+        for (var j = 0; j < tabs.length; j++) {
+          tabs[j].addEventListener('click', function () { activate(this); });
+          tabs[j].addEventListener('keydown', function (e) {
+            var idx = Array.prototype.indexOf.call(tabs, this);
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+              e.preventDefault();
+              var n = tabs[(idx + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+              activate(n); n.focus();
+            }
+          });
+        }
+      })(lists[i]);
+    }
+  })();
+})();

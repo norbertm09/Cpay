@@ -68,7 +68,7 @@ const SETTLEABLE_TYPES = new Set([
  */
 const processTransaction = async (params) => {
   const txnId    = uuidv4();
-  const { merchantId, type, amount, customerPhone, emvPayload, aidDetected, description, deviceId } = params;
+  const { merchantId, type, amount, customerPhone, emvPayload, aidDetected, description, deviceId, payLinkId } = params;
 
   logger.info('Orchestrator: new transaction', { txnId, merchantId, type, amount });
 
@@ -150,6 +150,7 @@ const processTransaction = async (params) => {
     detectedInfo:   detection,
     description,
     deviceId,
+    payLinkId:      payLinkId || null,
     status:         'pending',
   });
 
@@ -398,8 +399,8 @@ const createTransactionRecord = async (data) => {
       `INSERT INTO transactions
          (transaction_id, merchant_id, type, amount, currency,
           payment_method, detected_operator, detected_network,
-          detected_country, description, device_id, status, initiated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())`,
+          detected_country, description, device_id, status, pay_link_id, initiated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())`,
       [
         data.txnId, data.merchantId, data.type, data.amount, data.currency,
         data.paymentMethod,
@@ -409,6 +410,7 @@ const createTransactionRecord = async (data) => {
         data.description || null,
         data.deviceId    || null,
         data.status,
+        data.payLinkId   || null,
       ]
     );
   } catch (err) {

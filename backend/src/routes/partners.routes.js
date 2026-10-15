@@ -2,13 +2,29 @@
 const express  = require('express');
 const router   = express.Router();
 const bcrypt   = require('bcryptjs');
-const jwt      = require('jsonwebtoken');
 const crypto   = require('crypto');
-const speakeasy = require('speakeasy');
+const rateLimit = require('express-rate-limit');
 const { query, withTransaction } = require('../config/database');
+// WAVE-2 : module d'auth unique (audit §1.1) — aucun jwt.sign/verify local.
+// `requireRole` garde son nom historique dans ce fichier (= requirePartnerRole).
+const {
+  partnerAuth, requirePartnerRole: requireRole, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
+  readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
+} = require('../middleware/auth');
 
-const JWT_SECRET = process.env.JWT_SECRET;
-const signToken  = (payload, exp = '8h') => jwt.sign(payload, JWT_SECRET, { expiresIn: exp });
+// Rate limit login partenaires : 10 / 15 min / IP (audit §2.19)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Trop de tentatives de connexion, réessayez plus tard', code: 'RATE_LIMITED' }),
+});
+// Verrouillage du compte apres 10 echecs (15 min)
+const PARTNER_MAX_FAILED = 10;
+
+// Colonnes publiques (jamais password_hash / mfa_secret — audit §2.12)
+const BANK_USER_PUBLIC = `u.user_id, u.bank_id, u.agency_id, u.first_name, u.last_name, u.email, u.phone, u.role, u.status,
+                          u.is_mfa_enabled, u.temp_password, u.created_at, u.updated_at`;
+const AGENT_PUBLIC     = `a.agent_id, a.agency_id, a.bank_id, a.first_name, a.last_name, a.email, a.phone, a.role, a.status,
+                          a.float_balance, a.float_limit, a.is_mfa_enabled, a.temp_password, a.updated_at`;
 
 // ─── HOTFIX P0 (audit 2.6.0 §2.6) ─────────────────────────────────
 // /collect et /disburse créaient des transactions `completed` sans aucun
@@ -36,25 +52,34 @@ const userTarget = (u) => u.role === 'agent'
   ? { table: 'agents',     idCol: 'agent_id', id: u.agentId }
   : { table: 'bank_users', idCol: 'user_id',  id: u.sub };
 
-// Session partenaire (access + refresh) — factorisée pour login et 2FA validate
-const buildSession = (user, type, tenantId) => {
-  const payload = {
-    sub:      type === 'agent' ? user.agent_id : user.user_id,
-    email:    user.email,
-    role:     user.role,
-    type,
-    bankId:   user.bank_id,
-    agencyId: user.agency_id || null,
-    agentId:  type === 'agent' ? user.agent_id : null,
-    tenantId,
-    name:     `${user.first_name} ${user.last_name}`,
-  };
+// Claims de l'access token partenaire (type bank_user | agent conserve)
+const partnerClaims = (user, type, tenantId) => ({
+  email:    user.email,
+  role:     user.role,
+  type,
+  bankId:   user.bank_id,
+  agencyId: user.agency_id || null,
+  agentId:  type === 'agent' ? user.agent_id : null,
+  tenantId: tenantId || null,
+  name:     `${user.first_name} ${user.last_name}`,
+});
+
+// Session partenaire — factorisée pour login, 2FA validate et refresh.
+// WAVE-2 : access 15 min (etait 8 h), refresh opaque stocke/rotatif/revocable
+// (actor_type 'partner', meta { userType, tenantId }) en cookie cp_rt_partner.
+// refresh_token reste dans le JSON tant que le portail n'est pas migre.
+const buildSession = async (user, type, tenantId, req, res) => {
+  const sub = type === 'agent' ? user.agent_id : user.user_id;
+  const session = await issueSession({
+    actorType: 'partner', actorId: sub, claims: partnerClaims(user, type, tenantId),
+    meta: { userType: type, tenantId: tenantId || null }, req, res,
+  });
   return {
-    access_token:  signToken(payload),
-    refresh_token: signToken(payload, '7d'),
+    ...session,
+    mustChangePassword: !!user.temp_password,
     user: {
-      id:         payload.sub,
-      name:       payload.name,
+      id:         sub,
+      name:       `${user.first_name} ${user.last_name}`,
       email:      user.email,
       role:       user.role,
       type,
@@ -62,10 +87,25 @@ const buildSession = (user, type, tenantId) => {
       agencyName: user.agency_name || null,
       floatBalance: user.float_balance || null,
       floatLimit:   user.float_limit  || null,
+      mfaEnabled: !!user.is_mfa_enabled,
     }
   };
 };
 
+// Recharge un partenaire par identifiant (2FA validate, refresh)
+const loadPartnerUser = async (type, id) => {
+  const r = type === 'agent'
+    ? await query(`SELECT a.*, ag.agency_name, b.bank_name FROM agents a
+        JOIN agencies ag ON ag.agency_id=a.agency_id JOIN banks b ON b.bank_id=a.bank_id
+        WHERE a.agent_id=$1 AND a.status='active'`, [id])
+    : await query(`SELECT u.*, b.bank_name, a.agency_name FROM bank_users u
+        LEFT JOIN banks b ON b.bank_id=u.bank_id LEFT JOIN agencies a ON a.agency_id=u.agency_id
+        WHERE u.user_id=$1 AND u.status='active'`, [id]);
+  return r.rows[0] || null;
+};
+
+// NB : `u.*` / `a.*` ici sont internes au login (password_hash, mfa_secret,
+// failed_attempts…) ; rien de cette ligne n'est renvoye tel quel au client.
 const findPartnerUser = async (email) => {
   const bu = await query(`SELECT u.*, b.bank_name, a.agency_name FROM bank_users u
     LEFT JOIN banks b ON b.bank_id=u.bank_id
@@ -129,44 +169,43 @@ router.get('/tenant/config', async (req, res) => {
 });
 
 // ─── MIDDLEWARE AUTH ──────────────────────────────────────────────
-const partnerAuth = async (req, res, next) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return res.status(401).json({error:'Non authentifié'});
-  try {
-    const decoded = jwt.verify(auth.slice(7), JWT_SECRET);
-    if (!['bank_admin','bank_user','agency_admin','agency_user','agent'].includes(decoded.role)) {
-      return res.status(403).json({error:'Accès refusé'});
-    }
-    req.user = decoded;
-    next();
-  } catch { res.status(401).json({error:'Token invalide'}); }
-};
-
-const requireRole = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role)) return res.status(403).json({error:'Permission insuffisante'});
-  next();
-};
+// WAVE-2 : partnerAuth / requireRole viennent du module commun (type
+// bank_user | agent + role partenaire ; iss/aud verifies).
 
 // ─── AUTH ─────────────────────────────────────────────────────────
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(422).json({error:'Email et mot de passe requis'});
   try {
     const { user, type } = await findPartnerUser(email);
     if (!user) return res.status(401).json({error:'Identifiants incorrects'});
+    const table = type === 'agent' ? 'agents' : 'bank_users';
+    const idCol = type === 'agent' ? 'agent_id' : 'user_id';
+    const id    = type === 'agent' ? user.agent_id : user.user_id;
+
+    // Verrouillage apres PARTNER_MAX_FAILED echecs (audit §2.19)
+    if (user.locked_until && new Date(user.locked_until) > new Date()) {
+      return res.status(423).json({ error: 'Compte temporairement verrouillé', lockedUntil: user.locked_until });
+    }
     const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({error:'Identifiants incorrects'});
+    if (!valid) {
+      const attempts = (user.failed_attempts || 0) + 1;
+      const lockUntil = attempts >= PARTNER_MAX_FAILED ? new Date(Date.now() + 15 * 60 * 1000) : null;
+      await query(`UPDATE ${table} SET failed_attempts=$1, locked_until=$2 WHERE ${idCol}=$3`, [attempts, lockUntil, id]).catch(() => {});
+      return res.status(401).json({error:'Identifiants incorrects', attemptsLeft: Math.max(0, PARTNER_MAX_FAILED - attempts)});
+    }
+    await query(`UPDATE ${table} SET failed_attempts=0, locked_until=NULL, last_login_at=NOW() WHERE ${idCol}=$1`, [id]).catch(() => {});
 
     const tenantId = req.tenant?.tenant_id || user.tenant_id || null;
 
-    // HOTFIX 2FA (audit §2.11) : si la 2FA est activée, pas de session tant
+    // 2FA (audit §2.11) : si la 2FA est activée, pas de session tant
     // que le code TOTP n'est pas validé via POST /auth/2fa/validate.
     if (user.is_mfa_enabled && user.mfa_secret) {
-      const mfaToken = signToken({ sub: type === 'agent' ? user.agent_id : user.user_id, type: 'partner_mfa', userType: type, tenantId }, '5m');
+      const mfaToken = signMfaToken({ actorType: 'partner', sub: id, userType: type, tenantId });
       return res.json({ mfaRequired: true, mfaToken });
     }
 
-    res.json(buildSession(user, type, tenantId));
+    res.json(await buildSession(user, type, tenantId, req, res));
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -176,26 +215,60 @@ router.post('/auth/2fa/validate', async (req, res) => {
   if (!mfaToken || !code) return res.status(422).json({error:'mfaToken et code requis'});
   try {
     let payload;
-    try { payload = jwt.verify(mfaToken, JWT_SECRET); }
-    catch { return res.status(401).json({error:'Token 2FA invalide ou expiré'}); }
-    if (payload.type !== 'partner_mfa') return res.status(401).json({error:'Token 2FA invalide'});
+    try { payload = verifyMfaToken(mfaToken, 'partner'); }
+    catch (e) { return res.status(401).json({error: e.message, code: e.code}); }
 
     const isAgent = payload.userType === 'agent';
-    const r = isAgent
-      ? await query(`SELECT a.*, ag.agency_name, b.bank_name FROM agents a
-          JOIN agencies ag ON ag.agency_id=a.agency_id JOIN banks b ON b.bank_id=a.bank_id
-          WHERE a.agent_id=$1 AND a.status='active'`, [payload.sub])
-      : await query(`SELECT u.*, b.bank_name, a.agency_name FROM bank_users u
-          LEFT JOIN banks b ON b.bank_id=u.bank_id LEFT JOIN agencies a ON a.agency_id=u.agency_id
-          WHERE u.user_id=$1 AND u.status='active'`, [payload.sub]);
-    const user = r.rows[0];
+    const user = await loadPartnerUser(isAgent ? 'agent' : 'bank_user', payload.sub);
     if (!user) return res.status(401).json({error:'Utilisateur introuvable'});
     if (!user.mfa_secret) return res.status(400).json({error:'2FA non configurée'});
 
-    const valid = speakeasy.totp.verify({ secret: user.mfa_secret, encoding: 'base32', token: String(code).replace(/\s/g,''), window: 1 });
-    if (!valid) return res.status(400).json({error:'Code 2FA invalide'});
+    if (!verifyTotp(user.mfa_secret, code)) return res.status(401).json({error:'Code 2FA invalide', code:'INVALID_TOTP'});
 
-    res.json(buildSession(user, isAgent ? 'agent' : 'bank_user', payload.tenantId || null));
+    res.json(await buildSession(user, isAgent ? 'agent' : 'bank_user', payload.tenantId || null, req, res));
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Refresh : cookie cp_rt_partner (ou corps), rotation + revocation.
+// Branche legacy : l'ancien refresh JWT 7 j (payload complet, type bank_user |
+// agent) est accepte pendant la fenetre de transition et journalise. Un access
+// token ordinaire (8 h max) ne peut pas servir de refresh : exp - iat > 8 h.
+router.post('/auth/refresh', async (req, res) => {
+  const token = readRefreshToken(req, 'partner');
+  if (!token) return res.status(422).json({error:'refreshToken requis'});
+  try {
+    const tokens = await rotateRefresh({
+      actorType: 'partner', token, req, res,
+      legacy: (d) => (['bank_user','agent'].includes(d.type) && d.sub && (d.exp - d.iat) > 8 * 3600)
+        ? { actorId: d.sub, meta: { userType: d.type, tenantId: d.tenantId || null } } : null,
+      buildClaims: async ({ actorId, meta }) => {
+        const type = meta?.userType === 'agent' ? 'agent' : 'bank_user';
+        const user = await loadPartnerUser(type, actorId);
+        if (!user) throw new Error('Utilisateur introuvable');
+        return partnerClaims(user, type, meta?.tenantId || null);
+      },
+    });
+    res.json({ access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_in: tokens.expires_in });
+  } catch (err) {
+    res.status(err.statusCode || 401).json({ error: 'Refresh token invalide', code: err.code || 'INVALID_REFRESH' });
+  }
+});
+
+router.post('/auth/logout', async (req, res) => {
+  await revokeRefreshToken(readRefreshToken(req, 'partner'));
+  clearRefreshCookie(res, 'partner');
+  res.json({ success: true });
+});
+
+// Profil courant — sans secrets
+router.get('/auth/me', partnerAuth, async (req, res) => {
+  try {
+    const r = req.user.role === 'agent'
+      ? await query(`SELECT ${AGENT_PUBLIC}, ag.agency_name, b.bank_name FROM agents a JOIN agencies ag ON ag.agency_id=a.agency_id JOIN banks b ON b.bank_id=a.bank_id WHERE a.agent_id=$1`, [req.user.agentId])
+      : await query(`SELECT ${BANK_USER_PUBLIC}, b.bank_name, a.agency_name FROM bank_users u LEFT JOIN banks b ON b.bank_id=u.bank_id LEFT JOIN agencies a ON a.agency_id=u.agency_id WHERE u.user_id=$1`, [req.user.sub]);
+    if (!r.rows.length) return res.status(404).json({error:'Utilisateur introuvable'});
+    const { temp_password, ...profile } = r.rows[0];
+    res.json({ user: profile, mustChangePassword: !!temp_password });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -518,12 +591,13 @@ router.get('/transactions', partnerAuth, async (req, res) => {
 router.get('/profile', partnerAuth, async (req, res) => {
   try {
     const { role, agentId, sub } = req.user;
+    // WAVE-2 (audit §2.12) : colonnes explicites — jamais password_hash / mfa_secret
     if (role === 'agent') {
-      const r = await query(`SELECT a.*, ag.agency_name, b.bank_name FROM agents a JOIN agencies ag ON ag.agency_id=a.agency_id JOIN banks b ON b.bank_id=a.bank_id WHERE a.agent_id=$1`, [agentId]);
-      return res.json({...r.rows[0], password_hash:undefined});
+      const r = await query(`SELECT ${AGENT_PUBLIC}, ag.agency_name, b.bank_name FROM agents a JOIN agencies ag ON ag.agency_id=a.agency_id JOIN banks b ON b.bank_id=a.bank_id WHERE a.agent_id=$1`, [agentId]);
+      return res.json({...r.rows[0]});
     }
-    const r = await query(`SELECT u.*, b.bank_name, a.agency_name FROM bank_users u LEFT JOIN banks b ON b.bank_id=u.bank_id LEFT JOIN agencies a ON a.agency_id=u.agency_id WHERE u.user_id=$1`, [sub]);
-    res.json({...r.rows[0], password_hash:undefined});
+    const r = await query(`SELECT ${BANK_USER_PUBLIC}, b.bank_name, a.agency_name FROM bank_users u LEFT JOIN banks b ON b.bank_id=u.bank_id LEFT JOIN agencies a ON a.agency_id=u.agency_id WHERE u.user_id=$1`, [sub]);
+    res.json({...r.rows[0]});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -535,10 +609,11 @@ const ALLOWED_ROLES = ['bank_admin','bank_user','agency_admin','agency_user',
 
 router.get('/users', partnerAuth, requireRole('bank_admin'), async (req, res) => {
   try {
-    const r = await query(`SELECT u.*, a.agency_name FROM bank_users u
+    // WAVE-2 (audit §2.12) : colonnes explicites — jamais password_hash / mfa_secret
+    const r = await query(`SELECT ${BANK_USER_PUBLIC}, a.agency_name FROM bank_users u
       LEFT JOIN agencies a ON a.agency_id=u.agency_id
       WHERE u.bank_id=$1 ORDER BY u.created_at DESC`, [req.user.bankId]);
-    res.json({ data: r.rows.map(u=>({...u,password_hash:undefined})) });
+    res.json({ data: r.rows });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -591,8 +666,11 @@ router.post('/auth/change-password', partnerAuth, async (req, res) => {
     const valid = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
     if (!valid) return res.status(401).json({error:'Mot de passe actuel incorrect'});
     const hash = await bcrypt.hash(newPassword, 12);
-    await query(`UPDATE ${table} SET password_hash=$1, updated_at=NOW() WHERE ${idCol}=$2`, [hash, id]);
-    res.json({success:true});
+    // WAVE-2 : leve temp_password, revoque toutes les sessions du partenaire
+    await query(`UPDATE ${table} SET password_hash=$1, temp_password=FALSE, updated_at=NOW() WHERE ${idCol}=$2`, [hash, id]);
+    await revokeAll('partner', id);
+    clearRefreshCookie(res, 'partner');
+    res.json({success:true, sessionsRevoked:true});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -610,13 +688,10 @@ router.get('/auth/2fa/status', partnerAuth, async (req, res) => {
 router.post('/auth/2fa/setup', partnerAuth, async (req, res) => {
   try {
     const { table, idCol, id } = userTarget(req.user);
-    const secret = speakeasy.generateSecret({ name: `CPlus Partners:${req.user.email}`, issuer: 'CPlus', length: 20 });
+    const enrollment = await buildTotpEnrollment({ label: req.user.email, issuer: 'C-Pay Partners' });
     // Secret stocké sur l'utilisateur, 2FA non activée tant que /verify n'a pas réussi
-    await query(`UPDATE ${table} SET mfa_secret=$1, is_mfa_enabled=FALSE, updated_at=NOW() WHERE ${idCol}=$2`, [secret.base32, id]);
-    let qrCode = null;
-    try { qrCode = await require('qrcode').toDataURL(secret.otpauth_url); }
-    catch (e) { console.error('[2fa/setup] QR indisponible:', e.message); }
-    res.json({ secret: secret.base32, otpauthUrl: secret.otpauth_url, qrCode });
+    await query(`UPDATE ${table} SET mfa_secret=$1, is_mfa_enabled=FALSE, updated_at=NOW() WHERE ${idCol}=$2`, [enrollment.secret, id]);
+    res.json(enrollment);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -627,8 +702,7 @@ router.post('/auth/2fa/verify', partnerAuth, async (req, res) => {
     const { table, idCol, id } = userTarget(req.user);
     const u = await query(`SELECT mfa_secret FROM ${table} WHERE ${idCol}=$1`, [id]);
     if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configurée'});
-    const valid = speakeasy.totp.verify({ secret: u.rows[0].mfa_secret, encoding: 'base32', token: token.replace(/\s/g,''), window: 1 });
-    if (!valid) return res.status(400).json({error:'Code invalide'});
+    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
     await query(`UPDATE ${table} SET is_mfa_enabled=TRUE, updated_at=NOW() WHERE ${idCol}=$1`, [id]);
     res.json({success:true});
   } catch(err){ res.status(500).json({error:err.message}); }
@@ -641,8 +715,7 @@ router.post('/auth/2fa/disable', partnerAuth, async (req, res) => {
     const { table, idCol, id } = userTarget(req.user);
     const u = await query(`SELECT mfa_secret FROM ${table} WHERE ${idCol}=$1`, [id]);
     if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configurée'});
-    const valid = speakeasy.totp.verify({ secret: u.rows[0].mfa_secret, encoding: 'base32', token: token.replace(/\s/g,''), window: 1 });
-    if (!valid) return res.status(400).json({error:'Code invalide'});
+    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
     await query(`UPDATE ${table} SET is_mfa_enabled=FALSE, mfa_secret=NULL, updated_at=NOW() WHERE ${idCol}=$1`, [id]);
     res.json({success:true});
   } catch(err){ res.status(500).json({error:err.message}); }
@@ -705,10 +778,12 @@ router.post('/auth/reset-password', async (req, res) => {
     if (!r.rows.length) return res.status(400).json({error:'Lien invalide ou expiré', code:'INVALID_TOKEN'});
     const pwdHash = await bcrypt.hash(newPassword, 12);
     await withTransaction(async client => {
-      await client.query(`UPDATE bank_users SET password_hash=$1, updated_at=NOW() WHERE user_id=$2`, [pwdHash, r.rows[0].user_id]);
+      await client.query(`UPDATE bank_users SET password_hash=$1, temp_password=FALSE, failed_attempts=0, locked_until=NULL, updated_at=NOW() WHERE user_id=$2`, [pwdHash, r.rows[0].user_id]);
       await client.query(`UPDATE partner_password_resets SET used_at=NOW() WHERE reset_id=$1`, [r.rows[0].reset_id]);
     });
-    res.json({ success:true, message:'Mot de passe réinitialisé.' });
+    // WAVE-2 (audit §2.15) : toutes les sessions existantes sont revoquees apres un reset
+    await revokeAll('partner', r.rows[0].user_id);
+    res.json({ success:true, message:'Mot de passe réinitialisé.', sessionsRevoked:true });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 

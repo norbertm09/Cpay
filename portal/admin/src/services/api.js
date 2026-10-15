@@ -1,4 +1,5 @@
 import axios from 'axios';
+import toast from 'react-hot-toast';
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '';
 const api = axios.create({ baseURL: `${apiBaseUrl}/api/v1/admin` });
@@ -10,12 +11,21 @@ api.interceptors.request.use(cfg => {
 });
 
 api.interceptors.response.use(r => r, err => {
-  if (err.response?.status === 401) {
+  const st = err.response?.status;
+  if (st === 401) {
     localStorage.removeItem('admin_token');
-    window.location.href = '/login';
+    if (window.location.pathname !== '/login') window.location.href = '/login';
+  } else if (st === 403) {
+    // Droits insuffisants : la session reste valide, on previent sans rediriger
+    toast.error('Accès refusé');
   }
   return Promise.reject(err);
 });
+
+export const reconcileApi = {
+  // Deplacee de /merchant/reconcile : POST /api/v1/admin/reconcile (super_admin / ops_admin)
+  run: (data) => api.post('/reconcile', data),
+};
 
 export const authApi = {
   login: (data) => api.post('/auth/login', data),

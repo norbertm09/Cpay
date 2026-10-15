@@ -94,7 +94,8 @@ describe('fail-closed', () => {
 describe('consentements', () => {
   test('sans JWT → 401 ; avec JWT, identité prise dans le jeton', async () => {
     expect((await request(app).get('/api/v1/consent/check?portal=merchant')).status).toBe(401);
-    const tok = jwt.sign({ sub: 'u-1', type: 'merchant' }, process.env.JWT_SECRET);
+    // WAVE-2 : les access tokens portent iss/aud — signes via le module commun
+    const tok = require('../middleware/auth').signToken({ sub: 'u-1', type: 'merchant' });
     mockQuery.mockResolvedValueOnce({ rows: [] });
     const r = await request(app).get('/api/v1/consent/check?portal=merchant&userId=victim').set('Authorization', `Bearer ${tok}`);
     expect(r.status).toBe(200);

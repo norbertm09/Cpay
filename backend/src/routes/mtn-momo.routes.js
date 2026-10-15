@@ -19,7 +19,6 @@
 'use strict';
 
 const express = require('express');
-const jwt     = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const router  = express.Router();
 const mtn     = require('../services/rails/mtn-momo.client');
@@ -27,18 +26,11 @@ const { query, withTransaction } = require('../config/database');
 const webhooks = require('./webhook-handlers');
 
 // ─── Auth middleware ──────────────────────────────────────────────
-const makeAuth = (allowedTypes) => async (req, res, next) => {
-  try {
-    const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    if (!allowedTypes.includes(decoded.type)) return res.status(403).json({ error: 'Accès refusé' });
-    req.actor = decoded;
-    next();
-  } catch { res.status(401).json({ error: 'Token invalide' }); }
-};
-const cardAuth       = makeAuth(['cardholder', 'merchant']);
-const privilegedAuth = makeAuth(['admin', 'merchant']);
+// WAVE-2 : auth unique (audit §1.1). requireType verifie signature + iss/aud +
+// type ; aliasUser('actor') conserve req.actor pour les handlers existants.
+const { requireType, aliasUser } = require('../middleware/auth');
+const cardAuth       = [requireType(['cardholder', 'merchant']), aliasUser('actor')];
+const privilegedAuth = [requireType(['admin', 'merchant']), aliasUser('actor')];
 
 // ─── Propriété de la carte ────────────────────────────────────────
 // Un cardId venant du body n'est jamais pris pour argent comptant :

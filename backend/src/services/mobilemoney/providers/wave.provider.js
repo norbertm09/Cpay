@@ -7,6 +7,9 @@
 'use strict';
 const https  = require('https');
 const logger = require('../../../config/logger');
+// WAVE-2 : success_url / error_url sont des redirections NAVIGATEUR (client final) — jamais le
+// chemin secret. Le vrai webhook Wave (signé Wave-Signature) est configuré côté portail Wave
+// Business sur /api/v1/webhooks/<WEBHOOK_PATH_SECRET>/wave (voir routes/webhooks-mm.routes.js).
 
 const collectPayment = async ({ txnId, amount, currency, phone, description, config }) => {
   logger.info('Wave collectPayment', { txnId, amount, currency });

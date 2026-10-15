@@ -6,28 +6,15 @@
 'use strict';
 
 const express = require('express');
-const jwt     = require('jsonwebtoken');
 const router  = express.Router();
 const gtp     = require('../services/rails/gtp-card.service');
 const gtpClient = require('../services/rails/gtp.client');
 const { query } = require('../config/database');
 
 // ─── Auth ────────────────────────────────────────────────────────
-const cardAuth = async (req, res, next) => {
-  try {
-    const h = req.headers.authorization;
-    if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const d = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-    // HOTFIX (audit §2.5) : seul un JWT porteur est accepté
-    if (d.type !== 'cardholder') return res.status(403).json({ error: 'Accès refusé' });
-    req.cardholder = d;
-    req.chId = d.cardholderId || d.sub;
-    if (!req.chId) return res.status(403).json({ error: 'Accès refusé' });
-    next();
-  } catch (e) {
-    res.status(401).json({ error: 'Token invalide' });
-  }
-};
+// WAVE-2 : auth unique (audit §1.1). cardholderAuth n'accepte qu'un JWT de
+// type cardholder (audit §2.5) et pose req.chId (= sub) + req.cardholder.
+const { cardholderAuth: cardAuth } = require('../middleware/auth');
 
 // ─── HOTFIX IDOR : :gtpCardId doit appartenir au porteur ─────────
 const ownCard = async (req, res, next) => {

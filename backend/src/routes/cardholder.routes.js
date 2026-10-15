@@ -4,10 +4,15 @@
 // ================================================================
 const express = require('express');
 const bcrypt  = require('bcryptjs');
-const jwt     = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const router  = express.Router();
+// WAVE-2 : module d'auth unique (audit §1.1) — aucun jwt.sign/verify local
+const {
+  cardholderAuth, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
+  readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
+} = require('../middleware/auth');
 const {
   auditLog, updateSession, destroySession, maskPan,
   sanitizeCardResponse, PCI_EVENTS
@@ -37,15 +42,39 @@ const parsePagination = (q = {}) => {
 };
 
 // ─── Middleware Auth Cardholder ───────────────────────────────────
-const cardAuth = async (req, res, next) => {
-  try {
-    const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    if (decoded.type !== 'cardholder') return res.status(403).json({ error: 'Accès refusé' });
-    req.cardholder = decoded;
-    next();
-  } catch { res.status(401).json({ error: 'Token invalide' }); }
+// WAVE-2 : cardholderAuth (module commun) pose req.user, req.chId et
+// req.cardholder (compat des handlers existants).
+const cardAuth = cardholderAuth;
+
+// Rate limit inscription : 5 / heure / IP (audit §2.19)
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Trop d’inscriptions depuis cette adresse, réessayez plus tard', code: 'RATE_LIMITED' }),
+});
+
+// Colonnes explicites (jamais password_hash / mfa_secret dans une reponse — audit §2.12)
+const CARDHOLDER_COLS = `ch.cardholder_id, ch.card_id, ch.first_name, ch.last_name, ch.email, ch.phone, ch.kyc_level,
+              ch.is_active, ch.mfa_enabled, ch.temp_password, ch.failed_attempts, ch.locked_until, ch.email_verified`;
+const CARD_COLS = `vc.card_masked, vc.balance, vc.currency, vc.status as card_status, vc.expiry_month, vc.expiry_year,
+              vc.cardholder_name, vc.network, vc.daily_limit, vc.monthly_limit`;
+
+const cardholderClaims  = (ch) => ({ type: 'cardholder', cardId: ch.card_id, email: ch.email });
+const cardholderProfile = (ch) => ({
+  cardholderId: ch.cardholder_id, firstName: ch.first_name, lastName: ch.last_name, email: ch.email, phone: ch.phone,
+  kycLevel: ch.kyc_level, mfaEnabled: !!ch.mfa_enabled,
+});
+const cardSummary = (ch) => ({
+  cardId: ch.card_id, cardMasked: ch.card_masked, cardholderName: ch.cardholder_name, balance: parseFloat(ch.balance),
+  currency: ch.currency, status: ch.card_status, expiryMonth: ch.expiry_month, expiryYear: ch.expiry_year, network: ch.network,
+  dailyLimit: parseFloat(ch.daily_limit), monthlyLimit: parseFloat(ch.monthly_limit),
+});
+
+// Session complete : access 15 min (etait 8 h — audit §2.16) + refresh opaque
+// stocke/rotatif/revocable en cookie cp_rt_cardholder. refresh_token reste
+// dans le JSON tant que l'app porteur n'est pas migree.
+const cardholderSessionResponse = async ({ req, res, ch, status = 200, extra = {} }) => {
+  const session = await issueSession({ actorType: 'cardholder', actorId: ch.cardholder_id, claims: cardholderClaims(ch), req, res });
+  res.status(status).json({ ...session, mustChangePassword: !!ch.temp_password, cardholder: cardholderProfile(ch), card: cardSummary(ch), ...extra });
 };
 
 // ─── AUTH ─────────────────────────────────────────────────────────
@@ -56,9 +85,7 @@ router.post('/auth/login', async (req, res) => {
   if (!emailOrPhone || !password) return res.status(422).json({ error: 'Identifiants requis' });
   try {
     const r = await query(
-      `SELECT ch.*, vc.card_id, vc.card_number, vc.card_masked, vc.balance,
-              vc.currency, vc.status as card_status, vc.expiry_month, vc.expiry_year,
-              vc.cardholder_name, vc.network, vc.daily_limit, vc.monthly_limit
+      `SELECT ${CARDHOLDER_COLS}, ch.password_hash, ch.mfa_secret, ${CARD_COLS}
        FROM cardholders ch
        JOIN virtual_cards vc ON vc.card_id = ch.card_id
        WHERE (ch.email = $1 OR ch.phone = $1) AND ch.is_active = TRUE LIMIT 1`,
@@ -85,35 +112,77 @@ router.post('/auth/login', async (req, res) => {
     await query(`UPDATE cardholders SET failed_attempts=0, locked_until=NULL, last_login_at=NOW() WHERE cardholder_id=$1`, [ch.cardholder_id]);
     // REQ 10.2.4 : Log authentification réussie
     await auditLog({ eventType: PCI_EVENTS.AUTH_SUCCESS, actorType: 'cardholder', actorId: ch.cardholder_id, entityType: 'card', entityId: ch.card_id, ipAddress: req.ip, userAgent: req.headers['user-agent'], success: true });
+
+    // 2FA active : pas de session avant validation TOTP (POST /auth/2fa/validate)
+    if (ch.mfa_enabled && ch.mfa_secret) {
+      return res.json({ mfaRequired: true, mfaToken: signMfaToken({ actorType: 'cardholder', sub: ch.cardholder_id }) });
+    }
+
     // REQ 8 : Démarrer la session
     updateSession(ch.cardholder_id);
-
-    const access  = jwt.sign({ sub: ch.cardholder_id, cardId: ch.card_id, type: 'cardholder', email: ch.email }, process.env.JWT_SECRET, { expiresIn: '8h' });
-    const refresh = jwt.sign({ sub: ch.cardholder_id, type: 'cardholder_refresh' }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    res.json({
-      access_token: access, refresh_token: refresh,
-      cardholder: { cardholderId: ch.cardholder_id, firstName: ch.first_name, lastName: ch.last_name, email: ch.email, phone: ch.phone, kycLevel: ch.kyc_level },
-      card: { cardId: ch.card_id, cardMasked: ch.card_masked, cardholderName: ch.cardholder_name, balance: parseFloat(ch.balance), currency: ch.currency, status: ch.card_status, expiryMonth: ch.expiry_month, expiryYear: ch.expiry_year, network: ch.network, dailyLimit: parseFloat(ch.daily_limit), monthlyLimit: parseFloat(ch.monthly_limit) }
-    });
+    await cardholderSessionResponse({ req, res, ch });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Refresh token
-router.post('/auth/refresh', async (req, res) => {
+// 2FA — validation du code apres login (emet la session)
+router.post('/auth/2fa/validate', async (req, res) => {
+  const { mfaToken, code } = req.body;
+  if (!mfaToken || !code) return res.status(422).json({ error: 'mfaToken et code requis' });
   try {
-    const decoded = jwt.verify(req.body.refreshToken, process.env.JWT_SECRET);
-    if (decoded.type !== 'cardholder_refresh') return res.status(401).json({ error: 'Token invalide' });
-    const r = await query(`SELECT ch.*, vc.card_id FROM cardholders ch JOIN virtual_cards vc ON vc.card_id = ch.card_id WHERE ch.cardholder_id=$1 AND ch.is_active=TRUE`, [decoded.sub]);
-    if (!r.rows.length) return res.status(401).json({ error: 'Compte introuvable' });
-    const access = jwt.sign({ sub: decoded.sub, cardId: r.rows[0].card_id, type: 'cardholder', email: r.rows[0].email }, process.env.JWT_SECRET, { expiresIn: '8h' });
-    res.json({ access_token: access });
-  } catch { res.status(401).json({ error: 'Refresh token invalide' }); }
+    let payload;
+    try { payload = verifyMfaToken(mfaToken, 'cardholder'); }
+    catch (e) { return res.status(401).json({ error: e.message, code: e.code }); }
+    const r = await query(
+      `SELECT ${CARDHOLDER_COLS}, ch.mfa_secret, ${CARD_COLS}
+       FROM cardholders ch JOIN virtual_cards vc ON vc.card_id = ch.card_id
+       WHERE ch.cardholder_id = $1 AND ch.is_active = TRUE LIMIT 1`, [payload.sub]);
+    const ch = r.rows[0];
+    if (!ch) return res.status(401).json({ error: 'Compte introuvable' });
+    if (!ch.mfa_secret) return res.status(400).json({ error: '2FA non configuré' });
+    if (!verifyTotp(ch.mfa_secret, code)) return res.status(401).json({ error: 'Code 2FA invalide', code: 'INVALID_TOTP' });
+    updateSession(ch.cardholder_id);
+    await cardholderSessionResponse({ req, res, ch });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Refresh token : cookie cp_rt_cardholder (ou corps), rotation + revocation.
+// Branche legacy : l'ancien JWT `cardholder_refresh` (7 j, non stocke) reste
+// accepte pendant la fenetre de transition (journalise), puis refuse.
+router.post('/auth/refresh', async (req, res) => {
+  const token = readRefreshToken(req, 'cardholder');
+  if (!token) return res.status(422).json({ error: 'refreshToken requis' });
+  try {
+    const tokens = await rotateRefresh({
+      actorType: 'cardholder', token, req, res,
+      legacy: (decoded) => (decoded.type === 'cardholder_refresh' && decoded.sub ? { actorId: decoded.sub } : null),
+      buildClaims: async ({ actorId }) => {
+        const r = await query(
+          `SELECT ch.cardholder_id, ch.email, vc.card_id FROM cardholders ch JOIN virtual_cards vc ON vc.card_id = ch.card_id
+           WHERE ch.cardholder_id=$1 AND ch.is_active=TRUE`, [actorId]);
+        if (!r.rows.length) throw new Error('Compte introuvable');
+        return cardholderClaims(r.rows[0]);
+      },
+    });
+    res.json({ access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_in: tokens.expires_in });
+  } catch (err) {
+    res.status(err.statusCode || 401).json({ error: 'Refresh token invalide', code: err.code || 'INVALID_REFRESH' });
+  }
+});
+
+// Profil courant — sans secrets
+router.get('/auth/me', cardAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT ${CARDHOLDER_COLS}, ${CARD_COLS} FROM cardholders ch LEFT JOIN virtual_cards vc ON vc.card_id = ch.card_id
+       WHERE ch.cardholder_id=$1 LIMIT 1`, [req.chId]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Compte introuvable' });
+    res.json({ cardholder: cardholderProfile(r.rows[0]), card: r.rows[0].card_id ? cardSummary(r.rows[0]) : null, mustChangePassword: !!r.rows[0].temp_password });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 
 // ─── REGISTER CARDHOLDER ─────────────────────────────────────────
-router.post('/auth/register', async (req, res) => {
+router.post('/auth/register', registerLimiter, async (req, res) => {
   const { firstName, lastName, phone, email, dateOfBirth, idType, idNumber, country = 'CM', password } = req.body;
   if (!firstName || !lastName || !phone || !email || !password)
     return res.status(422).json({ error: "Champs requis : prénom, nom, téléphone, email, mot de passe" });
@@ -151,8 +220,6 @@ router.post('/auth/register', async (req, res) => {
     });
 
     const { chId, cardId, masked, emboss, expYear, verifyRaw } = created;
-    const accessToken  = jwt.sign({ sub: chId, cardId, type: 'cardholder', email }, process.env.JWT_SECRET, { expiresIn: '8h' });
-    const refreshToken = jwt.sign({ sub: chId, type: 'cardholder_refresh' }, process.env.JWT_SECRET, { expiresIn: '7d' });
     await auditLog({ eventType: 'CARDHOLDER_REGISTERED', actorType: 'cardholder', actorId: chId, ipAddress: req.ip, success: true, details: { country, email } });
 
     // Email d'activation (best-effort, ne bloque pas l'inscription) — envoyé après COMMIT
@@ -172,8 +239,11 @@ router.post('/auth/register', async (req, res) => {
       } catch (e) { console.error('[verify-email]', e.message); }
     })();
 
+    // Access 15 min (etait 8 h a l'inscription — audit §2.16) + refresh en cookie
+    const session = await issueSession({ actorType: 'cardholder', actorId: chId, claims: { type: 'cardholder', cardId, email }, req, res });
     res.status(201).json({
-      access_token: accessToken, refresh_token: refreshToken,
+      ...session,
+      mustChangePassword: false,
       cardholder: { cardholderId: chId, firstName, lastName, email, phone, kycLevel: 1, emailVerified: false },
       card: { cardId, cardMasked: masked, cardholderName: emboss, balance: 0, currency: 'XAF', status: 'active', expiryMonth: 12, expiryYear: expYear, network: 'visa' },
     });
@@ -327,20 +397,25 @@ router.patch('/profile', cardAuth, async (req, res) => {
   }
 });
 
-// Changer mot de passe
-router.post('/profile/change-password', cardAuth, async (req, res) => {
+// Changer mot de passe — WAVE-2 : leve temp_password, revoque toutes les sessions
+const changeCardholderPassword = async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(422).json({ error: 'Champs requis' });
   if (newPassword.length < 8) return res.status(422).json({ error: 'Mot de passe trop court (min 8 car.)' });
   try {
-    const r = await query(`SELECT password_hash FROM cardholders WHERE cardholder_id=$1`, [req.cardholder.sub]);
+    const r = await query(`SELECT password_hash FROM cardholders WHERE cardholder_id=$1`, [req.chId]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Compte introuvable' });
     const ok = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
     if (!ok) return res.status(401).json({ error: 'Mot de passe actuel incorrect', code: 'WRONG_PASSWORD' });
     const hash = await bcrypt.hash(newPassword, 12);
-    await query(`UPDATE cardholders SET password_hash=$1, updated_at=NOW() WHERE cardholder_id=$2`, [hash, req.cardholder.sub]);
-    res.json({ success: true });
+    await query(`UPDATE cardholders SET password_hash=$1, temp_password=FALSE, updated_at=NOW() WHERE cardholder_id=$2`, [hash, req.chId]);
+    await revokeAll('cardholder', req.chId);
+    clearRefreshCookie(res, 'cardholder');
+    res.json({ success: true, sessionsRevoked: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
-});
+};
+router.post('/profile/change-password', cardAuth, changeCardholderPassword);
+router.post('/auth/change-password',    cardAuth, changeCardholderPassword);
 
 // ─── TRANSACTIONS ─────────────────────────────────────────────────
 
@@ -938,6 +1013,9 @@ router.post('/payment/tokenized', cardAuth, async (req, res) => {
 
 router.post('/auth/logout', cardAuth, async (req, res) => {
   destroySession(req.cardholder.sub);
+  // WAVE-2 : revocation du refresh (cookie ou corps) + suppression du cookie
+  await revokeRefreshToken(readRefreshToken(req, 'cardholder'));
+  clearRefreshCookie(res, 'cardholder');
   await auditLog({ eventType: 'AUTH_LOGOUT', actorType: 'cardholder', actorId: req.cardholder.sub, entityType: 'session', ipAddress: req.ip, success: true });
   res.json({ success: true });
 });
@@ -1020,15 +1098,16 @@ router.post('/support/tickets/:id/messages', cardAuth, async (req, res) => {
 });
 
 // ─── 2FA CARDHOLDER ───────────────────────────────────────────────
-const speakeasy2 = require('speakeasy');
-const QRCode2    = require('qrcode');
+// WAVE-2 (audit §2.11) : TOTP reel (fenetre 1), secret stocke sur le porteur,
+// QR genere cote serveur ; le login emet un mfaToken (cardholder_mfa) quand
+// mfa_enabled, consomme par POST /auth/2fa/validate (declare avec le login).
 
 router.post('/auth/2fa/setup', cardAuth, async (req, res) => {
   try {
-    const secret = speakeasy2.generateSecret({ name: `CPlus:${req.cardholder.email}`, length: 20 });
-    await query(`UPDATE cardholders SET mfa_secret=$1 WHERE cardholder_id=$2`, [secret.base32, req.cardholder.sub]);
-    const qrUrl = await QRCode2.toDataURL(secret.otpauth_url);
-    res.json({ secret: secret.base32, qrCode: qrUrl });
+    const u = await query(`SELECT email FROM cardholders WHERE cardholder_id=$1`, [req.chId]);
+    const enrollment = await buildTotpEnrollment({ label: u.rows[0]?.email || req.cardholder.email || String(req.chId), issuer: 'C-Pay' });
+    await query(`UPDATE cardholders SET mfa_secret=$1, mfa_enabled=FALSE WHERE cardholder_id=$2`, [enrollment.secret, req.chId]);
+    res.json(enrollment);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -1036,12 +1115,24 @@ router.post('/auth/2fa/verify', cardAuth, async (req, res) => {
   const { token } = req.body;
   if (!token || typeof token !== 'string') return res.status(400).json({error:'Code requis'});
   try {
-    const u = await query(`SELECT mfa_secret FROM cardholders WHERE cardholder_id=$1`, [req.cardholder.sub]);
+    const u = await query(`SELECT mfa_secret FROM cardholders WHERE cardholder_id=$1`, [req.chId]);
     if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
-    const valid = speakeasy2.totp.verify({ secret: u.rows[0].mfa_secret, encoding:'base32', token:token.replace(/\s/g,''), window:2 });
-    if (!valid) return res.status(400).json({error:'Code invalide'});
-    await query(`UPDATE cardholders SET mfa_enabled=TRUE WHERE cardholder_id=$1`, [req.cardholder.sub]);
+    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
+    await query(`UPDATE cardholders SET mfa_enabled=TRUE WHERE cardholder_id=$1`, [req.chId]);
     res.json({success:true, message:'2FA activé ✅'});
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// Désactiver 2FA — code TOTP valide obligatoire (mfa_secret NULL → 400, audit §3.8)
+router.post('/auth/2fa/disable', cardAuth, async (req, res) => {
+  const { token } = req.body;
+  if (!token || typeof token !== 'string') return res.status(400).json({error:'Code requis'});
+  try {
+    const u = await query(`SELECT mfa_secret FROM cardholders WHERE cardholder_id=$1`, [req.chId]);
+    if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
+    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
+    await query(`UPDATE cardholders SET mfa_enabled=FALSE, mfa_secret=NULL WHERE cardholder_id=$1`, [req.chId]);
+    res.json({success:true});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 

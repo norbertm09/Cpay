@@ -1,5 +1,14 @@
 'use strict';
-const crypto = require('crypto');
+/**
+ * PCI — en-têtes de sécurité et helpers partagés.
+ *
+ * WAVE-2 (audit prod 2.6.0, 01-§2.2) : les six middlewares cosmétiques
+ * (pciInputValidation, pciSessionCheck, pciAuditRequest, pciAnomalyDetection,
+ * pciResponseSanitizer, pciContentTypeCheck — tous `next()`) et pciErrorHandler
+ * (enregistré après errorHandler, jamais exécuté) ont été supprimés.
+ * Seul pciSecurityHeaders est un vrai middleware ; auditLog / maskPan /
+ * sanitizeCardResponse restent des helpers utilisés par les routes et webhooks.
+ */
 const { query } = require('../config/database');
 
 const PCI_EVENTS = {
@@ -39,6 +48,7 @@ const sanitizeCardResponse = (data) => {
   return s;
 };
 
+/** Seul middleware réel : HSTS, anti-framing, nosniff, no-store sur les parcours sensibles. */
 const pciSecurityHeaders = (req, res, next) => {
   res.setHeader('Strict-Transport-Security','max-age=31536000; includeSubDomains; preload');
   res.setHeader('X-Frame-Options','DENY');
@@ -50,22 +60,8 @@ const pciSecurityHeaders = (req, res, next) => {
   next();
 };
 
-const pciInputValidation = (req, res, next) => { next(); };
-const pciSessionCheck    = (req, res, next) => { next(); };
-const pciAuditRequest    = (req, res, next) => { next(); };
-const pciAnomalyDetection= (req, res, next) => { next(); };
-const pciResponseSanitizer=(req,res,next)=>{ next(); };
-const pciContentTypeCheck= (req, res, next) => { next(); };
-
-const pciErrorHandler = (err, req, res, next) => {
-  console.error('[PCI-ERROR]', err.message);
-  const isProd = process.env.NODE_ENV === 'production';
-  res.status(err.status||500).json({ error: isProd?'Une erreur est survenue':err.message, code: err.code||'INTERNAL_ERROR' });
-};
-
 module.exports = {
-  pciSecurityHeaders, pciInputValidation, pciSessionCheck, pciAuditRequest,
-  pciAnomalyDetection, pciResponseSanitizer, pciErrorHandler, pciContentTypeCheck,
+  pciSecurityHeaders,
   maskPan, sanitizeCardResponse, auditLog, updateSession, destroySession, checkSession,
   PCI_EVENTS, cardholderRateLimits: {},
 };

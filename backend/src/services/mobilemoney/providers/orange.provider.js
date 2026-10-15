@@ -6,6 +6,8 @@
 'use strict';
 const https  = require('https');
 const logger = require('../../../config/logger');
+// WAVE-2 : URL de callback secrète (/api/v1/webhooks/<WEBHOOK_PATH_SECRET>/<provider>)
+const { webhookUrl } = require('../mobilemoney.router');
 
 const collectPayment = async ({ txnId, amount, currency, phone, description, config }) => {
   logger.info('Orange collectPayment', { txnId, amount, currency });
@@ -18,7 +20,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       amount:      String(amount),
       return_url:  process.env.PAY_LINK_BASE_URL + `/callback/orange/${txnId}`,
       cancel_url:  process.env.PAY_LINK_BASE_URL + `/cancel/orange/${txnId}`,
-      notif_url:   process.env.API_BASE_URL      + `/webhooks/orange`,
+      notif_url:   webhookUrl('orange'),
       lang:        'fr',
       reference:   description || 'CPlus 2.6.0',
     }

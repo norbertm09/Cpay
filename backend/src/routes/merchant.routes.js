@@ -158,7 +158,11 @@ function scheduleAirtelPolling(transactionId, airtelTxId) {
     }
   }, 30000);
 }
-const { merchantAuth, signToken, signRefreshToken, rotateRefreshToken, revokeRefreshToken, setRefreshCookie, clearRefreshCookie, readRefreshToken } = require('../middleware/auth');
+// WAVE-2 : module d'auth unique (audit §1.1) — aucun jwt.sign/verify local
+const {
+  merchantAuth, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
+  readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
+} = require('../middleware/auth');
 const logger  = require('../config/logger');
 const { detectFromPhone, normalizePhone } = require('../services/detection/detection.engine');
 const { assignMerchantCountryDefaults } = require('../services/config/country-defaults');
@@ -277,6 +281,51 @@ const safeEqualHex = (a, b) => {
   return ba.length > 0 && ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// WAVE-2 — AUTH MARCHAND (sessions unifiees, 2FA, hygiene mots de passe)
+// ═══════════════════════════════════════════════════════════════════
+
+// Rate limits dedies (audit §2.19) — par IP, dans le routeur
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Trop d’inscriptions depuis cette adresse, réessayez plus tard', code: 'RATE_LIMITED' }),
+});
+const pairLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Trop de tentatives d’appairage, réessayez plus tard', code: 'RATE_LIMITED' }),
+});
+
+// Colonnes explicites : jamais password_hash / mfa_secret dans une reponse (audit §2.12)
+const MERCHANT_USER_COLS = `u.user_id, u.merchant_id, u.email, u.phone, u.first_name, u.last_name, u.role, u.is_active,
+              u.mfa_enabled, u.temp_password, u.failed_attempts, u.locked_until, u.last_login_at, u.created_at,
+              m.business_name, m.currency, m.kyb_level, m.merchant_status, m.country`;
+
+const merchantClaims = (user) => ({
+  type: 'merchant', merchantId: user.merchant_id, role: user.role,
+  businessName: user.business_name, country: user.country, currency: user.currency,
+});
+
+const merchantProfile = (user) => ({
+  userId: user.user_id, firstName: user.first_name, lastName: user.last_name,
+  email: user.email, role: user.role,
+  merchantId: user.merchant_id, businessName: user.business_name,
+  currency: user.currency, country: user.country, kybLevel: user.kyb_level,
+  mfaEnabled: !!user.mfa_enabled,
+});
+
+// Session complete apres authentification (login, 2FA validee, inscription).
+// refresh_token reste dans le JSON pour ne pas casser les portails non encore
+// migres vers le cookie — il sera retire en phase 3.
+const merchantSessionResponse = async ({ req, res, user, status = 200, extra = {} }) => {
+  const session = await issueSession({ actorType: 'merchant', actorId: user.user_id, claims: merchantClaims(user), req, res });
+  res.status(status).json({
+    ...session,
+    mustChangePassword: !!user.temp_password,
+    user: merchantProfile(user),
+    ...extra,
+  });
+};
+
 // ─── LOGIN MARCHAND ───────────────────────────────────────────────
 router.post('/auth/login', async (req, res) => {
   const { emailOrPhone, password } = req.body;
@@ -284,8 +333,7 @@ router.post('/auth/login', async (req, res) => {
 
   try {
     const result = await query(
-      `SELECT u.*, m.merchant_id, m.business_name, m.currency, m.kyb_level,
-              m.merchant_status, m.country
+      `SELECT ${MERCHANT_USER_COLS}, u.password_hash, u.mfa_secret
        FROM merchant_users u
        JOIN merchants m ON u.merchant_id = m.merchant_id
        WHERE (u.email = $1 OR u.phone = $1) AND u.is_active = TRUE LIMIT 1`,
@@ -312,43 +360,60 @@ router.post('/auth/login', async (req, res) => {
       return res.status(403).json({ error: 'Compte suspendu — contactez le support', code: 'SUSPENDED' });
     }
 
+    // 2FA active : pas de session tant que le code TOTP n'est pas valide
+    // (POST /auth/2fa/validate). Le jeton MFA vaut 5 minutes.
+    if (user.mfa_enabled && user.mfa_secret) {
+      const mfaToken = signMfaToken({ actorType: 'merchant', sub: user.user_id });
+      return res.json({ mfaRequired: true, mfaToken });
+    }
+
     // NE PAS vérifier les APIs ici — juste l'utilisateur en DB
-    const accessToken  = signToken({
-      sub: user.user_id, merchantId: user.merchant_id,
-      role: user.role, type: 'merchant',
-      businessName: user.business_name, country: user.country, currency: user.currency,
-      // 12h -> 15m : un access token non revocable pendant 12h reste
-      // valide 12h apres la revocation du refresh, ce qui vide la
-      // revocation cote serveur de son sens.
-    }, '15m');
-    const refreshToken = await signRefreshToken({
-      subjectId: user.user_id,
-      actorType: 'merchant',
-      payload: { sub: user.user_id, type: 'merchant_refresh' },
-      expiresIn: '30d',
-    });
-
-    // Cookie HttpOnly : inaccessible au JavaScript, donc inexploitable par XSS.
-    // refresh_token reste dans le JSON pour ne pas casser les portails non
-    // encore migres — il sera retire en phase 3.
-    setRefreshCookie(res, { actorType: 'merchant', path: '/api/v1/merchant/auth', token: refreshToken });
-
-    res.json({
-      access_token: accessToken, refresh_token: refreshToken,
-      user: {
-        userId: user.user_id, firstName: user.first_name, lastName: user.last_name,
-        email: user.email, role: user.role,
-        merchantId: user.merchant_id, businessName: user.business_name,
-        currency: user.currency, country: user.country, kybLevel: user.kyb_level,
-      },
-    });
+    await merchantSessionResponse({ req, res, user });
   } catch (err) {
     logger.error('Merchant login error', { err: err.message });
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-router.post('/auth/register', async (req, res) => {
+// ─── 2FA : validation du code apres login (emet la session) ──────
+router.post('/auth/2fa/validate', async (req, res) => {
+  const { mfaToken, code } = req.body;
+  if (!mfaToken || !code) return res.status(422).json({ error: 'mfaToken et code requis' });
+  try {
+    let payload;
+    try { payload = verifyMfaToken(mfaToken, 'merchant'); }
+    catch (e) { return res.status(401).json({ error: e.message, code: e.code }); }
+
+    const r = await query(
+      `SELECT ${MERCHANT_USER_COLS}, u.mfa_secret
+       FROM merchant_users u JOIN merchants m ON u.merchant_id = m.merchant_id
+       WHERE u.user_id = $1 AND u.is_active = TRUE LIMIT 1`, [payload.sub]);
+    const user = r.rows[0];
+    if (!user) return res.status(401).json({ error: 'Utilisateur introuvable' });
+    if (user.merchant_status === 'suspended') return res.status(403).json({ error: 'Compte suspendu — contactez le support', code: 'SUSPENDED' });
+    if (!user.mfa_secret) return res.status(400).json({ error: '2FA non configuré' });
+    if (!verifyTotp(user.mfa_secret, code)) return res.status(401).json({ error: 'Code 2FA invalide', code: 'INVALID_TOTP' });
+
+    await merchantSessionResponse({ req, res, user });
+  } catch (err) {
+    logger.error('Merchant 2FA validate error', { err: err.message });
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ─── PROFIL (sans secrets) ────────────────────────────────────────
+router.get('/auth/me', merchantAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT ${MERCHANT_USER_COLS}
+       FROM merchant_users u JOIN merchants m ON u.merchant_id = m.merchant_id
+       WHERE u.user_id = $1 LIMIT 1`, [req.user.sub]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Utilisateur introuvable' });
+    res.json({ user: merchantProfile(r.rows[0]), mustChangePassword: !!r.rows[0].temp_password });
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+router.post('/auth/register', registerLimiter, async (req, res) => {
   const {
     businessName, rccm, nif, phone, email, password,
     settlementType = 'mobile_money', settlementAccount, settlementProvider,
@@ -403,37 +468,11 @@ router.post('/auth/register', async (req, res) => {
       return { merchant: merchantRow, user: user.rows[0], apiDefaults };
     });
 
-    const accessToken = signToken({
-      sub: created.user.user_id,
-      merchantId: created.merchant.merchant_id,
-      role: created.user.role,
-      type: 'merchant',
-      businessName: created.merchant.business_name,
-      country: created.merchant.country,
-      currency: created.merchant.currency,
-    }, '8h');
-    const refreshToken = await signRefreshToken({
-      subjectId: created.user.user_id,
-      actorType: 'merchant',
-      payload: { sub: created.user.user_id, type: 'merchant_refresh' },
-      expiresIn: '30d',
-    });
-
-    res.status(201).json({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      user: {
-        userId: created.user.user_id,
-        firstName: created.user.first_name,
-        email: created.user.email,
-        role: created.user.role,
-        merchantId: created.merchant.merchant_id,
-        businessName: created.merchant.business_name,
-        currency: created.merchant.currency,
-        country: created.merchant.country,
-        kybLevel: created.merchant.kyb_level,
-      },
-      apiDefaults: created.apiDefaults,
+    // Access 15 min (etait 8 h a l'inscription — audit §2.16), refresh en cookie
+    await merchantSessionResponse({
+      req, res, status: 201,
+      user: { ...created.user, ...created.merchant, temp_password: false },
+      extra: { apiDefaults: created.apiDefaults },
     });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email ou telephone deja utilise' });
@@ -448,40 +487,28 @@ router.post('/auth/refresh', async (req, res) => {
   if (!refreshToken) return res.status(422).json({ error: 'refreshToken requis' });
 
   try {
-    const tokens = await rotateRefreshToken({
-      token: refreshToken,
-      expectedType: 'merchant_refresh',
-      actorType: 'merchant',
-      buildAccessPayload: async (userId) => {
+    const tokens = await rotateRefresh({
+      actorType: 'merchant', token: refreshToken, req, res,
+      buildClaims: async ({ actorId }) => {
         const r = await query(
           `SELECT u.user_id, u.role, m.merchant_id, m.business_name, m.country, m.currency
            FROM merchant_users u JOIN merchants m ON u.merchant_id = m.merchant_id
            WHERE u.user_id = $1 AND u.is_active = TRUE AND m.merchant_status = 'active'`,
-          [userId]
+          [actorId]
         );
         if (!r.rows.length) throw new Error('Utilisateur introuvable');
-        const user = r.rows[0];
-        return {
-          sub: user.user_id,
-          merchantId: user.merchant_id,
-          role: user.role,
-          type: 'merchant',
-          businessName: user.business_name,
-          country: user.country,
-          currency: user.currency,
-        };
+        return merchantClaims(r.rows[0]);
       },
     });
-    setRefreshCookie(res, { actorType: 'merchant', path: '/api/v1/merchant/auth', token: tokens.refreshToken });
-    res.json({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken });
+    res.json({ access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_in: tokens.expires_in });
   } catch (err) {
-    res.status(err.statusCode || 401).json({ error: 'Refresh token invalide' });
+    res.status(err.statusCode || 401).json({ error: 'Refresh token invalide', code: err.code || 'INVALID_REFRESH' });
   }
 });
 
 router.post('/auth/logout', async (req, res) => {
   await revokeRefreshToken(readRefreshToken(req, 'merchant'));
-  clearRefreshCookie(res, { actorType: 'merchant', path: '/api/v1/merchant/auth' });
+  clearRefreshCookie(res, 'merchant');
   res.json({ success: true });
 });
 
@@ -1121,7 +1148,8 @@ router.post('/terminals/check', async (req, res) => {
     res.status(500).json({ error: 'Erreur verification' });
   }
 });
-router.post('/terminals/pair', async (req, res) => {
+// WAVE-2 : 10 tentatives / 15 min / IP (code a 6 chiffres — audit §2.19)
+router.post('/terminals/pair', pairLimiter, async (req, res) => {
   const { pairingCode, androidId, deviceModel, appVersion } = req.body;
   if (!pairingCode || !androidId)
     return res.status(422).json({ error: 'pairingCode et androidId requis' });
@@ -1960,76 +1988,74 @@ router.post('/receipts/sms', merchantAuth, smsLimiter, async (req, res) => {
 });
 
 // ─── ACCOUNT CHANGE PASSWORD ─────────────────────────────────────
-router.post('/account/change-password', merchantAuth, async (req, res) => {
-  const bcrypt = require('bcryptjs');
+// WAVE-2 (audit §2.13, §2.15) : leve temp_password et revoque toutes les
+// sessions (refresh) du marchand ; l'access en cours expire sous 15 min.
+const changeMerchantPassword = async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(422).json({ error: 'currentPassword et newPassword requis' });
   if (newPassword.length < 8) return res.status(422).json({ error: 'Minimum 8 caracteres' });
   try {
     // Le JWT marchand porte l'identifiant utilisateur dans `sub` (audit §3.3)
-    const userId = req.merchant?.userId || req.user?.sub || req.user?.userId;
+    const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'Utilisateur non identifie' });
     const u = await query(`SELECT password_hash FROM merchant_users WHERE user_id=$1`, [userId]);
     if (!u.rows[0]) return res.status(404).json({ error: 'Utilisateur introuvable' });
     const ok = await bcrypt.compare(currentPassword, u.rows[0].password_hash);
     if (!ok) return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
-    const hash = await bcrypt.hash(newPassword, 10);
-    await query(`UPDATE merchant_users SET password_hash=$1, updated_at=NOW() WHERE user_id=$2`, [hash, userId]);
-    res.json({ success:true, message:'Mot de passe modifie' });
+    const hash = await bcrypt.hash(newPassword, 12);
+    await query(`UPDATE merchant_users SET password_hash=$1, temp_password=FALSE, updated_at=NOW() WHERE user_id=$2`, [hash, userId]);
+    await revokeAll('merchant', userId);
+    clearRefreshCookie(res, 'merchant');
+    res.json({ success:true, message:'Mot de passe modifie', sessionsRevoked: true });
   } catch(err) { res.status(500).json({ error: err.message }); }
-});
+};
+router.post('/account/change-password', merchantAuth, changeMerchantPassword);
+router.post('/auth/change-password',    merchantAuth, changeMerchantPassword);
 
 // HOTFIX (audit §2.6, §3.4) : autorisation NFC simulee (auth code aleatoire, aucun
 // appel PSP, req.merchant undefined). Desactive : 410 Gone, aucune ecriture.
 router.post('/collect/contactless', merchantAuth, (req, res) => featureDisabled(res));
 
 // ─── 2FA MERCHANT ─────────────────────────────────────────────────
-const speakeasy = require('speakeasy');
-const QRCode    = require('qrcode');
+// WAVE-2 (audit §2.11) : TOTP reel (speakeasy, fenetre 1), secret base32 sur
+// la ligne utilisateur, QR genere cote serveur. Le login emet un mfaToken
+// quand mfa_enabled (voir POST /auth/2fa/validate plus haut).
 
-// Setup 2FA — générer secret + QR
+// Setup 2FA — générer secret + QR (non activé tant que /verify n'a pas réussi)
 router.post('/auth/2fa/setup', merchantAuth, async (req, res) => {
   try {
-    const secret = speakeasy.generateSecret({
-      name: `CPlus:${req.user.email}`,
-      length: 20
-    });
-    // Sauvegarder le secret temporairement (non activé)
+    const u = await query(`SELECT email FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
+    const label = u.rows[0]?.email || req.user.email || String(req.user.sub);
+    const enrollment = await buildTotpEnrollment({ label, issuer: 'C-Pay Merchant' });
     await query(
-      `UPDATE merchant_users SET mfa_secret=$1 WHERE user_id=$2`,
-      [secret.base32, req.user.sub]
+      `UPDATE merchant_users SET mfa_secret=$1, mfa_enabled=FALSE WHERE user_id=$2`,
+      [enrollment.secret, req.user.sub]
     );
-    const qrUrl = await QRCode.toDataURL(secret.otpauth_url);
-    res.json({ secret: secret.base32, qrCode: qrUrl, otpauthUrl: secret.otpauth_url });
+    res.json(enrollment);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
 // Vérifier et activer 2FA
 router.post('/auth/2fa/verify', merchantAuth, async (req, res) => {
   const { token } = req.body;
-  if (!token) return res.status(422).json({error:'Token requis'});
+  if (!token || typeof token !== 'string') return res.status(422).json({error:'Token requis'});
   try {
     const u = await query(`SELECT mfa_secret FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
     if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
-    const valid = speakeasy.totp.verify({
-      secret: u.rows[0].mfa_secret,
-      encoding: 'base32',
-      token: token.replace(/\s/g,''),
-      window: 2
-    });
-    if (!valid) return res.status(400).json({error:'Code invalide'});
+    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
     await query(`UPDATE merchant_users SET mfa_enabled=TRUE WHERE user_id=$1`, [req.user.sub]);
     res.json({success:true, message:'2FA activé ✅'});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-// Désactiver 2FA
+// Désactiver 2FA — code TOTP valide obligatoire (mfa_secret NULL → 400, plus de TypeError, audit §3.8)
 router.post('/auth/2fa/disable', merchantAuth, async (req, res) => {
   const { token } = req.body;
+  if (!token || typeof token !== 'string') return res.status(422).json({error:'Token requis'});
   try {
     const u = await query(`SELECT mfa_secret FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
-    const valid = speakeasy.totp.verify({ secret: u.rows[0].mfa_secret, encoding:'base32', token:token.replace(/\s/g,''), window:2 });
-    if (!valid) return res.status(400).json({error:'Code invalide'});
+    if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
+    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
     await query(`UPDATE merchant_users SET mfa_enabled=FALSE, mfa_secret=NULL WHERE user_id=$1`, [req.user.sub]);
     res.json({success:true});
   } catch(err){ res.status(500).json({error:err.message}); }
@@ -2050,28 +2076,9 @@ router.get('/auth/2fa/status', merchantAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-// Validation 2FA lors du login (route séparée)
-router.post('/auth/2fa/validate', async (req, res) => {
-  const { tempToken, totpCode } = req.body;
-  if (!tempToken || !totpCode) return res.status(422).json({error:'Token et code requis'});
-  try {
-    const jwt = require('jsonwebtoken');
-    const payload = jwt.verify(tempToken, process.env.JWT_SECRET);
-    if (payload.type !== 'mfa_pending') return res.status(401).json({error:'Token invalide'});
-    const u = await query(`SELECT * FROM merchant_users WHERE user_id=$1`, [payload.sub]);
-    if (!u.rows[0]) return res.status(404).json({error:'Utilisateur introuvable'});
-    const valid = speakeasy.totp.verify({
-      secret: u.rows[0].mfa_secret,
-      encoding: 'base32',
-      token: totpCode.replace(/\s/g,''),
-      window: 2
-    });
-    if (!valid) return res.status(400).json({error:'Code 2FA invalide'});
-    const { signToken } = require('../middleware/auth');
-    const accessToken = signToken({ sub: u.rows[0].user_id, email: u.rows[0].email, merchantId: u.rows[0].merchant_id, role: u.rows[0].role, type: 'merchant' }, '8h');
-    res.json({ access_token: accessToken, user: { email: u.rows[0].email, firstName: u.rows[0].first_name } });
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
+// (WAVE-2) L'ancienne route /auth/2fa/validate attendait un jeton `mfa_pending`
+// que personne n'emettait ; elle est remplacee par la route du meme nom
+// declaree avec le login (mfaToken de type merchant_mfa).
 
 // ─── API KEYS MANAGEMENT ──────────────────────────────────────────
 // HOTFIX (audit §2.9) : la cle `sk_live_…` n'est plus stockee en clair.

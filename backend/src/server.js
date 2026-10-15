@@ -4,11 +4,7 @@ require('dotenv').config();
 
 const express = require('express');
 const helmet = require('helmet');
-const {
-  pciSecurityHeaders, pciInputValidation, pciSessionCheck,
-  pciAuditRequest, pciAnomalyDetection, pciResponseSanitizer,
-  pciErrorHandler, pciContentTypeCheck,
-} = require('./middleware/pci.middleware');
+const { pciSecurityHeaders } = require('./middleware/pci.middleware');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
@@ -34,6 +30,7 @@ const gtpCardRoutes     = require('./routes/gtp-card.routes');
 const mtnMomoRoutes     = require('./routes/mtn-momo.routes');
 const card2momoRoutes   = require('./routes/card2momo.routes');
 const railsRoutes = require('./routes/rails.routes');
+const { secretRouter: webhooksMmSecretRouter, legacyRouter: webhooksMmLegacyRouter } = require('./routes/webhooks-mm.routes');
 const { cardholderResetRouter, merchantResetRouter, distributionAdminRouter, agentRouter } = require('./routes/password_reset_distribution.routes');
 const { cardholderRouter: claimsChRouter, adminRouter: claimsAdminRouter } = require('./routes/claims.routes');
 const { adminRouter: distAdminRouter, bankRouter, agencyRouter, agentPortalRouter } = require('./routes/distribution.routes');
@@ -65,16 +62,11 @@ app.use(helmet({
   contentSecurityPolicy: false, // Géré par pciSecurityHeaders
 }));
 
-// ─── PCI-DSS Middleware Stack ─────────────────────────────────────
-app.use(pciSecurityHeaders);       // REQ 4+12 : HSTS, CSP, headers
-app.use(pciContentTypeCheck);      // REQ 2   : Content-Type enforcement
-app.use(pciInputValidation);       // REQ 6   : Input sanitization + XSS
-app.use(pciSessionCheck);          // REQ 8   : Session timeout 30 min
-app.use(pciAnomalyDetection);      // REQ 11  : Anomaly detection
-app.use('/api/v1/cardholder', pciAuditRequest);  // REQ 10 : Audit trail
-app.use('/api/v1/cardholder', pciResponseSanitizer); // REQ 3 : Masquage PAN
+// En-têtes de sécurité (HSTS, X-Frame-Options, nosniff, no-store sur les parcours sensibles).
+// WAVE-2 : les middlewares PCI cosmétiques (no-op) et pciErrorHandler ont été supprimés.
+app.use(pciSecurityHeaders);
 app.use(cors({
-  origin: (process.env.ALLOWED_ORIGINS || 'https://admin.c-pay.global,https://merchant.c-pay.global,https://card.c-pay.global,https://app.c-pay.global,https://bank.c-pay.global,https://agency.c-pay.global,https://agent.c-pay.global,http://localhost:3001,http://localhost:3002')
+  origin: (process.env.ALLOWED_ORIGINS || 'https://c-pay.global,https://www.c-pay.global,https://admin.c-pay.global,https://merchant.c-pay.global,https://card.c-pay.global,https://app.c-pay.global,https://bank.c-pay.global,https://agency.c-pay.global,https://agent.c-pay.global,http://localhost:3001,http://localhost:3002')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
@@ -242,6 +234,11 @@ app.post('/api/v1/webhooks/airtel',      handleAirtelWebhook);
 app.post('/api/v1/webhooks/cybersource', handleCyberSourceWebhook);
 app.post('/api/v1/webhooks/migs',        handleMigsWebhook);
 app.use('/api/v1/rails', wrapRouterAsync(railsRoutes));
+// WAVE-2 : webhooks Mobile Money (Orange, Wave, Africell, Express Union, Free Money, Moov)
+//   - chemin secret : POST /api/v1/webhooks/<WEBHOOK_PATH_SECRET>/:provider
+//   - chemins publics historiques donnés aux opérateurs : /webhooks/orange, /webhooks/wave/…, /webhooks/<provider>/:txnId
+app.use('/api/v1/webhooks', webhooksMmSecretRouter);
+app.use('/webhooks', webhooksMmLegacyRouter);
 
 // ─── Reset mot de passe ───────────────────────────────────────────
 app.use('/api/v1/cardholder', wrapRouterAsync(cardholderResetRouter));
@@ -250,6 +247,10 @@ app.use('/api/v1/merchant',   wrapRouterAsync(merchantResetRouter));
 // ─── Réclamations & Incidents ─────────────────────────────────────
 app.use('/api/v1/cardholder', wrapRouterAsync(claimsChRouter));
 app.use('/api/v1/admin',      wrapRouterAsync(claimsAdminRouter));
+
+// ─── WAVE-2 : vitrine (assistant, leads, réclamations) + CRM admin ───
+app.use('/api/v1/public',    wrapRouterAsync(require('./routes/public-crm.routes')));
+app.use('/api/v1/admin/crm', wrapRouterAsync(require('./routes/crm-admin.routes')));
 
 // ─── Distribution ─────────────────────────────────────────────────
 app.use('/api/v1/admin/distribution', wrapRouterAsync(distAdminRouter));
@@ -824,7 +825,5 @@ process.on('SIGINT', () => shutdown('SIGINT').catch((err) => {
 
 if (require.main === module) start();
 
-// REQ 10 : PCI Error Handler (doit être le dernier middleware)
-app.use(pciErrorHandler);
 
 module.exports = app;

@@ -1,29 +1,68 @@
 'use strict';
 const express = require('express');
 const bcrypt  = require('bcryptjs');
-const jwt     = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { query, withTransaction } = require('../config/database');
 
-const makeAuth = (roles) => async (req, res, next) => {
-  try {
-    const h = req.headers.authorization;
-    if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const d = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-    if (!roles.includes(d.role)) return res.status(403).json({ error: 'Accès refusé' });
-    req.user = d; next();
-  } catch { res.status(401).json({ error: 'Token invalide' }); }
-};
+// WAVE-2 : auth unique (audit §1.1). L'ancien `makeAuth(['admin'])` exigeait
+// role='admin' qu'aucun JWT admin ne porte (audit §1 : /admin/distribution/*
+// inaccessible) -> adminAuth du module commun (type admin). Les portails
+// bank/agency/agent recoivent des JWT type 'distribution' + role.
+const {
+  adminAuth, distributionAuth, issueSession, rotateRefresh, revokeRefreshToken,
+  readRefreshToken, clearRefreshCookie,
+} = require('../middleware/auth');
 
-const adminAuth   = makeAuth(['admin']);
-const bankAuth    = makeAuth(['bank_admin']);
-const agencyAuth  = makeAuth(['agency_admin']);
-const agentAuth   = makeAuth(['agent']);
+const bankAuth    = distributionAuth('bank_admin');
+const agencyAuth  = distributionAuth('agency_admin');
+const agentAuth   = distributionAuth('agent');
 
 const adminRouter      = express.Router();
 const bankRouter       = express.Router();
 const agencyRouter     = express.Router();
 const agentPortalRouter = express.Router();
+
+// Session distribution : access 15 min (etait 8 h) + refresh opaque en cookie
+// cp_rt_<portal> (path /api/v1/<portal>/auth). Le JSON conserve access_token
+// et user ; refresh_token est ajoute pour les clients non migres au cookie.
+const distributionClaims = (u, role) => ({
+  type: 'distribution', role, bankId: u.bank_id, agencyId: u.agency_id || null, agentId: u.agent_id || null,
+});
+const DIST_USER_COLS = `du.user_id, du.first_name, du.last_name, du.email, du.phone, du.role, du.is_active,
+                        du.bank_id, du.agency_id, du.agent_id, du.password_hash, du.temp_password`;
+
+const addSessionRoutes = (r, portal, role, loadUser) => {
+  r.post('/auth/refresh', async (req, res) => {
+    const token = readRefreshToken(req, portal);
+    if (!token) return res.status(422).json({ error: 'refreshToken requis' });
+    try {
+      const tokens = await rotateRefresh({
+        actorType: portal, token, req, res,
+        buildClaims: async ({ actorId }) => {
+          const u = await loadUser(actorId);
+          if (!u) throw new Error('Utilisateur introuvable');
+          return distributionClaims(u, role);
+        },
+      });
+      res.json({ access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_in: tokens.expires_in });
+    } catch (err) {
+      res.status(err.statusCode || 401).json({ error: 'Refresh token invalide', code: err.code || 'INVALID_REFRESH' });
+    }
+  });
+  r.post('/auth/logout', async (req, res) => {
+    await revokeRefreshToken(readRefreshToken(req, portal));
+    clearRefreshCookie(res, portal);
+    res.json({ success: true });
+  });
+};
+
+const loadDistributionUser = (role) => async (userId) => {
+  const r = await query(`SELECT ${DIST_USER_COLS} FROM distribution_users du WHERE du.user_id=$1 AND du.role=$2 AND du.is_active=TRUE LIMIT 1`, [userId, role]);
+  return r.rows[0] || null;
+};
+addSessionRoutes(bankRouter,        'bank',   'bank_admin',   loadDistributionUser('bank_admin'));
+addSessionRoutes(agencyRouter,      'agency', 'agency_admin', loadDistributionUser('agency_admin'));
+addSessionRoutes(agentPortalRouter, 'agent',  'agent',        loadDistributionUser('agent'));
 
 // Admin — banques
 adminRouter.get('/banks',  adminAuth, async (req, res) => { const r = await query(`SELECT * FROM distribution_banks ORDER BY bank_name`); res.json({ data: r.rows }); });
@@ -49,8 +88,8 @@ bankRouter.post('/auth/login', async (req,res) => {
     const u = r.rows[0];
     if (!await bcrypt.compare(password, u.password_hash)) return res.status(401).json({error:'Identifiants incorrects'});
     await query(`UPDATE distribution_users SET last_login_at=NOW() WHERE user_id=$1`,[u.user_id]);
-    const token = jwt.sign({sub:u.user_id,role:'bank_admin',bankId:u.bank_id},process.env.JWT_SECRET,{expiresIn:'8h'});
-    res.json({access_token:token,user:{userId:u.user_id,firstName:u.first_name,lastName:u.last_name,email:u.email,role:'bank_admin',bank:{bankId:u.bank_id,bankName:u.bank_name}}});
+    const session = await issueSession({ actorType: 'bank', actorId: u.user_id, claims: distributionClaims(u, 'bank_admin'), req, res });
+    res.json({...session, mustChangePassword: !!u.temp_password, user:{userId:u.user_id,firstName:u.first_name,lastName:u.last_name,email:u.email,role:'bank_admin',bank:{bankId:u.bank_id,bankName:u.bank_name}}});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 bankRouter.get('/dashboard', bankAuth, async (req,res) => {
@@ -87,8 +126,8 @@ agencyRouter.post('/auth/login', async (req,res) => {
     const u=r.rows[0];
     if (!await bcrypt.compare(password,u.password_hash)) return res.status(401).json({error:'Identifiants incorrects'});
     await query(`UPDATE distribution_users SET last_login_at=NOW() WHERE user_id=$1`,[u.user_id]);
-    const token=jwt.sign({sub:u.user_id,role:'agency_admin',bankId:u.bank_id,agencyId:u.agency_id},process.env.JWT_SECRET,{expiresIn:'8h'});
-    res.json({access_token:token,user:{userId:u.user_id,firstName:u.first_name,lastName:u.last_name,email:u.email,role:'agency_admin',agency:{agencyId:u.agency_id,agencyName:u.agency_name},bank:{bankId:u.bank_id,bankName:u.bank_name}}});
+    const session = await issueSession({ actorType: 'agency', actorId: u.user_id, claims: distributionClaims(u, 'agency_admin'), req, res });
+    res.json({...session, mustChangePassword: !!u.temp_password, user:{userId:u.user_id,firstName:u.first_name,lastName:u.last_name,email:u.email,role:'agency_admin',agency:{agencyId:u.agency_id,agencyName:u.agency_name},bank:{bankId:u.bank_id,bankName:u.bank_name}}});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 agencyRouter.get('/dashboard', agencyAuth, async (req,res) => {
@@ -124,8 +163,8 @@ agentPortalRouter.post('/auth/login', async (req,res) => {
     const u=r.rows[0];
     if (!await bcrypt.compare(password,u.password_hash)) return res.status(401).json({error:'Identifiants incorrects'});
     await query(`UPDATE distribution_users SET last_login_at=NOW() WHERE user_id=$1`,[u.user_id]);
-    const token=jwt.sign({sub:u.user_id,role:'agent',bankId:u.bank_id,agencyId:u.agency_id,agentId:u.agent_id},process.env.JWT_SECRET,{expiresIn:'8h'});
-    res.json({access_token:token,user:{userId:u.user_id,firstName:u.first_name,lastName:u.last_name,email:u.email,role:'agent',agent:{agentId:u.agent_id,agentCode:u.agent_code,cardsIssued:u.cards_issued,cardsLimit:u.cards_limit},agency:{agencyId:u.agency_id,agencyName:u.agency_name},bank:{bankId:u.bank_id,bankName:u.bank_name}}});
+    const session = await issueSession({ actorType: 'agent', actorId: u.user_id, claims: distributionClaims(u, 'agent'), req, res });
+    res.json({...session, mustChangePassword: !!u.temp_password, user:{userId:u.user_id,firstName:u.first_name,lastName:u.last_name,email:u.email,role:'agent',agent:{agentId:u.agent_id,agentCode:u.agent_code,cardsIssued:u.cards_issued,cardsLimit:u.cards_limit},agency:{agencyId:u.agency_id,agencyName:u.agency_name},bank:{bankId:u.bank_id,bankName:u.bank_name}}});
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 agentPortalRouter.get('/dashboard', agentAuth, async (req,res) => {

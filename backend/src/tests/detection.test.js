@@ -1,5 +1,7 @@
 /**
  * Tests du Detection Engine — le cœur de l'automatisation CPlus 2.6.0
+ * Suite historique (prod). WAVE-2 : trois tests encodaient des bugs du moteur et ont été corrigés
+ * (CM 69 = Orange, CI = 10 chiffres, AID A000000333 = UnionPay). Voir wave2-detection.test.js.
  */
 
 'use strict';
@@ -36,7 +38,7 @@ describe('normalizePhone', () => {
 
 describe('detectFromPhone — Cameroun (CM, XAF)', () => {
   test('MTN CM +23767XXXXXXX', () => {
-    const r = detectFromPhone('+237699000001');
+    const r = detectFromPhone('+237670000001'); // 67 = MTN (69 est Orange — ancien test erroné)
     expect(r.success).toBe(true);
     expect(r.country).toBe('CM');
     expect(r.currency).toBe('XAF');
@@ -48,7 +50,7 @@ describe('detectFromPhone — Cameroun (CM, XAF)', () => {
     const r = detectFromPhone('+237695000001');
     expect(r.success).toBe(true);
     expect(r.country).toBe('CM');
-    expect(r.operator).toMatch(/MTN|ORANGE/); // selon le pattern
+    expect(r.operator).toBe('ORANGE_MONEY');
   });
 
   test('Numéro invalide CM', () => {
@@ -68,11 +70,16 @@ describe('detectFromPhone — Sénégal (SN, XOF)', () => {
 });
 
 describe('detectFromPhone — Côte d\'Ivoire (CI, XOF)', () => {
-  test('MTN CI +225XXX', () => {
-    const r = detectFromPhone('+22507123456789');
+  test('Orange CI +22507XXXXXXXX (10 chiffres)', () => {
+    const r = detectFromPhone('+2250712345678'); // l'ancien test utilisait 11 chiffres (bug \d{7,9})
     expect(r.success).toBe(true);
     expect(r.country).toBe('CI');
     expect(r.currency).toBe('XOF');
+    expect(r.operator).toBe('ORANGE_MONEY');
+  });
+
+  test('CI 11 chiffres → rejeté', () => {
+    expect(detectFromPhone('+22507123456789').success).toBe(false);
   });
 });
 
@@ -174,10 +181,10 @@ describe('detectFromAid — AID EMV', () => {
     expect(r.acquirer).toBe('mpgs');
   });
 
-  test('AID GIMAC', () => {
+  test('AID A000000333 = UnionPay (RID officiel), pas GIMAC', () => {
     const r = detectFromAid('A000000333010101');
     expect(r.success).toBe(true);
-    expect(r.network).toBe('GIMAC');
+    expect(r.network).toBe('UNIONPAY');
   });
 
   test('AID Maestro', () => {

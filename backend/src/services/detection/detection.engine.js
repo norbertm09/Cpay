@@ -1,309 +1,310 @@
 /**
- * Detection Engine — Le cerveau de CPlus 2.6.0
+ * Detection Engine — le cerveau de C-Pay 2.6.0
  *
  * Principe : le marchand ne choisit jamais rien.
- * À partir d'un numéro de téléphone ou d'un BIN/IIN carte,
- * ce module détermine automatiquement :
- *   - Le pays
- *   - L'opérateur Mobile Money
- *   - La devise
- *   - Le réseau carte (Visa, MC, GIMAC, UnionPay, Verve)
- *   - L'acquéreur
- *   - La route technique optimale
+ * À partir d'un numéro de téléphone (E.164 ou local + pays marchand) ou d'un BIN/AID carte,
+ * ce module détermine : pays, devise, opérateur Mobile Money, réseau carte, acquéreur.
+ *
+ * WAVE-2 (audit prod 2.6.0, 02-§3) : port de la version refonte-2026.
+ *   - plans de numérotation corrigés : SN (9), CI (10 chiffres depuis 2021), CM (9), CG (9), CD (9) ;
+ *     un numéro de mauvaise longueur est rejeté (PHONE_LENGTH) plutôt que routé au hasard ;
+ *   - les wallets non liés à un opérateur (Wave, Express Union) ne sont PAS détectables
+ *     par numéro : ils sont proposés dans `alternatives` et sélectionnables via `operatorOverride` ;
+ *   - Mastercard : plage 2221xx–2720xx couverte ; AID EMV : UnionPay A000000333, JCB A000000065,
+ *     Verve A000000371, GIMAC via GIMAC_AID_PREFIXES ;
+ *   - `normalizePhone(phone, defaultCountry)` accepte un numéro local si le pays est fourni
+ *     (merchant.routes / settlement passent les numéros locaux Congo avec 'CG').
+ *
+ * Compatibilité : les valeurs `operator` (MTN_MOMO, AIRTEL_MONEY, ORANGE_MONEY…) sont celles
+ * écrites par l'orchestrateur dans transactions.detected_operator — ne pas les renommer.
+ * `COUNTRY_PREFIXES` (ancien export) est dérivé de COUNTRIES pour les anciens appelants.
+ *
+ * Toute entrée marquée `verified:false` doit être confirmée auprès de l'opérateur
+ * avant la mise en production du pays concerné.
  */
-
 'use strict';
-// CPlus 2.6.0
 
-// ─── Table pays → préfixes mobiles ───────────────────────────────
-
-const COUNTRY_PREFIXES = {
-  '+221': { country: 'SN', name: 'Sénégal',           currency: 'XOF', region: 'BCEAO' },
-  '+225': { country: 'CI', name: "Côte d'Ivoire",      currency: 'XOF', region: 'BCEAO' },
-  '+237': { country: 'CM', name: 'Cameroun',            currency: 'XAF', region: 'CEMAC' },
-  '+242': { country: 'CG', name: 'Congo Brazzaville',  currency: 'XAF', region: 'CEMAC' },
-  '+243': { country: 'CD', name: 'RDC',                 currency: 'CDF', region: 'CUSTOM' },
-  // Extensions futures
-  '+225': { country: 'CI', name: "Côte d'Ivoire",      currency: 'XOF', region: 'BCEAO' },
-  '+233': { country: 'GH', name: 'Ghana',               currency: 'GHS', region: 'CUSTOM' },
-  '+234': { country: 'NG', name: 'Nigeria',             currency: 'NGN', region: 'CUSTOM' },
-  '+254': { country: 'KE', name: 'Kenya',               currency: 'KES', region: 'CUSTOM' },
+// ─── Pays supportés ───────────────────────────────────────────────
+// nsnLength = longueur du numéro national (sans indicatif, sans 0 initial sauf CI)
+const COUNTRIES = {
+  SN: { callingCode: '221', name: 'Sénégal',           currency: 'XOF', region: 'BCEAO',  nsnLength: 9  },
+  CI: { callingCode: '225', name: "Côte d'Ivoire",     currency: 'XOF', region: 'BCEAO',  nsnLength: 10 },
+  CM: { callingCode: '237', name: 'Cameroun',          currency: 'XAF', region: 'CEMAC',  nsnLength: 9  },
+  CG: { callingCode: '242', name: 'Congo Brazzaville', currency: 'XAF', region: 'CEMAC',  nsnLength: 9  },
+  CD: { callingCode: '243', name: 'RDC',               currency: 'CDF', region: 'CUSTOM', nsnLength: 9  },
+  // Extensions futures (devise détectée, aucun opérateur branché)
+  GH: { callingCode: '233', name: 'Ghana',             currency: 'GHS', region: 'CUSTOM', nsnLength: 9  },
+  NG: { callingCode: '234', name: 'Nigeria',           currency: 'NGN', region: 'CUSTOM', nsnLength: 10 },
+  KE: { callingCode: '254', name: 'Kenya',             currency: 'KES', region: 'CUSTOM', nsnLength: 9  },
 };
 
-// ─── Table opérateurs Mobile Money par pays ───────────────────────
-//
-// Chaque entrée = { pattern: RegExp, operator, brand, gateway }
-// Le premier pattern qui matche gagne.
+const COUNTRY_BY_CODE = Object.fromEntries(
+  Object.entries(COUNTRIES).map(([iso, c]) => [c.callingCode, { country: iso, ...c }])
+);
 
+// Ancien export (clé '+221' → { country, name, currency, region }) conservé pour les appelants legacy.
+const COUNTRY_PREFIXES = Object.fromEntries(
+  Object.entries(COUNTRIES).map(([iso, c]) => [`+${c.callingCode}`, { country: iso, name: c.name, currency: c.currency, region: c.region }])
+);
+
+// ─── Opérateurs Mobile Money par pays ─────────────────────────────
+// prefixes : préfixes du numéro national (après l'indicatif). Les préfixes les plus
+// longs sont testés d'abord ; le premier match gagne.
 const MOBILE_MONEY_OPERATORS = {
-
-  // ─── Sénégal (+221) ────────────────────────────────────────────
   SN: [
-    { pattern: /^221(76|77|78)\d{7}$/, operator: 'ORANGE_MONEY',  brand: 'Orange Money',  gateway: 'orange_senegal' },
-    { pattern: /^221(70|75|76)\d{7}$/, operator: 'FREE_MONEY',    brand: 'Free Money',    gateway: 'free_money_sn' },
-    { pattern: /^221(70|75|76)\d{7}$/, operator: 'WAVE',          brand: 'Wave',          gateway: 'wave_sn' },
-    { pattern: /^221\d{9}$/,           operator: 'ORANGE_MONEY',  brand: 'Orange Money',  gateway: 'orange_senegal' }, // fallback
+    { prefixes: ['77', '78'],      operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_sn',      verified: true  },
+    { prefixes: ['76'],            operator: 'FREE_MONEY',   brand: 'Free Money',   gateway: 'free_money_sn',  verified: true  },
+    { prefixes: ['70'],            operator: 'EXPRESSO',     brand: 'Expresso',     gateway: null,             verified: true  }, // pas de wallet branché
   ],
-
-  // ─── Côte d'Ivoire (+225) ───────────────────────────────────────
-  CI: [
-    { pattern: /^225(07|08|09|77|78|79|01|02)\d{7,9}$/, operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_ci' },
-    { pattern: /^225(05|06|55|56|57|58)\d{7,9}$/,       operator: 'MTN_MOMO',    brand: 'MTN Mobile Money', gateway: 'mtn_ci' },
-    { pattern: /^225(01|02|03)\d{7,9}$/,                operator: 'MOOV_MONEY',  brand: 'Moov Money',   gateway: 'moov_ci' },
-    { pattern: /^225(22|23|24|25)\d{7,9}$/,             operator: 'WAVE',        brand: 'Wave',          gateway: 'wave_ci' },
-    { pattern: /^225\d{9,11}$/,                         operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_ci' },
+  CI: [ // plan à 10 chiffres depuis le 31/01/2021
+    { prefixes: ['07'],            operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_ci',      verified: true  },
+    { prefixes: ['05'],            operator: 'MTN_MOMO',     brand: 'MTN MoMo',     gateway: 'mtn_ci',         verified: true  },
+    { prefixes: ['01'],            operator: 'MOOV_MONEY',   brand: 'Moov Money',   gateway: 'moov_ci',        verified: true  },
   ],
-
-  // ─── Cameroun (+237) ────────────────────────────────────────────
   CM: [
-    { pattern: /^237(67|68|69)\d{6}$/,  operator: 'MTN_MOMO',    brand: 'MTN Mobile Money', gateway: 'mtn_cm' },
-    { pattern: /^237(69)\d{6}$/,         operator: 'ORANGE_MONEY', brand: 'Orange Money',    gateway: 'orange_cm' },
-    { pattern: /^237(24|33|22)\d{6}$/,  operator: 'EXPRESS_UNION', brand: 'Express Union',  gateway: 'express_union_cm' },
-    { pattern: /^237(55|56|57)\d{6}$/,  operator: 'MOOV_MONEY',   brand: 'Moov Money',      gateway: 'moov_cm' },
-    { pattern: /^237\d{9}$/,            operator: 'MTN_MOMO',    brand: 'MTN Mobile Money', gateway: 'mtn_cm' },
+    { prefixes: ['650','651','652','653','654','67','68'], operator: 'MTN_MOMO',     brand: 'MTN MoMo',     gateway: 'mtn_cm',    verified: true },
+    { prefixes: ['655','656','657','658','659','69'],      operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_cm', verified: true },
+    { prefixes: ['66'],                                    operator: 'NEXTTEL',      brand: 'Nexttel',      gateway: null,        verified: true },
+    { prefixes: ['62'],                                    operator: 'CAMTEL',       brand: 'Camtel Blue',  gateway: null,        verified: true },
   ],
-
-  // ─── Congo Brazzaville (+242) ───────────────────────────────────
   CG: [
-    { pattern: /^242(06|05|04)\d{6}$/,  operator: 'MTN_MOMO',    brand: 'MTN Mobile Money', gateway: 'mtn_cg' },
-    { pattern: /^242(05|55|06)\d{6}$/,  operator: 'AIRTEL_MONEY', brand: 'Airtel Money',    gateway: 'airtel_cg' },
-    { pattern: /^242(04|03|02)\d{6}$/,  operator: 'ORANGE_MONEY', brand: 'Orange Money',    gateway: 'orange_cg' },
-    { pattern: /^242\d{9}$/,            operator: 'MTN_MOMO',    brand: 'MTN Mobile Money', gateway: 'mtn_cg' },
+    { prefixes: ['06'],            operator: 'MTN_MOMO',     brand: 'MTN MoMo',     gateway: 'mtn_cg',         verified: true  },
+    { prefixes: ['05', '04'],      operator: 'AIRTEL_MONEY', brand: 'Airtel Money', gateway: 'airtel_cg',      verified: false }, // 04 : ex-Azur, à confirmer
   ],
-
-  // ─── RDC (+243) ─────────────────────────────────────────────────
   CD: [
-    { pattern: /^243(81|82|83|84|85|89|90|97|98|99)\d{7}$/, operator: 'VODACOM_MPESA', brand: 'M-Pesa (Vodacom)', gateway: 'vodacom_cd' },
-    { pattern: /^243(97|98|99|90|91|92)\d{7}$/,             operator: 'AIRTEL_MONEY',  brand: 'Airtel Money',    gateway: 'airtel_cd' },
-    { pattern: /^243(85|86|87|88)\d{7}$/,                   operator: 'ORANGE_MONEY',  brand: 'Orange Money',    gateway: 'orange_cd' },
-    { pattern: /^243(80|81|82|83)\d{7}$/,                   operator: 'AFRICELL_MONEY', brand: 'Africell Money', gateway: 'africell_cd' },
-    { pattern: /^243\d{10}$/,                               operator: 'VODACOM_MPESA', brand: 'M-Pesa (Vodacom)', gateway: 'vodacom_cd' },
+    { prefixes: ['81', '82'],      operator: 'VODACOM_MPESA',  brand: 'M-Pesa',         gateway: 'vodacom_cd',  verified: true  },
+    { prefixes: ['97', '98', '99'],operator: 'AIRTEL_MONEY',   brand: 'Airtel Money',   gateway: 'airtel_cd',   verified: true  },
+    { prefixes: ['84', '85', '89'],operator: 'ORANGE_MONEY',   brand: 'Orange Money',   gateway: 'orange_cd',   verified: true  },
+    { prefixes: ['90', '91'],      operator: 'AFRICELL_MONEY', brand: 'Africell Money', gateway: 'africell_cd', verified: false },
   ],
 };
 
-// ─── Table BIN/IIN → réseau carte ────────────────────────────────
-//
-// Résolution par préfixe numérique (longueur décroissante pour la précision)
+// Wallets non détectables par numéro (sélection explicite par le client final ou override)
+const WALLET_ALTERNATIVES = {
+  SN: [{ operator: 'WAVE', brand: 'Wave', gateway: 'wave_sn' }],
+  CI: [{ operator: 'WAVE', brand: 'Wave', gateway: 'wave_ci' }],
+  CM: [{ operator: 'EXPRESS_UNION', brand: 'Express Union Mobile', gateway: 'express_union_cm' }],
+  CG: [], CD: [],
+};
 
+// Migration CI 2021 : anciens numéros à 8 chiffres → nouveau préfixe à 2 chiffres
+const CI_LEGACY_MAP = {
+  '07': ['07','08','09','47','48','49','57','58','59','77','78','79','87','88','89'],
+  '05': ['04','05','06','44','45','46','54','55','56','64','65','66','74','75','76','84','85','86','94','95','96'],
+  '01': ['01','02','03','40','41','42','43','50','51','52','53','70','71','72','73'],
+};
+
+// ─── Réseaux carte (BIN/IIN) ──────────────────────────────────────
+// Les plages (range) priment sur les préfixes. Les entrées verified:false doivent
+// être confirmées avec l'acquéreur (GIMAC n'a pas de plage publique documentée ici).
 const CARD_NETWORKS = [
-  // GIMAC — réseau CEMAC, Afrique Centrale (prioritaire pour nos marchés)
-  { prefix: '9792', network: 'GIMAC',    name: 'GIMAC',    acquirer: 'gimac_gateway' },
-  { prefix: '979',  network: 'GIMAC',    name: 'GIMAC',    acquirer: 'gimac_gateway' },
-  // Verve — Afrique de l'Ouest
-  { prefix: '650',  network: 'VERVE',    name: 'Verve',    acquirer: 'interswitch' },
-  { prefix: '506',  network: 'VERVE',    name: 'Verve',    acquirer: 'interswitch' },
-  // UnionPay
-  { prefix: '62',   network: 'UNIONPAY', name: 'UnionPay', acquirer: 'cybersource' },
-  // American Express
-  { prefix: '34',   network: 'AMEX',     name: 'Amex',     acquirer: 'cybersource' },
-  { prefix: '37',   network: 'AMEX',     name: 'Amex',     acquirer: 'cybersource' },
-  // Mastercard
-  { prefix: '51',   network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs' },
-  { prefix: '52',   network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs' },
-  { prefix: '53',   network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs' },
-  { prefix: '54',   network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs' },
-  { prefix: '55',   network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs' },
-  { prefix: '2221', network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs' },
-  { prefix: '2720', network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs' },
-  // Visa
-  { prefix: '4',    network: 'VISA',     name: 'Visa',     acquirer: 'cybersource' },
-  // Maestro (Mastercard)
-  { prefix: '6304', network: 'MAESTRO',  name: 'Maestro',  acquirer: 'mpgs' },
-  { prefix: '6759', network: 'MAESTRO',  name: 'Maestro',  acquirer: 'mpgs' },
-  // Discover
-  { prefix: '6011', network: 'DISCOVER', name: 'Discover', acquirer: 'cybersource' },
-  { prefix: '65',   network: 'DISCOVER', name: 'Discover', acquirer: 'cybersource' },
+  { range:  ['222100', '272099'], network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs',          verified: true  },
+  { prefix: '979',                network: 'GIMAC',      name: 'GIMAC',      acquirer: 'gimac_gateway', verified: false },
+  { prefix: '506',                network: 'VERVE',      name: 'Verve',      acquirer: 'interswitch',   verified: true  },
+  { prefix: '650',                network: 'VERVE',      name: 'Verve',      acquirer: 'interswitch',   verified: true  },
+  { prefix: '6304',               network: 'MAESTRO',    name: 'Maestro',    acquirer: 'mpgs',          verified: true  },
+  { prefix: '6759',               network: 'MAESTRO',    name: 'Maestro',    acquirer: 'mpgs',          verified: true  },
+  { prefix: '6011',               network: 'DISCOVER',   name: 'Discover',   acquirer: 'cybersource',   verified: true  },
+  { prefix: '65',                 network: 'DISCOVER',   name: 'Discover',   acquirer: 'cybersource',   verified: true  },
+  { prefix: '62',                 network: 'UNIONPAY',   name: 'UnionPay',   acquirer: 'cybersource',   verified: true  },
+  { prefix: '34',                 network: 'AMEX',       name: 'Amex',       acquirer: 'cybersource',   verified: true  },
+  { prefix: '37',                 network: 'AMEX',       name: 'Amex',       acquirer: 'cybersource',   verified: true  },
+  { prefix: '35',                 network: 'JCB',        name: 'JCB',        acquirer: 'cybersource',   verified: true  },
+  { prefix: '51',                 network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs',          verified: true  },
+  { prefix: '52',                 network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs',          verified: true  },
+  { prefix: '53',                 network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs',          verified: true  },
+  { prefix: '54',                 network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs',          verified: true  },
+  { prefix: '55',                 network: 'MASTERCARD', name: 'Mastercard', acquirer: 'mpgs',          verified: true  },
+  { prefix: '4',                  network: 'VISA',       name: 'Visa',       acquirer: 'cybersource',   verified: true  },
 ];
+
+// ─── AID EMV (RID + PIX) ──────────────────────────────────────────
+// RID officiels : Visa A000000003, Mastercard A000000004, UnionPay A000000333,
+// JCB A000000065, Amex A000000025, Verve A000000371, Discover A000000152.
+const AID_MAP = [
+  { aid: 'A0000000031010',   network: 'VISA',       acquirer: 'cybersource' },  // Visa credit/debit
+  { aid: 'A0000000032010',   network: 'VISA',       acquirer: 'cybersource' },  // Visa Electron
+  { aid: 'A0000000032020',   network: 'VISA',       acquirer: 'cybersource' },  // V PAY
+  { aid: 'A0000000033010',   network: 'VISA',       acquirer: 'cybersource' },  // Interlink
+  { aid: 'A0000000038010',   network: 'VISA',       acquirer: 'cybersource' },  // Plus
+  { aid: 'A0000000041010',   network: 'MASTERCARD', acquirer: 'mpgs' },
+  { aid: 'A0000000042203',   network: 'MAESTRO',    acquirer: 'mpgs' },         // Maestro US
+  { aid: 'A0000000043060',   network: 'MAESTRO',    acquirer: 'mpgs' },
+  { aid: 'A0000000050001',   network: 'MAESTRO',    acquirer: 'mpgs' },         // Maestro UK
+  { aid: 'A000000333010101', network: 'UNIONPAY',   acquirer: 'cybersource' },  // UnionPay debit
+  { aid: 'A000000333010102', network: 'UNIONPAY',   acquirer: 'cybersource' },  // UnionPay credit
+  { aid: 'A000000333010103', network: 'UNIONPAY',   acquirer: 'cybersource' },  // UnionPay quasi-credit
+  { aid: 'A0000000651010',   network: 'JCB',        acquirer: 'cybersource' },
+  { aid: 'A00000002501',     network: 'AMEX',       acquirer: 'cybersource' },
+  { aid: 'A0000001523010',   network: 'DISCOVER',   acquirer: 'cybersource' },
+  { aid: 'A0000003710001',   network: 'VERVE',      acquirer: 'interswitch' },
+  // GIMAC : AID à obtenir auprès du GIMAC (configurable via GIMAC_AID_PREFIXES="A000...,A000...")
+  ...String(process.env.GIMAC_AID_PREFIXES || '').split(',').map(s => s.trim()).filter(Boolean)
+      .map(aid => ({ aid: aid.toUpperCase(), network: 'GIMAC', acquirer: 'gimac_gateway' })),
+];
+
+// ─── Normalisation téléphone ──────────────────────────────────────
+
+/**
+ * Normalise en E.164 ("+2376…"). Accepte :
+ *   +237 6xx, 00237 6xx, 237 6xx, et un numéro local (06xx / 6xx) si defaultCountry est fourni.
+ * Sans defaultCountry, un numéro local renvoie null (comportement historique de la prod).
+ * @param {string} phone
+ * @param {string|null} [defaultCountry] ISO-2 (ex. 'CG') pour les numéros locaux
+ * @returns {string|null}
+ */
+const normalizePhone = (phone, defaultCountry = null) => {
+  if (phone === null || phone === undefined) return null;
+  if (typeof phone !== 'string') phone = String(phone);
+  let clean = phone.replace(/[\s\-().]/g, '');
+  if (!/^\+?\d{6,16}$/.test(clean)) return null;
+
+  if (clean.startsWith('00')) clean = '+' + clean.slice(2);
+
+  if (!clean.startsWith('+')) {
+    const dc = defaultCountry ? String(defaultCountry).toUpperCase() : null;
+    // Indicatif connu sans '+' ?
+    const code = Object.keys(COUNTRY_BY_CODE).find(c => clean.startsWith(c) && clean.length === c.length + COUNTRY_BY_CODE[c].nsnLength);
+    if (code) clean = '+' + clean;
+    else if (dc && COUNTRIES[dc]) {
+      const c = COUNTRIES[dc];
+      // Le 0 initial fait partie du numéro national en CI (10 chiffres) ; ailleurs c'est un préfixe de sortie
+      const national = (clean.startsWith('0') && clean.length === c.nsnLength + 1) ? clean.slice(1) : clean;
+      clean = `+${c.callingCode}${national}`;
+    } else {
+      return null; // numéro local sans contexte pays
+    }
+  }
+
+  // Migration CI 8 → 10 chiffres
+  if (clean.startsWith('+225') && clean.length === 4 + 8) {
+    const old = clean.slice(4, 6);
+    const newPrefix = Object.keys(CI_LEGACY_MAP).find(p => CI_LEGACY_MAP[p].includes(old));
+    if (newPrefix) clean = `+225${newPrefix}${clean.slice(4)}`;
+  }
+  return clean;
+};
+
+const detectCountry = (e164) => {
+  const digits = e164.replace('+', '');
+  const codes = Object.keys(COUNTRY_BY_CODE).sort((a, b) => b.length - a.length);
+  for (const code of codes) {
+    if (digits.startsWith(code)) return { ...COUNTRY_BY_CODE[code], national: digits.slice(code.length) };
+  }
+  return null;
+};
+
+const detectOperator = (national, countryCode) => {
+  const ops = MOBILE_MONEY_OPERATORS[countryCode];
+  if (!ops) return null;
+  const candidates = ops.flatMap(op => op.prefixes.map(p => ({ prefix: p, op })))
+    .sort((a, b) => b.prefix.length - a.prefix.length);
+  const hit = candidates.find(c => national.startsWith(c.prefix));
+  return hit ? hit.op : null;
+};
 
 // ─── API principale ───────────────────────────────────────────────
 
 /**
- * Détecter automatiquement toutes les informations à partir d'un numéro de téléphone.
- *
- * @param {string} phone  Numéro avec indicatif (+221XXXXXXXXX)
- * @returns {DetectionResult}
+ * @param {string} phone
+ * @param {object} [opts]
+ * @param {string} [opts.defaultCountry]   ISO-2 du marchand (pour numéros locaux)
+ * @param {string} [opts.operatorOverride] ex. 'WAVE' — wallet choisi explicitement
  */
-const detectFromPhone = (phone) => {
-  if (!phone) return { success: false, error: 'Numéro de téléphone requis' };
+const detectFromPhone = (phone, opts = {}) => {
+  opts = opts && typeof opts === 'object' ? opts : {};
+  if (!phone) return { success: false, error: 'Numéro de téléphone requis', code: 'PHONE_REQUIRED' };
 
-  // Normaliser le numéro
-  const normalized = normalizePhone(phone);
-  if (!normalized) return { success: false, error: `Numéro invalide : ${phone}` };
+  const normalized = normalizePhone(String(phone), opts.defaultCountry);
+  if (!normalized) return { success: false, error: 'Numéro invalide', code: 'PHONE_INVALID' };
 
-  // Détecter le pays par préfixe
   const countryInfo = detectCountry(normalized);
-  if (!countryInfo) {
-    return { success: false, error: `Pays non supporté pour le numéro ${phone}` };
+  if (!countryInfo) return { success: false, error: 'Pays non supporté', code: 'COUNTRY_UNSUPPORTED' };
+
+  if (countryInfo.national.length !== countryInfo.nsnLength) {
+    return { success: false, error: `Numéro ${countryInfo.name} invalide (${countryInfo.nsnLength} chiffres attendus)`, code: 'PHONE_LENGTH' };
   }
 
-  // Détecter l'opérateur
-  const operatorInfo = detectOperator(normalized, countryInfo.country);
+  const alternatives = WALLET_ALTERNATIVES[countryInfo.country] || [];
+  const base = {
+    phone: normalized, country: countryInfo.country, countryName: countryInfo.name,
+    currency: countryInfo.currency, region: countryInfo.region, alternatives,
+  };
+
+  // Override explicite (Wave, Express Union…)
+  if (opts.operatorOverride) {
+    const wanted = String(opts.operatorOverride).toUpperCase();
+    const alt = alternatives.find(a => a.operator === wanted);
+    const op  = (MOBILE_MONEY_OPERATORS[countryInfo.country] || []).find(o => o.operator === wanted);
+    const chosen = alt || (op && op.gateway ? op : null);
+    if (!chosen) return { success: false, error: `Opérateur ${wanted} indisponible pour ${countryInfo.name}`, code: 'OPERATOR_UNAVAILABLE', ...base };
+    return { success: true, ...base, operator: chosen.operator, brand: chosen.brand, gateway: chosen.gateway, overridden: true };
+  }
+
+  const operatorInfo = detectOperator(countryInfo.national, countryInfo.country);
   if (!operatorInfo) {
+    return { success: false, error: `Opérateur non reconnu pour ce numéro ${countryInfo.name}`, code: 'OPERATOR_UNKNOWN', ...base };
+  }
+  if (!operatorInfo.gateway) {
     return {
-      success: false,
-      error: `Opérateur non supporté pour ${phone}`,
-      countryInfo,
+      success: false, code: 'OPERATOR_NO_WALLET', ...base,
+      operator: operatorInfo.operator, brand: operatorInfo.brand,
+      error: `${operatorInfo.brand} n'a pas de service Mobile Money branché${alternatives.length ? ` — alternatives : ${alternatives.map(a => a.brand).join(', ')}` : ''}`,
     };
   }
-
-  return {
-    success:  true,
-    phone:    normalized,
-    country:  countryInfo.country,
-    countryName: countryInfo.name,
-    currency: countryInfo.currency,
-    region:   countryInfo.region,
-    operator: operatorInfo.operator,
-    brand:    operatorInfo.brand,
-    gateway:  operatorInfo.gateway,
-  };
+  return { success: true, ...base, operator: operatorInfo.operator, brand: operatorInfo.brand, gateway: operatorInfo.gateway, verified: operatorInfo.verified };
 };
 
 /**
- * Détecter le réseau et l'acquéreur à partir d'un BIN/IIN carte.
- *
- * @param {string} bin  6 à 8 premiers chiffres du PAN (ou PAN masqué)
- * @returns {CardDetectionResult}
+ * Détecte le réseau carte depuis un BIN (6 à 8 chiffres).
+ * Ne jamais passer un PAN complet : seuls les 8 premiers chiffres sont conservés.
  */
 const detectFromCard = (bin) => {
-  if (!bin) return { success: false, error: 'BIN carte requis' };
+  if (!bin) return { success: false, error: 'BIN carte requis', code: 'BIN_REQUIRED' };
+  const cleanBin = String(bin).replace(/\D/g, '').slice(0, 8);
+  if (cleanBin.length < 6) return { success: false, error: 'BIN trop court (6 chiffres minimum)', code: 'BIN_INVALID' };
 
-  const cleanBin = bin.replace(/\D/g, '').slice(0, 8);
-
-  // Chercher du plus précis (plus long préfixe) au moins précis
-  const sorted = [...CARD_NETWORKS].sort((a, b) => b.prefix.length - a.prefix.length);
-
-  for (const entry of sorted) {
-    if (cleanBin.startsWith(entry.prefix)) {
-      return {
-        success:  true,
-        network:  entry.network,
-        name:     entry.name,
-        acquirer: entry.acquirer,
-        bin:      cleanBin,
-      };
-    }
+  const six = cleanBin.slice(0, 6);
+  // 1) plages
+  for (const e of CARD_NETWORKS) {
+    if (e.range && six >= e.range[0] && six <= e.range[1]) return { success: true, network: e.network, name: e.name, acquirer: e.acquirer, bin: cleanBin, verified: e.verified };
   }
-
-  return { success: false, error: `Réseau carte non reconnu pour BIN ${cleanBin}` };
+  // 2) préfixes, du plus long au plus court
+  const byLen = CARD_NETWORKS.filter(e => e.prefix).sort((a, b) => b.prefix.length - a.prefix.length);
+  for (const e of byLen) {
+    if (cleanBin.startsWith(e.prefix)) return { success: true, network: e.network, name: e.name, acquirer: e.acquirer, bin: cleanBin, verified: e.verified };
+  }
+  return { success: false, error: 'Réseau carte non reconnu', code: 'NETWORK_UNKNOWN' };
 };
 
-/**
- * Détecter depuis un AID NFC (Application Identifier EMV).
- * Utilisé quand le SDK NFC retourne l'AID avant le BIN.
- */
+/** Détecte depuis un AID EMV (préfixe le plus long d'abord). */
 const detectFromAid = (aid) => {
-  const AID_MAP = {
-    'A0000000031010': { network: 'VISA',        acquirer: 'cybersource' },
-    'A0000000032010': { network: 'VISA',        acquirer: 'cybersource' },
-    'A0000000033010': { network: 'VISA',        acquirer: 'cybersource' },
-    'A0000000038010': { network: 'VISA',        acquirer: 'cybersource' },
-    'A0000000041010': { network: 'MASTERCARD',  acquirer: 'mpgs' },
-    'A0000000043060': { network: 'MAESTRO',     acquirer: 'mpgs' },
-    'A0000000050001': { network: 'MAESTRO',     acquirer: 'mpgs' },
-    'A000000333010101': { network: 'GIMAC',     acquirer: 'gimac_gateway' },
-    'A000000333010102': { network: 'GIMAC',     acquirer: 'gimac_gateway' },
-    'A000000065101001': { network: 'VERVE',     acquirer: 'interswitch' },
-    'A000000626': { network: 'UNIONPAY', acquirer: 'cybersource' },
-  };
-
-  const upper = aid?.toUpperCase() || '';
-  for (const [aidPrefix, info] of Object.entries(AID_MAP)) {
-    if (upper.startsWith(aidPrefix.toUpperCase())) {
-      return { success: true, ...info, aid };
-    }
-  }
-  return { success: false, error: `AID non reconnu : ${aid}` };
+  const upper = String(aid || '').replace(/\s/g, '').toUpperCase();
+  if (!/^A[0-9A-F]{9,31}$/.test(upper)) return { success: false, error: 'AID invalide', code: 'AID_INVALID' };
+  const sorted = [...AID_MAP].sort((a, b) => b.aid.length - a.aid.length);
+  const hit = sorted.find(e => upper.startsWith(e.aid));
+  if (!hit) return { success: false, error: 'AID non reconnu', code: 'AID_UNKNOWN' };
+  return { success: true, network: hit.network, acquirer: hit.acquirer, aid: upper };
 };
 
-/**
- * Obtenir la meilleure route pour une transaction.
- * Combine détection + règles métier (frais, disponibilité, priorité).
- */
-const getBestRoute = ({ phone, bin, aid, amount, currency, country }) => {
-  // Mobile Money
-  if (phone && !bin) {
-    const detection = detectFromPhone(phone);
-    if (!detection.success) return detection;
-    return {
-      ...detection,
-      paymentMethod: 'mobile_money',
-      routeType:     'direct',
-    };
+/** Combine détection + règles de routage. */
+const getBestRoute = ({ phone, bin, aid, defaultCountry, operatorOverride } = {}) => {
+  if (phone && !bin && !aid) {
+    const d = detectFromPhone(phone, { defaultCountry, operatorOverride });
+    return d.success ? { ...d, paymentMethod: 'mobile_money', routeType: 'direct' } : d;
   }
-
-  // Carte NFC via AID
   if (aid) {
-    const cardInfo = detectFromAid(aid);
-    if (!cardInfo.success) return cardInfo;
-    return {
-      ...cardInfo,
-      paymentMethod: 'card_nfc',
-      routeType:     'emv',
-    };
+    const c = detectFromAid(aid);
+    return c.success ? { ...c, paymentMethod: 'card_nfc', routeType: 'emv' } : c;
   }
-
-  // Carte via BIN
   if (bin) {
-    const cardInfo = detectFromCard(bin);
-    if (!cardInfo.success) return cardInfo;
-    return {
-      ...cardInfo,
-      paymentMethod: 'card',
-      routeType:     'emv',
-    };
+    const c = detectFromCard(bin);
+    return c.success ? { ...c, paymentMethod: 'card', routeType: 'emv' } : c;
   }
-
-  return { success: false, error: 'Paramètres insuffisants pour la détection de route' };
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────
-
-const normalizePhone = (phone) => {
-  let clean = phone.replace(/[\s\-().]/g, '');
-  // Convertir les formats locaux en E.164
-  if (clean.startsWith('00')) clean = '+' + clean.slice(2);
-  if (clean.startsWith('0') && clean.length <= 10) {
-    // Numéro local sans préfixe — impossible à normaliser sans contexte pays
-    return null;
-  }
-  if (!clean.startsWith('+')) clean = '+' + clean;
-  return clean;
-};
-
-const detectCountry = (normalizedPhone) => {
-  // Chercher le préfixe le plus long en premier
-  const prefixes = Object.keys(COUNTRY_PREFIXES).sort((a, b) => b.length - a.length);
-  for (const prefix of prefixes) {
-    if (normalizedPhone.startsWith(prefix)) {
-      return COUNTRY_PREFIXES[prefix];
-    }
-  }
-  return null;
-};
-
-const detectOperator = (normalizedPhone, countryCode) => {
-  const operators = MOBILE_MONEY_OPERATORS[countryCode];
-  if (!operators) return null;
-
-  // Retirer le + pour le matching
-  const digits = normalizedPhone.replace('+', '');
-
-  for (const entry of operators) {
-    if (entry.pattern.test(digits)) {
-      return entry;
-    }
-  }
-  return null;
+  return { success: false, error: 'Paramètres insuffisants pour la détection de route', code: 'INSUFFICIENT_PARAMS' };
 };
 
 module.exports = {
-  detectFromPhone,
-  detectFromCard,
-  detectFromAid,
-  getBestRoute,
-  normalizePhone,
-  COUNTRY_PREFIXES,
-  MOBILE_MONEY_OPERATORS,
-  CARD_NETWORKS,
+  detectFromPhone, detectFromCard, detectFromAid, getBestRoute, normalizePhone,
+  COUNTRIES, COUNTRY_PREFIXES, MOBILE_MONEY_OPERATORS, WALLET_ALTERNATIVES, CARD_NETWORKS, AID_MAP,
 };

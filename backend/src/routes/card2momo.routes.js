@@ -11,7 +11,6 @@
 'use strict';
 
 const express  = require('express');
-const jwt      = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const router   = express.Router();
 const psp      = require('../services/psp/psp.router');
@@ -20,15 +19,11 @@ const { query, withTransaction } = require('../config/database');
 const webhooks = require('./webhook-handlers');
 
 // ─── Auth middleware ──────────────────────────────────────────────
-const cardAuth = async (req, res, next) => {
-  try {
-    const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requis' });
-    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    req.actor = decoded;
-    next();
-  } catch { res.status(401).json({ error: 'Token invalide' }); }
-};
+// WAVE-2 : auth unique (audit §1.1). L'ancien cardAuth acceptait n'importe quel
+// JWT signe ; seuls les porteurs (type cardholder) peuvent lancer un card2momo
+// (les handlers lisent req.actor.sub / req.actor.cardId = porteur).
+const { cardholderAuth, aliasUser } = require('../middleware/auth');
+const cardAuth = [cardholderAuth, aliasUser('actor')];
 
 // ─── Helper : enregistrer transfert en DB ────────────────────────
 const logTransfer = async (client, { txnId, cardId, cardholderId, type, amount, fee, feeBearer, currency, status, description, metadata }) => {

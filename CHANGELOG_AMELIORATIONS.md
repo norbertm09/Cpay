@@ -1,5 +1,12 @@
 # Changelog - ameliorations integrees
 
+## 2.6.0-wave-2 (2026-10-15) — refonte produit « C-Pay par Calculus Plus »
+Voir `docs/WAVE-2.md` : webhooks Mobile Money reels (Orange, Wave, Africell, Express Union, Free Money, Moov),
+moteur de detection reecrit, secrets providers chiffres au repos, authentification unifiee (JWT 15 min,
+refresh opaque avec rotation, 2FA TOTP au login, mot de passe temporaire), vitrine c-pay.global interactive
+(demo de detection, simulateur, formulaires, assistant Claude avec creation de leads et de reclamations),
+CRM admin, passe de marque sur les 7 portails, migration 008, 446 tests.
+
 ## 2.6.0-hotfix-v1 (2026-10-15) — vague 1 de l'audit de production
 Voir `docs/HOTFIX-V1.md` : webhooks fail-closed avec re-verification operateur, IDOR cartes corrigees,
 endpoints creant de la valeur sans mouvement desactives (410), retrait carte refuse, statuts pending reels,

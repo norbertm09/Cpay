@@ -1,310 +1,477 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>C-Pay — Paiements Digitaux CEMAC</title>
-  <meta name="description" content="C-Pay by Calculus Plus — Plateforme de paiement digital pour l'Afrique Centrale." />
-  <link rel="canonical" href="https://c-pay.global/" />
-  <link rel="icon" href="/logo-calculus.svg" type="image/svg+xml" />
-
-  <!-- Open Graph : un lien C-Pay partage sur WhatsApp, canal n°1 dans la
-       region, s'affichait sans titre ni image. -->
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="C-Pay" />
-  <meta property="og:url" content="https://c-pay.global/" />
-  <meta property="og:title" content="C-Pay — Le paiement digital en Afrique Centrale" />
-  <meta property="og:description" content="Mobile Money, carte virtuelle et Pay Links pour marchands et porteurs de carte. Par Calculus Plus SAS." />
-  <meta property="og:image" content="https://c-pay.global/logo-calculus.png" />
-  <meta property="og:locale" content="fr_FR" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="C-Pay — Le paiement digital en Afrique Centrale" />
-  <meta name="twitter:description" content="Mobile Money, carte virtuelle et Pay Links pour marchands et porteurs de carte." />
-  <meta name="twitter:image" content="https://c-pay.global/logo-calculus.png" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --primary:  #12b6c7;
-      --blue:     #1d4f92;
-      --success:  #00c896;
-      --text:     #1e2d3d;
-      --muted:    #5a6677;
-      --bg:       #f0f4f8;
-      --card:     #ffffff;
-      --border:   #dce3ed;
-      --font: 'Century Gothic','CenturyGothic','AppleGothic','Gill Sans MT',Tahoma,Arial,sans-serif;
-    }
-    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
-
-    nav {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(255,255,255,0.95); backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0 40px; height: 64px;
-    }
-    .nav-logo { display: flex; align-items: center; text-decoration: none; }
-    .nav-logo img { height: 44px; width: auto; max-width: 180px; object-fit: contain; }
-    .nav-actions { display: flex; gap: 12px; align-items: center; }
-    .nav-btn {
-      padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 700;
-      cursor: pointer; text-decoration: none; font-family: var(--font); transition: all .2s;
-    }
-    .nav-btn-outline { border: 2px solid var(--primary); color: var(--primary); background: transparent; }
-    .nav-btn-outline:hover { background: var(--primary); color: #fff; }
-    .nav-btn-solid { background: var(--primary); color: #fff; border: 2px solid var(--primary); }
-    .nav-btn-solid:hover { background: #0fa3b3; }
-
-    .hero {
-      min-height: 100vh; display: flex; align-items: center; justify-content: center;
-      background: linear-gradient(135deg, #0a1628 0%, #1d4f92 50%, #12b6c7 100%);
-      position: relative; overflow: hidden; padding-top: 64px;
-    }
-    .hero::before {
-      content: ''; position: absolute; inset: 0;
-      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-    }
-    .hero::after {
-      content: ''; position: absolute;
-      width: 600px; height: 600px; border-radius: 50%;
-      background: radial-gradient(circle, rgba(18,182,199,0.15) 0%, transparent 70%);
-      right: -100px; bottom: -100px; pointer-events: none;
-    }
-    .hero-orb {
-      position: absolute; width: 400px; height: 400px; border-radius: 50%;
-      background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
-      left: -80px; top: 100px; pointer-events: none;
-    }
-    .hero-content { position: relative; z-index: 1; text-align: center; padding: 40px 20px; max-width: 760px; }
-    .hero-title { font-size: clamp(32px, 6vw, 64px); font-weight: 800; color: #fff; line-height: 1.1; margin-bottom: 20px; letter-spacing: -1px; }
-    .hero-title span { color: var(--primary); }
-    .hero-subtitle { font-size: clamp(15px, 2.5vw, 20px); color: rgba(255,255,255,0.75); margin-bottom: 48px; line-height: 1.6; max-width: 540px; margin-left: auto; margin-right: auto; }
-
-    .cta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 560px; margin: 0 auto 48px; }
-    .cta-card {
-      background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.15);
-      border-radius: 20px; padding: 28px 20px; text-decoration: none; color: #fff;
-      transition: all .3s; cursor: pointer; display: block; backdrop-filter: blur(8px);
-    }
-    .cta-card:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.4); transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
-    .cta-card.primary-cta { background: var(--primary); border-color: var(--primary); }
-    .cta-card.primary-cta:hover { background: #0fa3b3; border-color: #0fa3b3; }
-    .cta-icon { font-size: 36px; margin-bottom: 12px; }
-    .cta-title { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
-    .cta-desc { font-size: 12px; opacity: 0.8; line-height: 1.5; }
-    .cta-arrow { display: inline-block; margin-top: 12px; font-size: 18px; }
-
-    .hero-stats { display: flex; gap: 32px; justify-content: center; flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 32px; }
-    .hero-stat { text-align: center; }
-    .hero-stat-value { font-size: 28px; font-weight: 800; color: var(--primary); }
-    .hero-stat-label { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
-
-    .cemac-strip { background: var(--card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 24px 40px; }
-    .cemac-inner { max-width: 900px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-    .cemac-label { font-size: 13px; color: var(--muted); font-weight: 600; }
-    .cemac-flags { display: flex; gap: 16px; flex-wrap: wrap; }
-    .cemac-flag { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
-
-    .features { padding: 100px 40px; max-width: 1200px; margin: 0 auto; }
-    .section-tag { font-size: 12px; color: var(--primary); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
-    .section-title { font-size: clamp(24px, 4vw, 40px); font-weight: 800; color: var(--text); margin-bottom: 48px; }
-    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
-    .feature-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; transition: all .2s; }
-    .feature-card:hover { border-color: var(--primary); box-shadow: 0 8px 24px rgba(18,182,199,0.12); transform: translateY(-2px); }
-    .feature-icon { font-size: 32px; margin-bottom: 16px; }
-    .feature-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
-    .feature-desc { font-size: 13px; color: var(--muted); line-height: 1.6; }
-
-    .portals { background: linear-gradient(135deg, var(--blue), #0a2d5e); padding: 100px 40px; }
-    .portals-inner { max-width: 900px; margin: 0 auto; text-align: center; }
-    .portals-title { font-size: clamp(26px, 4vw, 44px); font-weight: 800; color: #fff; margin-bottom: 16px; }
-    .portals-sub { font-size: 16px; color: rgba(255,255,255,0.7); margin-bottom: 56px; }
-    .portals-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-    .portal-card { background: rgba(255,255,255,0.07); border: 2px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 36px 28px; text-decoration: none; color: #fff; transition: all .3s; text-align: left; }
-    .portal-card:hover { background: rgba(255,255,255,0.14); border-color: var(--primary); transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,0.3); }
-    .portal-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--primary); background: rgba(18,182,199,0.15); border-radius: 20px; padding: 4px 12px; margin-bottom: 16px; }
-    .portal-icon { font-size: 48px; margin-bottom: 16px; }
-    .portal-name { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
-    .portal-desc { font-size: 13px; opacity: 0.75; line-height: 1.6; margin-bottom: 20px; }
-    .portal-features { list-style: none; margin-bottom: 24px; }
-    .portal-features li { font-size: 12px; opacity: 0.8; padding: 4px 0; }
-    .portal-features li::before { content: '✓  '; color: var(--primary); font-weight: 700; }
-    .portal-btn { display: inline-flex; align-items: center; gap: 8px; background: var(--primary); color: #fff; border: none; border-radius: 10px; padding: 12px 24px; font-size: 14px; font-weight: 700; font-family: var(--font); cursor: pointer; text-decoration: none; transition: all .2s; }
-    .portal-btn:hover { background: #0fa3b3; }
-
-    footer { background: #0a1628; padding: 40px; text-align: center; }
-    footer .logo-text { font-size: 20px; font-weight: 800; color: #fff; letter-spacing: 1px; margin-bottom: 8px; }
-    footer .logo-text span { color: var(--primary); }
-    footer .tagline { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 24px; letter-spacing: 2px; text-transform: uppercase; }
-    footer .links { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; margin-bottom: 24px; }
-    footer .links a { color: rgba(255,255,255,0.5); font-size: 12px; text-decoration: none; }
-    footer .links a:hover { color: var(--primary); }
-    footer .copy { font-size: 11px; color: rgba(255,255,255,0.3); }
-
-    @media (max-width: 768px) {
-      nav { padding: 0 20px; }
-      .cta-grid { grid-template-columns: 1fr; max-width: 320px; }
-      .features-grid { grid-template-columns: 1fr; }
-      .portals-grid { grid-template-columns: 1fr; }
-      .features { padding: 60px 20px; }
-      .portals { padding: 60px 20px; }
-    }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>C-Pay — Encaissement Mobile Money, QR et lien de paiement</title>
+  <meta name="description" content="C-Pay, par Calculus Plus SAS : encaissez par Mobile Money, QR code et lien de paiement au Sénégal, en Côte d'Ivoire, au Cameroun, au Congo et en RDC. Le marchand ne choisit rien, C-Pay détecte l'opérateur.">
+  <link rel="canonical" href="https://c-pay.global/">
+  <link rel="icon" href="/logo-calculus.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <meta name="cpay-api" content="https://api.c-pay.global">
+  <meta name="theme-color" content="#1d4f92">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="C-Pay">
+  <meta property="og:url" content="https://c-pay.global/">
+  <meta property="og:title" content="C-Pay — Encaissement Mobile Money, QR et lien de paiement">
+  <meta property="og:description" content="Encaissez par Mobile Money, QR et lien de paiement dans 5 pays. Le marchand ne choisit rien : C-Pay détecte l'opérateur. Un produit de Calculus Plus SAS.">
+  <meta property="og:image" content="https://c-pay.global/logo-calculus.png">
+  <meta property="og:locale" content="fr_FR">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="C-Pay — Encaissement Mobile Money, QR et lien de paiement">
+  <meta name="twitter:description" content="Encaissez par Mobile Money, QR et lien de paiement dans 5 pays. Le marchand ne choisit rien : C-Pay détecte l'opérateur.">
+  <meta name="twitter:image" content="https://c-pay.global/logo-calculus.png">
 </head>
 <body>
+  <a class="skip-link" href="#main">Aller au contenu</a>
 
-  <nav>
-    <a href="/" class="nav-logo">
-      <img src="/logo-calculus.svg" alt="C-Pay" />
-    </a>
-    <div class="nav-actions">
-      <a href="/developers.html" class="nav-btn nav-btn-outline" style="background:#00c896;color:#fff;border-color:#00c896">🚀 Espace Développeurs</a>
-      <a href="https://merchant.c-pay.global" class="nav-btn nav-btn-outline">Espace Marchand</a>
-      <a href="https://app.c-pay.global" class="nav-btn nav-btn-solid">Espace Cardholder</a>
-    </div>
-  </nav>
-
-  <section class="hero">
-    <div class="hero-orb"></div>
-    <div class="hero-content">
-      <h1 class="hero-title">
-        Le paiement digital<br/>
-        <span>sans frontières</span><br/>
-        en Afrique Centrale
-      </h1>
-      <p class="hero-subtitle">
-        C-Pay connecte les marchands et les porteurs de carte à travers le réseau GIMAC.
-        Mobile Money, carte virtuelle, Pay Links — tout en un.
-      </p>
-      <div class="cta-grid" style="grid-template-columns:1fr 1fr 1fr;max-width:840px">
-        <a href="https://merchant.c-pay.global" class="cta-card primary-cta">
-          <div class="cta-icon">🏪</div>
-          <div class="cta-title">Espace Marchand</div>
-          <div class="cta-desc">Acceptez les paiements Mobile Money et carte. Créez des Pay Links. Gérez vos règlements.</div>
-          <div class="cta-arrow">→</div>
-        </a>
-        <a href="https://app.c-pay.global" class="cta-card">
-          <div class="cta-icon">💳</div>
-          <div class="cta-title">Espace Cardholder</div>
-          <div class="cta-desc">Accédez à votre carte virtuelle C-Pay. Rechargez, payez et transférez partout en CEMAC.</div>
-          <div class="cta-arrow">→</div>
-        </a>
-        <a href="/developers.html#register" class="cta-card" style="border-color:rgba(0,200,150,0.5)">
-          <div class="cta-icon">🚀</div>
-          <div class="cta-title">Compte Sandbox</div>
-          <div class="cta-desc">Intégrez l'API CPlus dans votre application. Compte sandbox gratuit et immédiat.</div>
-          <div class="cta-arrow" style="color:#00c896">→</div>
-        </a>
-      </div>
-      <div class="hero-stats">
-        <div class="hero-stat"><div class="hero-stat-value">Congo</div><div class="hero-stat-label">En production</div></div>
-        <div class="hero-stat"><div class="hero-stat-value">CEMAC</div><div class="hero-stat-label">Couverture cible</div></div>
-        <div class="hero-stat"><div class="hero-stat-value">Mobile Money</div><div class="hero-stat-label">MTN · Airtel</div></div>
-        <div class="hero-stat"><div class="hero-stat-value">AES-256</div><div class="hero-stat-label">Tokenisation GCM</div></div>
+  <header class="site-header" id="site-header">
+    <div class="container">
+      <a class="brand" href="/" aria-label="C-Pay, accueil">
+        <img src="/logo-calculus.svg" alt="Calculus Plus" width="193" height="40">
+        <span class="brand-product"><strong>C-Pay</strong><small>par Calculus Plus</small></span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Ouvrir le menu"><span></span></button>
+      <nav class="site-nav" id="site-nav" aria-label="Navigation principale">
+        <a href="#demo">Démo</a>
+        <a href="#produits">Produits</a>
+        <a href="#pays">Pays</a>
+        <a href="#tarifs">Tarifs</a>
+        <a href="#securite">Sécurité</a>
+        <a href="#faq">FAQ</a>
+        <a href="/developers.html">Développeurs</a>
+        <a href="#contact">Contact</a>
+      </nav>
+      <div class="header-cta">
+        <a class="btn btn--outline btn--sm" href="https://merchant.c-pay.global">Se connecter</a>
+        <a class="btn btn--primary btn--sm" href="https://merchant.c-pay.global/register">Ouvrir un compte marchand</a>
       </div>
     </div>
-  </section>
+  </header>
 
-  <div class="cemac-strip">
-    <div class="cemac-inner">
-      <span class="cemac-label">Zone de couverture :</span>
-      <div class="cemac-flags">
-        <span class="cemac-flag">🇨🇲 Cameroun</span>
-        <span class="cemac-flag">🇨🇬 Congo</span>
-        <span class="cemac-flag">🇬🇦 Gabon</span>
-        <span class="cemac-flag">🇨🇫 RCA</span>
-        <span class="cemac-flag">🇹🇩 Tchad</span>
-        <span class="cemac-flag">🇬🇶 Guinée Éq.</span>
-      </div>
-    </div>
-  </div>
-
-  <section class="features">
-    <div class="section-tag">Fonctionnalités</div>
-    <div class="section-title">Tout ce dont vous avez besoin</div>
-    <div class="features-grid">
-      <div class="feature-card"><div class="feature-icon">📱</div><div class="feature-title">Mobile Money</div><div class="feature-desc">MTN MoMo et Airtel Money en production au Congo-Brazzaville. Orange Money et Vodacom M-Pesa (RDC) en cours d'intégration. Collecte et décaissement en temps réel.</div></div>
-      <div class="feature-card"><div class="feature-icon">💳</div><div class="feature-title">Carte Virtuelle C-Pay</div><div class="feature-desc">Émission de cartes virtuelles GIMAC via GTP. Schéma 1 (débit direct) et Schéma 2 (token CPlus).</div></div>
-      <div class="feature-card"><div class="feature-icon">🔗</div><div class="feature-title">Pay Links</div><div class="feature-desc">Créez un lien de paiement en secondes. Partagez par SMS ou WhatsApp. Suivi en temps réel.</div></div>
-      <div class="feature-card"><div class="feature-icon">📲</div><div class="feature-title">Tap to Phone NFC</div><div class="feature-desc">Transformez votre smartphone Android en terminal de paiement. Aucun matériel supplémentaire.</div></div>
-      <div class="feature-card"><div class="feature-icon">🔒</div><div class="feature-title">Sécurité des données</div><div class="feature-desc">Architecture alignée sur les exigences PCI-DSS v4.0 : tokenisation AES-256-GCM, journal d'audit complet, session 30 min, détection d'anomalies en temps réel.</div></div>
-      <div class="feature-card"><div class="feature-icon">🌍</div><div class="feature-title">Réseau GIMAC</div><div class="feature-desc">Interopérabilité complète sur le réseau interbancaire monétique d'Afrique Centrale.</div></div>
-    </div>
-  </section>
-
-  <section class="portals">
-    <div class="portals-inner">
-      <div class="section-tag" style="color:rgba(255,255,255,0.5)">Accès aux portails</div>
-      <div class="portals-title">Choisissez votre espace</div>
-      <div class="portals-sub">Deux espaces dédiés pour deux profils différents</div>
-      <div class="portals-grid">
-        <div class="portal-card">
-          <div class="portal-tag">Marchand</div>
-          <div class="portal-icon">🏪</div>
-          <div class="portal-name">Espace Marchand</div>
-          <div class="portal-desc">Pour les entreprises et commerçants qui souhaitent accepter des paiements digitaux.</div>
-          <ul class="portal-features">
-            <li>Tableau de bord et analytics</li>
-            <li>Pay Links QR + SMS + WhatsApp</li>
-            <li>Tap to Phone NFC</li>
-            <li>Règlements J+1</li>
-            <li>Application mobile Android</li>
-          </ul>
-          <a href="https://merchant.c-pay.global" class="portal-btn">Accéder →</a>
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container">
+        <div>
+          <h1 id="hero-title">Encaissez par Mobile Money, QR et lien de paiement dans <em>5 pays</em>.</h1>
+          <p>Le marchand ne choisit rien : C-Pay détecte le pays, la devise et l'opérateur à partir du numéro de téléphone du client, puis route le paiement.</p>
+          <div class="hero-actions">
+            <a class="btn btn--light" href="https://merchant.c-pay.global/register">Ouvrir un compte marchand</a>
+            <a class="btn btn--ghost-light" href="#demo">Tester la détection</a>
+          </div>
+          <p class="hero-note">Déjà client ? <a href="https://merchant.c-pay.global">Se connecter au portail marchand</a>.</p>
         </div>
-        <div class="portal-card">
-          <div class="portal-tag">Cardholder</div>
-          <div class="portal-icon">💳</div>
-          <div class="portal-name">Espace Cardholder</div>
-          <div class="portal-desc">Pour les porteurs de carte virtuelle C-Pay qui souhaitent gérer leurs finances.</div>
-          <ul class="portal-features">
-            <li>Carte virtuelle GIMAC</li>
-            <li>Top-up Mobile Money</li>
-            <li>Paiement tokenisé sécurisé</li>
-            <li>Transfert vers Mobile Money</li>
-            <li>Historique et notifications</li>
-          </ul>
-          <a href="https://app.c-pay.global" class="portal-btn">Accéder →</a>
+        <div class="hero-card" aria-label="Exemple de détection">
+          <h2>Exemple : ce que C-Pay déduit d'un numéro</h2>
+          <div class="ex-phone">+237 6 70 12 34 56</div>
+          <div class="ex-row"><span>Pays</span><span>Cameroun</span></div>
+          <div class="ex-row"><span>Devise</span><span>XAF</span></div>
+          <div class="ex-row"><span>Opérateur</span><span>MTN Mobile Money</span></div>
+          <div class="ex-row"><span>Alternative au choix du client</span><span>Express Union</span></div>
+          <p class="ex-foot">Le marchand saisit un montant et un numéro. Rien d'autre.</p>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-
-  <!-- Section Developers -->
-  <section style="background:linear-gradient(135deg,#1d4f92,#12b6c7);padding:80px 40px;text-align:center">
-    <div style="max-width:700px;margin:0 auto">
-      <div style="font-size:48px;margin-bottom:16px">🔌</div>
-      <h2 style="color:#fff;font-size:32px;font-weight:800;margin-bottom:12px;font-family:var(--font)">Intégrez CPlus dans votre application</h2>
-      <p style="color:rgba(255,255,255,0.85);font-size:16px;margin-bottom:32px;line-height:1.6">
-        API REST complète pour intégrer les paiements Mobile Money et carte bancaire dans vos applications web et mobiles.
-      </p>
-      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
-        <a href="/developers.html" style="background:#fff;color:#1d4f92;border-radius:10px;padding:14px 28px;font-weight:700;text-decoration:none;font-size:15px;font-family:var(--font)">
-          📖 Documentation
-        </a>
-        <a href="https://api.c-pay.global/api/v1/docs/" style="background:rgba(255,255,255,0.15);color:#fff;border:2px solid rgba(255,255,255,0.5);border-radius:10px;padding:14px 28px;font-weight:700;text-decoration:none;font-size:15px;font-family:var(--font)">
-          ⚡ API Reference (Swagger)
-        </a>
+    <section class="section" id="demo" aria-labelledby="demo-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Démo interactive</span>
+          <h2 id="demo-title">Testez la détection</h2>
+          <p class="lead">Saisissez un numéro au format international. La page interroge le moteur de détection C-Pay et affiche le pays, la devise et l'opérateur reconnus. Aucune transaction n'est créée.</p>
+        </div>
+        <div class="demo">
+          <div>
+            <form class="demo-form" id="detect-form" novalidate>
+              <label class="visually-hidden" for="detect-phone">Numéro de téléphone avec indicatif</label>
+              <input type="tel" id="detect-phone" name="phone" inputmode="tel" autocomplete="off" placeholder="+221 77 123 45 67" required>
+              <button class="btn btn--primary" type="submit" id="detect-btn">Détecter</button>
+            </form>
+            <div class="chips" aria-label="Exemples de numéros">
+              <button type="button" class="chip" data-phone="+221771234567">+221 77… Sénégal</button>
+              <button type="button" class="chip" data-phone="+2250701234567">+225 07… Côte d'Ivoire</button>
+              <button type="button" class="chip" data-phone="+237670123456">+237 67… Cameroun</button>
+              <button type="button" class="chip" data-phone="+242061234567">+242 06… Congo</button>
+              <button type="button" class="chip" data-phone="+243811234567">+243 81… RDC</button>
+            </div>
+            <p class="note mt-4">Service public limité en débit (30 requêtes par minute et par adresse). Si l'API n'est pas joignable, la page utilise une table locale indicative.</p>
+          </div>
+          <div class="result" id="detect-result" aria-live="polite">
+            <p class="result-empty">Le résultat s'affichera ici.</p>
+          </div>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <footer style="background:#1d4f92;color:rgba(255,255,255,0.7);text-align:center;padding:28px 20px;font-size:12px;margin-top:0">
-    <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:4px">C-Pay</div>
-    <div style="margin-bottom:14px">Innover · Transformer · Réussir</div>
-    <p style="margin-bottom:10px">
-      <a href="https://merchant.c-pay.global" style="color:rgba(255,255,255,0.85);margin:0 8px">Portail Marchand</a> |
-      <a href="https://app.c-pay.global" style="color:rgba(255,255,255,0.85);margin:0 8px">Portail Cardholder</a> |
-      <a href="/developers.html" style="color:rgba(255,255,255,0.85);margin:0 8px">Développeurs</a>
-    </p>
-    <p style="margin-bottom:10px">
-      <a href="/legal/cgu.html" style="color:rgba(255,255,255,0.7);margin:0 8px">CGU</a> |
-      <a href="/legal/confidentialite.html" style="color:rgba(255,255,255,0.7);margin:0 8px">Confidentialité</a> |
-      <a href="/legal/mentions-legales.html" style="color:rgba(255,255,255,0.7);margin:0 8px">Mentions légales</a> |
-      <a href="mailto:support@c-pay.global" style="color:rgba(255,255,255,0.7);margin:0 8px">support@c-pay.global</a>
-    </p>
-    <p>© 2026 Calculus Plus SAS — Tous droits réservés</p>
+    <section class="section section--alt" id="simulateur" aria-labelledby="sim-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Simulateur</span>
+          <h2 id="sim-title">Estimez vos frais</h2>
+          <p class="lead">Commission C-Pay par défaut selon la méthode d'encaissement et le niveau de vérification de votre compte (KYB).</p>
+        </div>
+        <div class="sim">
+          <form id="sim-form" novalidate>
+            <div class="form-row">
+              <div class="field">
+                <label for="sim-amount">Montant encaissé</label>
+                <input type="number" id="sim-amount" min="1" step="1" value="25000" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label for="sim-currency">Devise</label>
+                <select id="sim-currency">
+                  <option value="XOF">XOF (Sénégal, Côte d'Ivoire)</option>
+                  <option value="XAF" selected>XAF (Cameroun, Congo)</option>
+                  <option value="CDF">CDF (RDC)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="sim-method">Méthode</label>
+                <select id="sim-method">
+                  <option value="mobile_money" selected>Mobile Money (incl. QR et lien)</option>
+                  <option value="card">Carte (Tap-to-Phone, bientôt)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="sim-level">Niveau de compte</label>
+                <select id="sim-level">
+                  <option value="0" selected>Niveau 0 — KYB en cours</option>
+                  <option value="1">Niveau 1 — KYB validé</option>
+                  <option value="2">Niveau 2 — Contrat négocié</option>
+                </select>
+              </div>
+            </div>
+          </form>
+          <div class="sim-out" aria-live="polite">
+            <p class="note sim-label">Vous recevez (net)</p>
+            <div class="sim-big" id="sim-net">24 625 XAF</div>
+            <div class="sim-row mt-4"><span>Montant</span><strong id="sim-gross">25 000 XAF</strong></div>
+            <div class="sim-row"><span>Taux appliqué</span><strong id="sim-rate">1,5 %</strong></div>
+            <div class="sim-row"><span>Commission C-Pay</span><strong id="sim-fee">375 XAF</strong></div>
+            <p class="note mt-4 mb-0">Taux indicatifs : il s'agit des taux par défaut de la plateforme, hors éventuels frais facturés par l'opérateur Mobile Money au payeur. Le taux contractuel figure dans votre convention marchand.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="fonctionnement" aria-labelledby="how-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Comment ça marche</span>
+          <h2 id="how-title">Trois étapes, aucun choix technique</h2>
+        </div>
+        <ol class="steps">
+          <li class="step">
+            <h3>Vous saisissez le montant</h3>
+            <p>Et le numéro du client — ou vous affichez un QR code, ou vous envoyez un lien de paiement par SMS ou WhatsApp.</p>
+          </li>
+          <li class="step">
+            <h3>C-Pay détecte et route</h3>
+            <p>Pays, devise et opérateur sont déduits du numéro. La demande de paiement part vers le bon réseau Mobile Money.</p>
+          </li>
+          <li class="step">
+            <h3>Le client confirme, vous êtes réglé</h3>
+            <p>Le client valide sur son téléphone. Vous suivez la transaction dans le portail et les fonds sont reversés en règle générale à J+1 ouvré.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section section--alt" id="produits" aria-labelledby="products-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Produits</span>
+          <h2 id="products-title">Une plateforme, plusieurs façons d'encaisser</h2>
+        </div>
+        <div class="grid grid--3">
+          <article class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
+            <h3>Mobile Money</h3>
+            <p>Encaissement et reversement vers les portefeuilles mobiles des cinq pays couverts. Le client confirme sur son téléphone ; vous êtes notifié en temps réel.</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3M21 14v7h-7"/></svg></div>
+            <h3>QR code et lien de paiement</h3>
+            <p>Générez un QR à afficher en caisse ou un lien à partager par SMS, WhatsApp ou e-mail. Le client paie depuis son téléphone, sans application à installer.</p>
+          </article>
+          <article class="card card--soon">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></div>
+            <h3>Tap-to-Phone <span class="badge badge--soon">Bientôt</span></h3>
+            <p>Acceptation de cartes sans contact directement sur un smartphone Android, via un SDK certifié. Disponible après certification du module ; nous ne l'activons pas avant.</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 21h8"/></svg></div>
+            <h3>Portail marchand et portail administrateur</h3>
+            <p>Transactions, règlements, liens de paiement, clés API, utilisateurs et double authentification. Le portail administrateur sert à l'exploitation par Calculus Plus.</p>
+            <p><a href="https://merchant.c-pay.global">merchant.c-pay.global</a></p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 9l-4 3 4 3M16 9l4 3-4 3M14 4l-4 16"/></svg></div>
+            <h3>API, SDK et WooCommerce</h3>
+            <p>API REST avec clés par marchand et en-tête d'idempotence, SDK Android et extension WooCommerce pour les boutiques en ligne.</p>
+            <p><a href="/developers.html">Espace développeurs</a></p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+            <h3>Règlement</h3>
+            <p>Les encaissements de la journée sont regroupés par marchand et reversés par virement bancaire ou Mobile Money, commission déduite.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="pays" aria-labelledby="countries-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Couverture</span>
+          <h2 id="countries-title">Cinq pays, trois devises</h2>
+          <p class="lead">Les opérateurs ci-dessous sont ceux que le moteur de détection reconnaît. Les opérateurs marqués « au choix du client » (Wave, Express Union) ne se déduisent pas du numéro : le client les sélectionne lui-même sur la page de paiement. L'activation effective de chaque opérateur dépend de nos accords locaux — demandez-nous la couverture exacte pour votre pays.</p>
+        </div>
+        <div class="countries">
+          <table>
+            <caption class="visually-hidden">Pays, indicatifs, devises et opérateurs détectés</caption>
+            <thead><tr><th scope="col">Pays</th><th scope="col">Indicatif</th><th scope="col">Devise</th><th scope="col">Opérateurs</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Sénégal</th><td>+221</td><td>XOF</td><td><div class="ops"><span>Orange Money</span><span>Free Money</span><span class="alt">Wave — au choix du client</span></div></td></tr>
+              <tr><th scope="row">Côte d'Ivoire</th><td>+225</td><td>XOF</td><td><div class="ops"><span>Orange Money</span><span>MTN Mobile Money</span><span>Moov Money</span><span class="alt">Wave — au choix du client</span></div></td></tr>
+              <tr><th scope="row">Cameroun</th><td>+237</td><td>XAF</td><td><div class="ops"><span>MTN Mobile Money</span><span>Orange Money</span><span>Moov Money</span><span class="alt">Express Union — au choix du client</span></div></td></tr>
+              <tr><th scope="row">Congo-Brazzaville</th><td>+242</td><td>XAF</td><td><div class="ops"><span>MTN Mobile Money</span><span>Airtel Money</span><span>Orange Money</span></div></td></tr>
+              <tr><th scope="row">RDC</th><td>+243</td><td>CDF</td><td><div class="ops"><span>Vodacom M-Pesa</span><span>Airtel Money</span><span>Orange Money</span><span>Africell Money</span></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--alt" id="securite" aria-labelledby="security-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Sécurité et conformité</span>
+          <h2 id="security-title">Ce que nous faisons, sans promesse excessive</h2>
+        </div>
+        <ul class="sec-list">
+          <li><strong>Double authentification</strong>Les accès au portail marchand et au portail administrateur peuvent être protégés par un second facteur (code à usage unique).</li>
+          <li><strong>Chiffrement en transit</strong>Toutes les communications passent en TLS 1.2 ou 1.3 avec HSTS. Les secrets d'API ne sont jamais réaffichés après leur création.</li>
+          <li><strong>Aucun numéro de carte stocké</strong>C-Pay ne conserve jamais de numéro de carte complet (PAN) : seuls des jetons sont stockés. Nous ne revendiquons pas de certification PCI DSS à ce jour ; le module carte sera activé après certification.</li>
+          <li><strong>Hébergement OVH, Union européenne</strong>La plateforme est hébergée chez OVH SAS (Roubaix, France). Voir les <a href="/legal/mentions-legales.html">mentions légales</a>.</li>
+          <li><strong>Journal d'audit et limitation de débit</strong>Les opérations sensibles sont journalisées ; les points d'entrée publics de l'API sont limités en débit.</li>
+          <li><strong>Signalement responsable</strong>Les chercheurs en sécurité peuvent nous écrire à <a href="mailto:security@c-pay.global">security@c-pay.global</a> (fichier <a href="/.well-known/security.txt">security.txt</a>).</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section pricing" id="tarifs" aria-labelledby="pricing-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Tarifs</span>
+          <h2 id="pricing-title">Une commission par transaction, rien d'autre</h2>
+          <p class="lead">Pas d'abonnement ni de frais d'ouverture. La commission baisse avec le niveau de vérification de votre compte.</p>
+        </div>
+        <table>
+          <caption class="visually-hidden">Taux de commission par méthode et niveau de compte</caption>
+          <thead><tr><th scope="col">Méthode</th><th scope="col">Niveau 0<br><small>KYB en cours</small></th><th scope="col">Niveau 1<br><small>KYB validé</small></th><th scope="col">Niveau 2<br><small>Contrat</small></th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Mobile Money, QR, lien de paiement</th><td>1,5 %</td><td>1,2 %</td><td>1,0 %</td></tr>
+            <tr><th scope="row">Carte Tap-to-Phone <span class="badge badge--soon">bientôt</span></th><td>2,5 %</td><td>2,0 %</td><td>1,8 %</td></tr>
+          </tbody>
+        </table>
+        <p class="note mt-3">Taux par défaut de la plateforme, indicatifs et hors frais éventuels de l'opérateur Mobile Money supportés par le payeur. Les reversements vers un compte bancaire ou un portefeuille Mobile Money peuvent faire l'objet de frais de transfert précisés dans votre convention. <a href="#simulateur">Utiliser le simulateur</a>.</p>
+      </div>
+    </section>
+
+    <section class="section section--alt faq" id="faq" aria-labelledby="faq-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">FAQ</span>
+          <h2 id="faq-title">Questions fréquentes</h2>
+        </div>
+        <details>
+          <summary>Dois-je choisir l'opérateur Mobile Money de mon client ?</summary>
+          <div class="faq-body"><p>Non. Vous saisissez le montant et le numéro de téléphone ; C-Pay déduit le pays, la devise et l'opérateur à partir de l'indicatif et du préfixe. Si le numéro ne permet pas une détection fiable, le client choisit lui-même sur la page de paiement.</p></div>
+        </details>
+        <details>
+          <summary>Dans quels pays puis-je encaisser ?</summary>
+          <div class="faq-body"><p>Sénégal et Côte d'Ivoire (XOF), Cameroun et Congo-Brazzaville (XAF), République démocratique du Congo (CDF). La liste des opérateurs par pays figure dans la section <a href="#pays">Pays</a>.</p></div>
+        </details>
+        <details>
+          <summary>Que se passe-t-il si mon client utilise Wave ou Express Union ?</summary>
+          <div class="faq-body"><p>Ces services ne sont pas liés à un préfixe téléphonique : ils ne peuvent pas être détectés automatiquement. Ils sont proposés comme alternative sur la page de paiement et c'est le client qui les sélectionne.</p></div>
+        </details>
+        <details>
+          <summary>Combien coûte C-Pay ?</summary>
+          <div class="faq-body"><p>Une commission par transaction : 1,5 % sur Mobile Money (1,2 % une fois votre KYB validé, 1,0 % avec un contrat). Aucun abonnement. Les taux complets sont dans la section <a href="#tarifs">Tarifs</a> et vous pouvez les tester avec le <a href="#simulateur">simulateur</a>.</p></div>
+        </details>
+        <details>
+          <summary>Quand suis-je réglé ?</summary>
+          <div class="faq-body"><p>Les encaissements de la journée sont regroupés et reversés, commission déduite, en règle générale à J+1 ouvré, par virement bancaire ou vers votre portefeuille Mobile Money. Le délai effectif peut dépendre de votre banque ou de votre opérateur.</p></div>
+        </details>
+        <details>
+          <summary>Comment ouvrir un compte marchand ?</summary>
+          <div class="faq-body"><p>Créez votre compte sur <a href="https://merchant.c-pay.global/register">merchant.c-pay.global/register</a>. Vous pouvez commencer avec un compte de niveau 0 ; pour passer au niveau 1, nous vous demandons les pièces de votre entreprise (registre de commerce, identifiant fiscal, pièce d'identité du représentant) dans le cadre de la vérification KYB.</p></div>
+        </details>
+        <details>
+          <summary>Puis-je intégrer C-Pay à mon site ou à mon application ?</summary>
+          <div class="faq-body"><p>Oui. L'API REST, le SDK Android et l'extension WooCommerce sont documentés dans l'<a href="/developers.html">espace développeurs</a>. Les clés API se créent depuis le portail marchand.</p></div>
+        </details>
+        <details>
+          <summary>Puis-je accepter les cartes bancaires ?</summary>
+          <div class="faq-body"><p>L'acceptation de cartes sans contact sur smartphone (Tap-to-Phone) est en préparation et sera proposée via un SDK certifié. Nous ne l'activons pas avant la certification du module. Inscrivez-vous via le formulaire de contact pour être prévenu.</p></div>
+        </details>
+        <details>
+          <summary>Mes données et celles de mes clients sont-elles protégées ?</summary>
+          <div class="faq-body"><p>Les échanges sont chiffrés, les accès peuvent être protégés par double authentification, aucun numéro de carte complet n'est conservé et les données sont hébergées chez OVH en Union européenne. Le détail figure dans la section <a href="#securite">Sécurité</a> et dans notre <a href="/legal/confidentialite.html">politique de confidentialité</a>.</p></div>
+        </details>
+        <details>
+          <summary>Comment déposer une réclamation sur une transaction ?</summary>
+          <div class="faq-body"><p>Utilisez le <a href="#reclamation">formulaire de réclamation</a> avec la référence de la transaction. Vous recevez immédiatement un numéro de dossier à rappeler dans vos échanges avec le support.</p></div>
+        </details>
+      </div>
+    </section>
+
+    <section class="section" id="contact" aria-labelledby="contact-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Contact</span>
+          <h2 id="contact-title">Parlons de votre activité</h2>
+          <p class="lead">Un projet d'encaissement, une question sur la couverture de votre pays, une intégration ? Écrivez-nous.</p>
+        </div>
+        <div class="contact-grid">
+          <form id="lead-form" novalidate>
+            <div class="form-row">
+              <div class="field"><label for="lead-name">Nom et prénom <span class="req" aria-hidden="true">*</span></label><input id="lead-name" name="name" type="text" autocomplete="name" required></div>
+              <div class="field"><label for="lead-company">Entreprise</label><input id="lead-company" name="company" type="text" autocomplete="organization"></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label for="lead-email">E-mail <span class="req" aria-hidden="true">*</span></label><input id="lead-email" name="email" type="email" autocomplete="email" required></div>
+              <div class="field"><label for="lead-phone">Téléphone</label><input id="lead-phone" name="phone" type="tel" autocomplete="tel" placeholder="+237 …"></div>
+            </div>
+            <div class="field">
+              <label for="lead-country">Pays d'activité</label>
+              <select id="lead-country" name="country">
+                <option value="">— Choisir —</option>
+                <option value="SN">Sénégal</option>
+                <option value="CI">Côte d'Ivoire</option>
+                <option value="CM">Cameroun</option>
+                <option value="CG">Congo-Brazzaville</option>
+                <option value="CD">RDC</option>
+                <option value="OTHER">Autre</option>
+              </select>
+            </div>
+            <div class="field"><label for="lead-message">Votre message <span class="req" aria-hidden="true">*</span></label><textarea id="lead-message" name="message" required minlength="10"></textarea></div>
+            <div class="field field--check">
+              <input id="lead-consent" name="consent" type="checkbox" required>
+              <label for="lead-consent">J'accepte que Calculus Plus SAS traite ces informations pour répondre à ma demande, conformément à la <a href="/legal/confidentialite.html">politique de confidentialité</a>. <span class="req" aria-hidden="true">*</span></label>
+            </div>
+            <button class="btn btn--primary" type="submit">Envoyer ma demande</button>
+            <div class="form-status" id="lead-status" role="status" aria-live="polite"></div>
+          </form>
+          <aside class="contact-aside">
+            <div class="card">
+              <h3>Nous joindre directement</h3>
+              <p>Commercial et support : <a href="mailto:support@c-pay.global">support@c-pay.global</a></p>
+              <p>Développeurs : <a href="mailto:developers@c-pay.global">developers@c-pay.global</a></p>
+              <p>Sécurité : <a href="mailto:security@c-pay.global">security@c-pay.global</a></p>
+              <p>Données personnelles : <a href="mailto:dpo@c-pay.global">dpo@c-pay.global</a></p>
+              <p class="note mb-0">Vous pouvez aussi poser vos questions à l'assistant en bas à droite de la page.</p>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--alt" id="reclamation" aria-labelledby="claim-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Réclamation</span>
+          <h2 id="claim-title">Un problème sur une transaction ?</h2>
+          <p class="lead">Décrivez-le ici. Un numéro de dossier vous est attribué immédiatement ; conservez-le pour vos échanges avec le support.</p>
+        </div>
+        <div class="contact-grid">
+          <form id="claim-form" novalidate>
+            <div class="form-row">
+              <div class="field"><label for="claim-name">Nom et prénom <span class="req" aria-hidden="true">*</span></label><input id="claim-name" name="name" type="text" autocomplete="name" required></div>
+              <div class="field"><label for="claim-email">E-mail <span class="req" aria-hidden="true">*</span></label><input id="claim-email" name="email" type="email" autocomplete="email" required></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label for="claim-phone">Téléphone utilisé pour le paiement</label><input id="claim-phone" name="phone" type="tel" autocomplete="tel" placeholder="+242 …"></div>
+              <div class="field"><label for="claim-ref">Référence de la transaction <span class="req" aria-hidden="true">*</span></label><input id="claim-ref" name="transactionReference" type="text" required placeholder="ex. MOB-ABC123 ou identifiant du lien"><p class="hint">Visible dans le SMS de confirmation, le reçu ou le portail marchand.</p></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label for="claim-amount">Montant</label><input id="claim-amount" name="amount" type="number" min="0" step="1" inputmode="numeric"></div>
+              <div class="field"><label for="claim-currency">Devise</label><select id="claim-currency" name="currency"><option value="">—</option><option>XOF</option><option>XAF</option><option>CDF</option></select></div>
+            </div>
+            <div class="field">
+              <label for="claim-type">Nature du problème</label>
+              <select id="claim-type" name="type">
+                <option value="not_received">Paiement débité mais non reçu par le marchand</option>
+                <option value="double_charge">Double prélèvement</option>
+                <option value="refund">Demande de remboursement</option>
+                <option value="settlement">Règlement non reçu (marchand)</option>
+                <option value="other">Autre</option>
+              </select>
+            </div>
+            <div class="field"><label for="claim-desc">Description <span class="req" aria-hidden="true">*</span></label><textarea id="claim-desc" name="description" required minlength="10"></textarea></div>
+            <div class="field field--check">
+              <input id="claim-consent" name="consent" type="checkbox" required>
+              <label for="claim-consent">J'accepte que Calculus Plus SAS traite ces informations pour instruire ma réclamation, conformément à la <a href="/legal/confidentialite.html">politique de confidentialité</a>. <span class="req" aria-hidden="true">*</span></label>
+            </div>
+            <button class="btn btn--primary" type="submit">Déposer la réclamation</button>
+            <div class="form-status" id="claim-status" role="status" aria-live="polite"></div>
+          </form>
+          <aside class="contact-aside">
+            <div class="card">
+              <h3>Avant de déposer une réclamation</h3>
+              <p>Un paiement Mobile Money peut rester « en attente » quelques minutes le temps que le client confirme sur son téléphone. Vérifiez d'abord le statut dans le portail marchand ou auprès de votre opérateur.</p>
+              <p class="note mb-0">Les réclamations sont traitées par le support C-Pay. Les litiges relatifs au fonctionnement d'un service Mobile Money peuvent nécessiter l'intervention de l'opérateur concerné.</p>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <img src="/logo-calculus.svg" alt="Calculus Plus" width="164" height="34">
+          <p>C-Pay est un produit de Calculus Plus SAS.</p>
+        </div>
+        <div>
+          <h3>Produit</h3>
+          <ul>
+            <li><a href="#produits">Produits</a></li>
+            <li><a href="#tarifs">Tarifs</a></li>
+            <li><a href="#pays">Pays couverts</a></li>
+            <li><a href="/developers.html">Développeurs</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Accès</h3>
+          <ul>
+            <li><a href="https://merchant.c-pay.global">Portail marchand</a></li>
+            <li><a href="https://merchant.c-pay.global/register">Ouvrir un compte</a></li>
+            <li><a href="#contact">Contact</a></li>
+            <li><a href="#reclamation">Réclamation</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Légal</h3>
+          <ul>
+            <li><a href="/legal/mentions-legales.html">Mentions légales</a></li>
+            <li><a href="/legal/cgu.html">Conditions générales d'utilisation</a></li>
+            <li><a href="/legal/confidentialite.html">Politique de confidentialité</a></li>
+            <li><a href="/.well-known/security.txt">security.txt</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">© 2026 Calculus Plus SAS — Tous droits réservés.</div>
+    </div>
   </footer>
+
+  <script src="/app.js" defer></script>
+  <script src="/assistant.js" defer></script>
 </body>
 </html>

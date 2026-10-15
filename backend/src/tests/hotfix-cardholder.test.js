@@ -62,8 +62,10 @@ const gtpCards = { 500: { gtp_card_id: 500, cardholder_id: OWNER, last4: '1234',
 const tickets  = { 't-owner': { ticket_id: 't-owner', cardholder_id: OWNER, subject: 'x' },
                    't-other': { ticket_id: 't-other', cardholder_id: OTHER, subject: 'y' } };
 
+// WAVE-2 : les access tokens portent iss/aud (middleware/auth.js) — on signe via le module commun
+const { signToken } = require('../middleware/auth');
 const chToken = (sub = OWNER, cardId = CARD_OWNER, type = 'cardholder') =>
-  'Bearer ' + jwt.sign({ sub, cardId, type, email: 'o@c-pay.test' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  'Bearer ' + signToken({ sub, cardId, type, email: 'o@c-pay.test' }, '1h');
 
 // Stub SQL minimal : émule le scoping propriétaire des tables sensibles.
 // Il vérifie aussi qu'aucune requête ne réintroduit `cardholder_id IS NULL`.
@@ -200,7 +202,7 @@ describe('Endpoints désactivés (410 FEATURE_DISABLED)', () => {
       .set('Authorization', chToken()).send({ enrollmentId: 'enr-1', amount: 100, pin: '1234' }));
   });
 
-  const agentToken = 'Bearer ' + jwt.sign({ sub: 'ag-1', role: 'agent', type: 'agent', agentId: 'ag-1', bankId: 'b1', agencyId: 'a1', email: 'ag@x' }, process.env.JWT_SECRET);
+  const agentToken = 'Bearer ' + signToken({ sub: 'ag-1', role: 'agent', type: 'agent', agentId: 'ag-1', bankId: 'b1', agencyId: 'a1', email: 'ag@x' });
 
   test('POST /partners/collect → 410', async () => {
     expect410(await request(app).post('/api/v1/partners/collect')
@@ -305,7 +307,7 @@ describe('2FA partenaires (partners.routes)', () => {
   const PWD_HASH = bcrypt.hashSync('Passw0rd!', 4);
   const bankUser = { user_id: 'u1', email: 'bank@c-pay.test', first_name: 'B', last_name: 'U', role: 'bank_admin', bank_id: 'b1',
                      agency_id: null, status: 'active', password_hash: PWD_HASH, bank_name: 'Bank', mfa_secret: SECRET, is_mfa_enabled: true };
-  const partnerToken = 'Bearer ' + jwt.sign({ sub: 'u1', role: 'bank_admin', type: 'bank_user', bankId: 'b1', agencyId: null, email: bankUser.email }, process.env.JWT_SECRET);
+  const partnerToken = 'Bearer ' + signToken({ sub: 'u1', role: 'bank_admin', type: 'bank_user', bankId: 'b1', agencyId: null, email: bankUser.email });
 
   const partnersQuery = async (sql, params = []) => {
     sqlLog.push({ sql, params });

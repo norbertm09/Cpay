@@ -11,9 +11,27 @@ api.interceptors.request.use(cfg => {
   return cfg;
 });
 api.interceptors.response.use(r => r, e => {
-  if (e.response?.status === 401) { localStorage.removeItem('pt_token'); window.location = '/login'; }
+  const st = e.response?.status;
+  if (st === 401) {
+    // Purge token ET utilisateur, sinon AuthProvider relit pt_user -> boucle /login -> / -> 401
+    localStorage.removeItem('pt_token'); localStorage.removeItem('pt_user');
+    if (window.location.pathname !== '/login') window.location = '/login';
+  } else if (st === 403) {
+    toast.error('Accès refusé');
+  } else if (st === 410 || e.response?.data?.code === 'FEATURE_DISABLED') {
+    toast.error('Fonctionnalité en cours d\u2019intégration'); // collect / disburse partenaires (hotfix v1)
+  }
   return Promise.reject(e);
 });
+
+// Session valide uniquement si le JWT n'est pas expire (base64url -> base64).
+const tokenValid = (t) => {
+  try {
+    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
+    return !!payload.exp && payload.exp * 1000 > Date.now();
+  } catch { return false; }
+};
 
 const FONT = "Inter, 'Century Gothic', 'URW Gothic', Jost, system-ui, sans-serif";
 const FONT_TITRE = "Jost, 'Century Gothic', 'URW Gothic', Questrial, system-ui, sans-serif";
@@ -30,7 +48,7 @@ const useTenant = () => useContext(TenantCtx);
 // ─── TENANT PROVIDER ─────────────────────────────────────────────
 const TenantProvider = ({ children }) => {
   const [tenant, setTenant] = useState({
-    display_name:    'CPlus Partners',
+    display_name:    'C-Pay Partenaires',
     primary_color:   '#12b6c7',
     secondary_color: '#1d4f92',
     accent_color:    '#00c896',
@@ -153,7 +171,13 @@ const getNav = (role) => [
 ].filter(i => i.roles.includes(role));
 
 const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('pt_user')); } catch { return null; } });
+  const [user, setUser] = useState(() => {
+    try {
+      const t = localStorage.getItem('pt_token');
+      if (!t || !tokenValid(t)) { localStorage.removeItem('pt_token'); localStorage.removeItem('pt_user'); return null; }
+      return JSON.parse(localStorage.getItem('pt_user'));
+    } catch { return null; }
+  });
   const login  = (token, u) => { localStorage.setItem('pt_token', token); localStorage.setItem('pt_user', JSON.stringify(u)); setUser(u); };
   const logout = () => { localStorage.removeItem('pt_token'); localStorage.removeItem('pt_user'); setUser(null); };
   return <AuthCtx.Provider value={{ user, login, logout }}>{children}</AuthCtx.Provider>;
@@ -202,11 +226,11 @@ const ConsentModal = ({ userId, tenantName, onAccepted }) => {
             <li>Donnees conservees 10 ans (obligations LCB-FT COBAC)</li>
             <li>Contact : legal@c-pay.global</li>
           </ul>
-          <a href="https://c-pay.global/legal/privacy.html" target="_blank" rel="noreferrer" style={{ color:'#12b6c7', fontSize:12 }}>Lire la politique complete</a>
+          <a href="https://c-pay.global/legal/confidentialite.html" target="_blank" rel="noreferrer" style={{ color:'#12b6c7', fontSize:12 }}>Lire la politique complete</a>
         </div>
         <label style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:10, cursor:'pointer' }}>
           <input type="checkbox" checked={cgu} onChange={e=>setCgu(e.target.checked)} style={{ width:18, height:18, marginTop:2 }} />
-          <span style={{ fontSize:13 }}>J&apos;accepte les CGU de CPlus *</span>
+          <span style={{ fontSize:13 }}>J&apos;accepte les CGU de C-Pay *</span>
         </label>
         <label style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:16, cursor:'pointer' }}>
           <input type="checkbox" checked={privacy} onChange={e=>setPrivacy(e.target.checked)} style={{ width:18, height:18, marginTop:2 }} />
@@ -232,16 +256,57 @@ const Login = () => {
   const [view, setView]           = useState('login');
   const [resetStep, setResetStep] = useState('email');
   const [resetData, setResetData] = useState({ email:'', code:'', newPassword:'', confirm:'' });
+  // Etapes supplementaires renvoyees par /auth/login :
+  //   { mfaRequired:true, mfaToken } -> code TOTP via POST /auth/2fa/validate { mfaToken, code }
+  //   { mustChangePassword:true }    -> changement de mot de passe force
+  const [mfa, setMfa]           = useState(null);
+  const [code, setCode]         = useState('');
+  const [forcePwd, setForcePwd] = useState(null); // { token, user }
+  const [pwd, setPwd]           = useState({ newPassword:'', confirm:'' });
 
+  const finishLogin = (data) => {
+    if (data.mfaRequired && data.mfaToken) { setMfa({ mfaToken: data.mfaToken }); setView('mfa'); return; }
+    if (data.mustChangePassword) {
+      // Token pose pour autoriser /auth/change-password, mais l'utilisateur n'est
+      // "connecte" (AuthProvider) qu'une fois le mot de passe change.
+      localStorage.setItem('pt_token', data.access_token);
+      setForcePwd({ token: data.access_token, user: data.user }); setView('password'); return;
+    }
+    login(data.access_token, data.user); navigate('/');
+  };
 
   const submit = async () => {
     if (!creds.email || !creds.password) return toast.error('Email et mot de passe requis');
     setLoading(true);
     try {
       const { data } = await api.post('/auth/login', creds);
-      login(data.access_token, data.user); navigate('/');
+      finishLogin(data);
     }
     catch(err){ toast.error(err.response?.data?.error || 'Identifiants incorrects'); }
+    finally { setLoading(false); }
+  };
+
+  const submitMfa = async () => {
+    if (code.length !== 6) return toast.error('Code à 6 chiffres requis');
+    setLoading(true);
+    try {
+      const { data } = await api.post('/auth/2fa/validate', { mfaToken: mfa.mfaToken, code });
+      finishLogin({ ...data, mfaRequired:false });
+    }
+    catch(err){ toast.error(err.response?.data?.error || 'Code invalide'); }
+    finally { setLoading(false); }
+  };
+
+  const submitForcedPwd = async () => {
+    if (pwd.newPassword.length < 8) return toast.error('8 caractères minimum');
+    if (pwd.newPassword !== pwd.confirm) return toast.error('Mots de passe différents');
+    setLoading(true);
+    try {
+      await api.post('/auth/change-password', { currentPassword: creds.password, newPassword: pwd.newPassword });
+      toast.success('Mot de passe modifié ✅');
+      login(forcePwd.token, forcePwd.user); navigate('/');
+    }
+    catch(err){ toast.error(err.response?.data?.error || 'Erreur'); }
     finally { setLoading(false); }
   };
 
@@ -279,23 +344,42 @@ const Login = () => {
         <div style={{ textAlign:'center', marginBottom:24 }}>
           {tenant?.logo_url
             ? <img src={tenant.logo_url} alt={tenant.display_name} style={{ height:52, marginBottom:12, objectFit:'contain' }} />
-            : <img src="/logo-calculus.png" alt="CPlus" style={{ height:48, marginBottom:12 }} />
+            : <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height:48, marginBottom:12 }} />
           }
           <div style={{ fontSize:20, fontWeight:800, color:BLUE }}>
-            {view==='forgot' ? '🔐 Réinitialisation' : (tenant?.display_name || 'Espace Partenaires')}
+            {view==='forgot' ? '🔐 Réinitialisation' : view==='mfa' ? '🔐 Vérification en deux étapes' : view==='password' ? '🔐 Nouveau mot de passe requis' : (tenant?.display_name || 'C-Pay — Espace Partenaires')}
           </div>
         </div>
 
-        {view==='login' && (<>
+        {view==='mfa' && (
+          <form onSubmit={e=>{ e.preventDefault(); if (!loading) submitMfa(); }}>
+            <p style={{ fontSize:13, color:MUTED, marginBottom:16, textAlign:'center' }}>Saisissez le code à 6 chiffres de votre application d&apos;authentification.</p>
+            <Inp label="Code à 6 chiffres" value={code} onChange={v=>setCode(String(v).replace(/[^0-9]/g,'').slice(0,6))} placeholder="123456" inputMode="numeric" autoComplete="one-time-code" required />
+            <Btn disabled={loading || code.length!==6} style={{ width:'100%' }}>{loading?'Vérification…':'Valider'}</Btn>
+            <button type="button" onClick={()=>{ setMfa(null); setCode(''); setView('login'); }}
+              style={{ width:'100%', background:'none', border:'none', color:MUTED, cursor:'pointer', marginTop:12, fontSize:13, fontFamily:FONT }}>← Retour à la connexion</button>
+          </form>
+        )}
+
+        {view==='password' && (
+          <form onSubmit={e=>{ e.preventDefault(); if (!loading) submitForcedPwd(); }}>
+            <p style={{ fontSize:13, color:MUTED, marginBottom:16, textAlign:'center' }}>Pour continuer, définissez un nouveau mot de passe (8 caractères minimum).</p>
+            <Inp label="Nouveau mot de passe *" value={pwd.newPassword} onChange={v=>setPwd(p=>({...p,newPassword:v}))} type="password" placeholder="••••••••" autoComplete="new-password" required />
+            <Inp label="Confirmer *" value={pwd.confirm} onChange={v=>setPwd(p=>({...p,confirm:v}))} type="password" placeholder="••••••••" autoComplete="new-password" required />
+            <Btn disabled={loading} style={{ width:'100%' }}>{loading?'Enregistrement…':'🔐 Enregistrer'}</Btn>
+          </form>
+        )}
+
+        {view==='login' && (<form onSubmit={e=>{ e.preventDefault(); if (!loading) submit(); }}>
           <Inp label="Email" value={creds.email} onChange={v=>setCreds(p=>({...p,email:v}))} type="email" placeholder="email@exemple.com" />
           <div style={{ marginBottom:14 }}>
             <label style={{ display:'block', fontSize:12, color:MUTED, marginBottom:4, fontWeight:600 }}>Mot de passe</label>
             <div style={{ position:'relative' }}>
               <input type={showPwd?'text':'password'} value={creds.password}
                 onChange={e=>setCreds(p=>({...p,password:e.target.value}))}
-                onKeyDown={e=>e.key==='Enter'&&submit()}
+                autoComplete="current-password" required
                 placeholder="••••••••" style={{ ...boxStyle, paddingRight:42 }} />
-              <button onClick={()=>setShowPwd(!showPwd)}
+              <button type="button" onClick={()=>setShowPwd(!showPwd)}
                 style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', color:MUTED, padding:0, display:'flex', alignItems:'center' }}>
                 {showPwd
                   ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
@@ -304,14 +388,14 @@ const Login = () => {
               </button>
             </div>
           </div>
-          <Btn onClick={submit} disabled={loading} style={{ width:'100%' }}>{loading?'Connexion…':'Se connecter'}</Btn>
+          <Btn disabled={loading} style={{ width:'100%' }}>{loading?'Connexion…':'Se connecter'}</Btn>
           <div style={{ textAlign:'center', marginTop:12 }}>
-            <button onClick={()=>setView('forgot')}
+            <button type="button" onClick={()=>setView('forgot')}
               style={{ background:'none', border:'none', color:P, cursor:'pointer', fontSize:13, fontFamily:FONT }}>
               Mot de passe oublié ?
             </button>
           </div>
-        </>)}
+        </form>)}
 
 
 
@@ -360,8 +444,9 @@ const Login = () => {
         </>)}
 
         <div style={{ textAlign:'center', marginTop:20, fontSize:12, color:MUTED }}>
-          Accès réservé aux partenaires CPlus<br/>
+          Accès réservé aux partenaires C-Pay<br/>
           <a href="https://c-pay.global" style={{ color:P }}>← Retour à c-pay.global</a>
+          <div style={{ marginTop:8, fontSize:11 }}>C-Pay est un produit de Calculus Plus SAS</div>
         </div>
       </div>
     </div>
@@ -439,7 +524,7 @@ const Layout = ({ children }) => {
         <div style={{ padding:'20px 16px', borderBottom:`1px solid ${BORDER}` }}>
           {tenant?.logo_url
             ? <img src={tenant.logo_url} alt={tenant.display_name} style={{ height:36, marginBottom:16, display:'block', objectFit:'contain', maxWidth:160 }} />
-            : <img src="/logo-calculus.png" alt="CPlus" style={{ height:36, marginBottom:16, display:'block' }} />
+            : <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height:36, marginBottom:16, display:'block' }} />
           }
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <div style={{ width:38, height:38, background:`${rc.color||P}20`, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20 }}>{rc.icon||'👤'}</div>
@@ -473,7 +558,7 @@ const Layout = ({ children }) => {
           </button>
           <div style={{ marginTop:12, paddingTop:10, borderTop:`1px solid ${BORDER}`, fontSize:10, color:MUTED, textAlign:'center' }}>
             <a href="https://c-pay.global/legal/cgu.html" target="_blank" rel="noreferrer" style={{ color:MUTED, display:'block', marginBottom:2 }}>CGU</a>
-            <a href="https://c-pay.global/legal/privacy.html" target="_blank" rel="noreferrer" style={{ color:MUTED }}>Confidentialité</a>
+            <a href="https://c-pay.global/legal/confidentialite.html" target="_blank" rel="noreferrer" style={{ color:MUTED }}>Confidentialité</a>
           </div>
         </div>
       </aside>
@@ -1019,7 +1104,7 @@ const Transactions = () => {
     <table><thead><tr><th>Date</th><th>Référence</th><th>Agent</th><th>Type</th><th>Montant</th><th>Frais</th><th>Statut</th></tr></thead>
     <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
     <div class="total">Volume total: ${fmtNum(volume)} XAF</div>
-    <footer style="margin-top:20px;font-size:10px;color:#8a9ab0">CPlus Partners 2.6.0</footer>
+    <footer style="margin-top:20px;font-size:10px;color:#8a9ab0">C-Pay Partners 2.6.0</footer>
     </body></html>`;
     const win = window.open('','_blank');
     win.document.write(html); win.document.close();
@@ -1653,7 +1738,7 @@ const Rapport = () => {
     <h3>Volume par période</h3>
     <table><thead><tr><th>Période</th><th>Transactions</th><th>Volume</th><th>Frais</th></tr></thead>
     <tbody>${(data.byPeriod||[]).map(p=>`<tr><td>${new Date(p.period).toLocaleDateString('fr-FR')}</td><td>${p.count}</td><td>${parseFloat(p.volume||0).toLocaleString('fr-FR')} XAF</td><td>${parseFloat(p.fees||0).toLocaleString('fr-FR')} XAF</td></tr>`).join('')}</tbody></table>
-    <footer>CPlus Partners 2.6.0 — Confidentiel</footer>
+    <footer>C-Pay Partners 2.6.0 — Confidentiel</footer>
     </body></html>`;
     const win = window.open('','_blank');
     win.document.write(html); win.document.close();
