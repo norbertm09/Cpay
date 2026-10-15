@@ -1,5 +1,5 @@
 {
-  "name": "cplus-2-6-merchant-portal",
+  "name": "cpay-cardholder-portal",
   "version": "2.7.0",
   "private": true,
   "dependencies": {
