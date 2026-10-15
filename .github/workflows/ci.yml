@@ -153,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
@@ -167,7 +167,13 @@ jobs:
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
       - name: gradlew :app:assembleDebug
         working-directory: android
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleDebug --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+            # Erreurs Kotlin/Gradle remontées en annotations (les logs bruts ne sont pas toujours accessibles)
+            grep -E "^e: |What went wrong|Could not|error:|FAILURE" "$RUNNER_TEMP/gradle.log" | head -40 | sed 's/^/::error::/'
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: android-debug-apk
@@ -218,6 +224,7 @@ jobs:
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=c-pay.global' \
             -keyout "$RUNNER_TEMP/le/live/c-pay.global/privkey.pem" \
             -out "$RUNNER_TEMP/le/live/c-pay.global/fullchain.pem" 2>/dev/null
+          cp "$RUNNER_TEMP/le/live/c-pay.global/fullchain.pem" "$RUNNER_TEMP/le/live/c-pay.global/chain.pem"
           openssl dhparam -dsaparam -out "$RUNNER_TEMP/dhparam.pem" 2048 2>/dev/null
           # les upstreams sont des noms de services compose : resolus vers localhost pour le test
           docker run --rm \
@@ -226,7 +233,10 @@ jobs:
             -v "$PWD/docker/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$RUNNER_TEMP/le:/etc/letsencrypt:ro" \
             -v "$RUNNER_TEMP/dhparam.pem:/etc/nginx/dhparam.pem:ro" \
-            nginx:1.25-alpine nginx -t
+            nginx:1.25-alpine nginx -t 2>&1 | tee "$RUNNER_TEMP/nginx-t.log"
+          if grep -qE "emerg|error" "$RUNNER_TEMP/nginx-t.log"; then
+            grep -E "emerg|error" "$RUNNER_TEMP/nginx-t.log" | head -10 | sed 's/^/::error::nginx: /'; exit 1
+          fi
 
   # ────────────────────────────────────────────────────────────────
   version-check:
