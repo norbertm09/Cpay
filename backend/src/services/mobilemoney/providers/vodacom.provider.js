@@ -31,10 +31,10 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       input_Currency:              currency || 'CDF',
       input_ServiceProviderCode:   config.serviceCode || config.apiKey,
       input_ThirdPartyConversationID: txnId,
-      input_PurchasedItemsDesc:    description || 'CPlus 2.0',
+      input_PurchasedItemsDesc:    description || 'CPlus 2.6.0',
     },
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json',
-      'Origin':        config.origin || 'https://api.cplus.africa' }
+      'Origin':        config.origin || 'https://api.c-pay.global' }
   );
 
   const ok = r.body?.output_ResponseCode === 'INS-0';
@@ -60,10 +60,10 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
       input_Currency:              currency || 'CDF',
       input_ServiceProviderCode:   config.serviceCode || config.apiKey,
       input_ThirdPartyConversationID: txnId,
-      input_PaymentItemsDesc:      'CPlus 2.0 retrait',
+      input_PaymentItemsDesc:      'CPlus 2.6.0 retrait',
     },
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json',
-      'Origin': config.origin || 'https://api.cplus.africa' }
+      'Origin': config.origin || 'https://api.c-pay.global' }
   );
   return {
     success:       r.body?.output_ResponseCode === 'INS-0',

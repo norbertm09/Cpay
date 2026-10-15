@@ -31,7 +31,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       currency,
       customer_msisdn: phone.replace('+', ''),
       external_transaction_id: txnId,
-      description:   description || 'CPlus 2.0',
+      description:   description || 'CPlus 2.6.0',
       country_code:  country,
     },
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }

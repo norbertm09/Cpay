@@ -1,0 +1,32 @@
+groups:
+  - name: cplus
+    rules:
+      - alert: APIDown
+        expr: up{job="cplus-api"} == 0
+        for: 30s
+        labels: { severity: critical }
+        annotations: { summary: "API CPlus inaccessible" }
+
+      - alert: HighDeclineRate
+        expr: rate(transactions_total{status="failed"}[10m]) / rate(transactions_total[10m]) > 0.3
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Taux de refus > 30%" }
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.15
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Espace disque < 15%" }
+
+      - alert: HighMemory
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.90
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "Mémoire > 90%" }
+
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 30s
+        labels: { severity: critical }
+        annotations: { summary: "PostgreSQL inaccessible" }

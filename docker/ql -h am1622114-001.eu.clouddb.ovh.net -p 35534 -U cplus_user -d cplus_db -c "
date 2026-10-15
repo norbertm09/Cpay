@@ -1,0 +1,65 @@
+   txn    |  type   |  amount  | status  |              msg               |    init     | age_min 
+----------+---------+----------+---------+--------------------------------+-------------+---------
+ e540d9fc | collect |   100.00 | pending | Airtel: demande envoyee        | 08-19 21:15 |      27
+ 98f9c0f8 | collect |   100.00 | pending | Success.                       | 08-19 21:11 |      31
+ 0bc1b475 | collect |   100.00 | pending | Success.                       | 08-19 21:01 |      41
+ a0ab6570 | collect |   100.00 | pending | Airtel: demande envoyee        | 08-17 13:15 |    3387
+ 1c12c558 | collect |  -100.00 | pending | Transaction Amount is invalid  | 08-17 13:06 |    3396
+ 09de76e9 | collect |  -100.00 | pending | Transaction Amount is invalid  | 08-17 13:05 |    3398
+ fe172f6f | collect |     0.00 | pending | Transaction Amount is invalid  | 08-17 12:55 |    3407
+ e5d9aeec | collect |   100.00 | pending | Airtel: demande envoyee        | 08-17 12:06 |    3456
+ 55ee7d4d | collect |   100.00 | pending | Airtel: demande envoyee        | 08-17 11:14 |    3508
+ 17537cd1 | collect |   100.00 | pending | Airtel: demande envoyee        | 08-17 11:13 |    3509
+ 4a0719c1 | collect |   100.00 | pending | Airtel: demande envoyee        | 08-07 23:37 |   17165
+ b8351e8b | collect |   100.00 | pending | Airtel: demande envoyee        | 08-06 14:11 |   19172
+ 8e71aae4 | collect |   100.00 | pending | Airtel: demande envoyee        | 08-06 14:10 |   19173
+ 58c99aa9 | payout  |  1000.00 | pending | Versement Airtel en cours      | 08-06 11:54 |   19308
+ 0c90a416 | collect |   100.00 | pending | Airtel: demande envoyee        | 08-06 09:16 |   19467
+ b2ba7c9e | collect |   100.00 | pending | Airtel: demande envoyee        | 08-06 09:11 |   19471
+ 99899146 | collect |   400.00 | pending | Airtel: demande envoyee        | 08-06 09:10 |   19472
+ d5a03117 | collect |   100.00 | pending | Airtel: demande envoyee        | 08-06 08:45 |   19497
+ a8666ab8 | collect |   400.00 | pending | Airtel: demande envoyee        | 08-06 08:43 |   19499
+ 0c383ff0 | collect |   400.00 | pending | Airtel: demande envoyee        | 08-06 08:40 |   19502
+ 695c413c | collect |   400.00 | pending | Airtel: demande envoyee        | 08-06 08:36 |   19507
+ ca5c33cd | collect |   100.00 | pending | Push USSD envoye — en attente  | 08-04 16:35 |   21908
+ 6cda1ce5 | collect |   400.00 | pending | Airtel: demande envoyee        | 08-04 16:13 |   21929
+ 24fee3cf | collect |   314.00 | pending | Airtel: demande envoyee        | 08-04 14:34 |   22028
+ 75e768de | collect |   312.00 | pending | Airtel: echec                  | 08-04 14:31 |   22032
+ a90759c9 | collect |   311.00 | pending | Airtel: echec                  | 08-04 14:28 |   22034
+ 93e2bb5d | collect |   310.00 | pending | Airtel: echec                  | 08-04 14:27 |   22036
+ c43d2f56 | collect |   303.00 | pending | Airtel: echec                  | 08-04 14:21 |   22041
+ 5c803129 | collect |   302.00 | pending | Airtel: echec                  | 08-04 14:18 |   22044
+ c8d04e32 | collect |   301.00 | pending | Airtel: echec                  | 08-04 14:17 |   22045
+ a7d921a8 | collect |   300.00 | pending | Airtel: echec                  | 08-04 14:15 |   22048
+ c8853f9a | collect |   300.00 | pending | Airtel: echec                  | 08-04 14:14 |   22048
+ 5c62d71d | collect |   444.00 | pending | Airtel: echec                  | 08-04 14:11 |   22052
+ 938f5c4f | collect |   333.00 | pending | Airtel: echec                  | 08-04 14:09 |   22053
+ a6b8b0b7 | collect |   270.00 | pending | Airtel: echec                  | 08-04 14:08 |   22055
+ 15fdaf83 | collect |   260.00 | pending | Airtel: echec                  | 08-04 14:07 |   22056
+ 4702733b | collect |   250.00 | pending | Airtel: echec                  | 08-04 14:06 |   22056
+ 1a8a338a | collect |   225.00 | pending | Airtel: echec                  | 08-04 14:04 |   22058
+ 138b66c9 | collect |   180.00 | pending | Airtel: echec                  | 08-04 13:56 |   22066
+ ecedf959 | collect |   175.00 | pending | Airtel: echec                  | 08-04 13:55 |   22067
+ e62afb95 | collect |   150.00 | pending | Airtel: echec                  | 08-04 13:49 |   22073
+ 4f53bfe1 | collect |   100.00 | pending | Airtel: echec                  | 08-04 13:44 |   22079
+ 595429a8 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-19 22:26 |   44596
+ 16ed1c5c | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-17 15:36 |   47886
+ 8838b329 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-17 08:54 |   48288
+ 955cb5d3 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-17 08:41 |   48301
+ 11f63cd9 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-17 08:41 |   48302
+ 1f8a8f06 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-17 08:24 |   48318
+ 5ab8b802 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-17 08:23 |   48319
+ 9d980534 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-17 08:19 |   48323
+ 1e25e6ae | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-16 21:03 |   49000
+ 06b46c17 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-16 20:59 |   49004
+ 3066040a | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-16 20:58 |   49004
+ c70c6e48 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-16 20:52 |   49011
+ d212540e | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-14 19:48 |   51955
+ ccc6c5ad | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-14 19:47 |   51956
+ e1a8d4b0 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-14 19:25 |   51978
+ 33cdbbac | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-14 18:44 |   52019
+ c34269f1 | collect |   100.00 | pending | Push USSD envoye — en attente  | 07-14 18:41 |   52022
+ 0ebd177f | collect | 45000.00 | pending |                                | 07-01 15:41 |   70922
+ 4e5bd614 | collect | 45000.00 | pending |                                | 07-01 15:38 |   70924
+(61 rows)
+

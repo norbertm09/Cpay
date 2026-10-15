@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>C-Pay — Paiements Digitaux CEMAC</title>
+  <meta name="description" content="C-Pay by Calculus Plus — Plateforme de paiement digital pour l'Afrique Centrale." />
+  <link rel="canonical" href="https://c-pay.global/" />
+  <link rel="icon" href="/logo-calculus.svg" type="image/svg+xml" />
+
+  <!-- Open Graph : un lien C-Pay partage sur WhatsApp, canal n°1 dans la
+       region, s'affichait sans titre ni image. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="C-Pay" />
+  <meta property="og:url" content="https://c-pay.global/" />
+  <meta property="og:title" content="C-Pay — Le paiement digital en Afrique Centrale" />
+  <meta property="og:description" content="Mobile Money, carte virtuelle et Pay Links pour marchands et porteurs de carte. Par Calculus Plus SAS." />
+  <meta property="og:image" content="https://c-pay.global/logo-calculus.png" />
+  <meta property="og:locale" content="fr_FR" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="C-Pay — Le paiement digital en Afrique Centrale" />
+  <meta name="twitter:description" content="Mobile Money, carte virtuelle et Pay Links pour marchands et porteurs de carte." />
+  <meta name="twitter:image" content="https://c-pay.global/logo-calculus.png" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary:  #12b6c7;
+      --blue:     #1d4f92;
+      --success:  #00c896;
+      --text:     #1e2d3d;
+      --muted:    #5a6677;
+      --bg:       #f0f4f8;
+      --card:     #ffffff;
+      --border:   #dce3ed;
+      --font: 'Century Gothic','CenturyGothic','AppleGothic','Gill Sans MT',Tahoma,Arial,sans-serif;
+    }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(255,255,255,0.95); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 40px; height: 64px;
+    }
+    .nav-logo { display: flex; align-items: center; text-decoration: none; }
+    .nav-logo img { height: 44px; width: auto; max-width: 180px; object-fit: contain; }
+    .nav-actions { display: flex; gap: 12px; align-items: center; }
+    .nav-btn {
+      padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 700;
+      cursor: pointer; text-decoration: none; font-family: var(--font); transition: all .2s;
+    }
+    .nav-btn-outline { border: 2px solid var(--primary); color: var(--primary); background: transparent; }
+    .nav-btn-outline:hover { background: var(--primary); color: #fff; }
+    .nav-btn-solid { background: var(--primary); color: #fff; border: 2px solid var(--primary); }
+    .nav-btn-solid:hover { background: #0fa3b3; }
+
+    .hero {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #0a1628 0%, #1d4f92 50%, #12b6c7 100%);
+      position: relative; overflow: hidden; padding-top: 64px;
+    }
+    .hero::before {
+      content: ''; position: absolute; inset: 0;
+      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    }
+    .hero::after {
+      content: ''; position: absolute;
+      width: 600px; height: 600px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(18,182,199,0.15) 0%, transparent 70%);
+      right: -100px; bottom: -100px; pointer-events: none;
+    }
+    .hero-orb {
+      position: absolute; width: 400px; height: 400px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
+      left: -80px; top: 100px; pointer-events: none;
+    }
+    .hero-content { position: relative; z-index: 1; text-align: center; padding: 40px 20px; max-width: 760px; }
+    .hero-title { font-size: clamp(32px, 6vw, 64px); font-weight: 800; color: #fff; line-height: 1.1; margin-bottom: 20px; letter-spacing: -1px; }
+    .hero-title span { color: var(--primary); }
+    .hero-subtitle { font-size: clamp(15px, 2.5vw, 20px); color: rgba(255,255,255,0.75); margin-bottom: 48px; line-height: 1.6; max-width: 540px; margin-left: auto; margin-right: auto; }
+
+    .cta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 560px; margin: 0 auto 48px; }
+    .cta-card {
+      background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.15);
+      border-radius: 20px; padding: 28px 20px; text-decoration: none; color: #fff;
+      transition: all .3s; cursor: pointer; display: block; backdrop-filter: blur(8px);
+    }
+    .cta-card:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.4); transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+    .cta-card.primary-cta { background: var(--primary); border-color: var(--primary); }
+    .cta-card.primary-cta:hover { background: #0fa3b3; border-color: #0fa3b3; }
+    .cta-icon { font-size: 36px; margin-bottom: 12px; }
+    .cta-title { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+    .cta-desc { font-size: 12px; opacity: 0.8; line-height: 1.5; }
+    .cta-arrow { display: inline-block; margin-top: 12px; font-size: 18px; }
+
+    .hero-stats { display: flex; gap: 32px; justify-content: center; flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 32px; }
+    .hero-stat { text-align: center; }
+    .hero-stat-value { font-size: 28px; font-weight: 800; color: var(--primary); }
+    .hero-stat-label { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
+
+    .cemac-strip { background: var(--card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 24px 40px; }
+    .cemac-inner { max-width: 900px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    .cemac-label { font-size: 13px; color: var(--muted); font-weight: 600; }
+    .cemac-flags { display: flex; gap: 16px; flex-wrap: wrap; }
+    .cemac-flag { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+
+    .features { padding: 100px 40px; max-width: 1200px; margin: 0 auto; }
+    .section-tag { font-size: 12px; color: var(--primary); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
+    .section-title { font-size: clamp(24px, 4vw, 40px); font-weight: 800; color: var(--text); margin-bottom: 48px; }
+    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    .feature-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; transition: all .2s; }
+    .feature-card:hover { border-color: var(--primary); box-shadow: 0 8px 24px rgba(18,182,199,0.12); transform: translateY(-2px); }
+    .feature-icon { font-size: 32px; margin-bottom: 16px; }
+    .feature-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+    .feature-desc { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+    .portals { background: linear-gradient(135deg, var(--blue), #0a2d5e); padding: 100px 40px; }
+    .portals-inner { max-width: 900px; margin: 0 auto; text-align: center; }
+    .portals-title { font-size: clamp(26px, 4vw, 44px); font-weight: 800; color: #fff; margin-bottom: 16px; }
+    .portals-sub { font-size: 16px; color: rgba(255,255,255,0.7); margin-bottom: 56px; }
+    .portals-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .portal-card { background: rgba(255,255,255,0.07); border: 2px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 36px 28px; text-decoration: none; color: #fff; transition: all .3s; text-align: left; }
+    .portal-card:hover { background: rgba(255,255,255,0.14); border-color: var(--primary); transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,0.3); }
+    .portal-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--primary); background: rgba(18,182,199,0.15); border-radius: 20px; padding: 4px 12px; margin-bottom: 16px; }
+    .portal-icon { font-size: 48px; margin-bottom: 16px; }
+    .portal-name { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+    .portal-desc { font-size: 13px; opacity: 0.75; line-height: 1.6; margin-bottom: 20px; }
+    .portal-features { list-style: none; margin-bottom: 24px; }
+    .portal-features li { font-size: 12px; opacity: 0.8; padding: 4px 0; }
+    .portal-features li::before { content: '✓  '; color: var(--primary); font-weight: 700; }
+    .portal-btn { display: inline-flex; align-items: center; gap: 8px; background: var(--primary); color: #fff; border: none; border-radius: 10px; padding: 12px 24px; font-size: 14px; font-weight: 700; font-family: var(--font); cursor: pointer; text-decoration: none; transition: all .2s; }
+    .portal-btn:hover { background: #0fa3b3; }
+
+    footer { background: #0a1628; padding: 40px; text-align: center; }
+    footer .logo-text { font-size: 20px; font-weight: 800; color: #fff; letter-spacing: 1px; margin-bottom: 8px; }
+    footer .logo-text span { color: var(--primary); }
+    footer .tagline { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 24px; letter-spacing: 2px; text-transform: uppercase; }
+    footer .links { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; margin-bottom: 24px; }
+    footer .links a { color: rgba(255,255,255,0.5); font-size: 12px; text-decoration: none; }
+    footer .links a:hover { color: var(--primary); }
+    footer .copy { font-size: 11px; color: rgba(255,255,255,0.3); }
+
+    @media (max-width: 768px) {
+      nav { padding: 0 20px; }
+      .cta-grid { grid-template-columns: 1fr; max-width: 320px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .portals-grid { grid-template-columns: 1fr; }
+      .features { padding: 60px 20px; }
+      .portals { padding: 60px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a href="/" class="nav-logo">
+      <img src="/logo-calculus.svg" alt="C-Pay" />
+    </a>
+    <div class="nav-actions">
+      <a href="/developers.html" class="nav-btn nav-btn-outline" style="background:#00c896;color:#fff;border-color:#00c896">🚀 Espace Développeurs</a>
+      <a href="https://merchant.c-pay.global" class="nav-btn nav-btn-outline">Espace Marchand</a>
+      <a href="https://app.c-pay.global" class="nav-btn nav-btn-solid">Espace Cardholder</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-orb"></div>
+    <div class="hero-content">
+      <h1 class="hero-title">
+        Le paiement digital<br/>
+        <span>sans frontières</span><br/>
+        en Afrique Centrale
+      </h1>
+      <p class="hero-subtitle">
+        C-Pay connecte les marchands et les porteurs de carte à travers le réseau GIMAC.
+        Mobile Money, carte virtuelle, Pay Links — tout en un.
+      </p>
+      <div class="cta-grid" style="grid-template-columns:1fr 1fr 1fr;max-width:840px">
+        <a href="https://merchant.c-pay.global" class="cta-card primary-cta">
+          <div class="cta-icon">🏪</div>
+          <div class="cta-title">Espace Marchand</div>
+          <div class="cta-desc">Acceptez les paiements Mobile Money et carte. Créez des Pay Links. Gérez vos règlements.</div>
+          <div class="cta-arrow">→</div>
+        </a>
+        <a href="https://app.c-pay.global" class="cta-card">
+          <div class="cta-icon">💳</div>
+          <div class="cta-title">Espace Cardholder</div>
+          <div class="cta-desc">Accédez à votre carte virtuelle C-Pay. Rechargez, payez et transférez partout en CEMAC.</div>
+          <div class="cta-arrow">→</div>
+        </a>
+        <a href="/developers.html#register" class="cta-card" style="border-color:rgba(0,200,150,0.5)">
+          <div class="cta-icon">🚀</div>
+          <div class="cta-title">Compte Sandbox</div>
+          <div class="cta-desc">Intégrez l'API CPlus dans votre application. Compte sandbox gratuit et immédiat.</div>
+          <div class="cta-arrow" style="color:#00c896">→</div>
+        </a>
+      </div>
+      <div class="hero-stats">
+        <div class="hero-stat"><div class="hero-stat-value">Congo</div><div class="hero-stat-label">En production</div></div>
+        <div class="hero-stat"><div class="hero-stat-value">CEMAC</div><div class="hero-stat-label">Couverture cible</div></div>
+        <div class="hero-stat"><div class="hero-stat-value">Mobile Money</div><div class="hero-stat-label">MTN · Airtel</div></div>
+        <div class="hero-stat"><div class="hero-stat-value">AES-256</div><div class="hero-stat-label">Tokenisation GCM</div></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="cemac-strip">
+    <div class="cemac-inner">
+      <span class="cemac-label">Zone de couverture :</span>
+      <div class="cemac-flags">
+        <span class="cemac-flag">🇨🇲 Cameroun</span>
+        <span class="cemac-flag">🇨🇬 Congo</span>
+        <span class="cemac-flag">🇬🇦 Gabon</span>
+        <span class="cemac-flag">🇨🇫 RCA</span>
+        <span class="cemac-flag">🇹🇩 Tchad</span>
+        <span class="cemac-flag">🇬🇶 Guinée Éq.</span>
+      </div>
+    </div>
+  </div>
+
+  <section class="features">
+    <div class="section-tag">Fonctionnalités</div>
+    <div class="section-title">Tout ce dont vous avez besoin</div>
+    <div class="features-grid">
+      <div class="feature-card"><div class="feature-icon">📱</div><div class="feature-title">Mobile Money</div><div class="feature-desc">MTN MoMo et Airtel Money en production au Congo-Brazzaville. Orange Money et Vodacom M-Pesa (RDC) en cours d'intégration. Collecte et décaissement en temps réel.</div></div>
+      <div class="feature-card"><div class="feature-icon">💳</div><div class="feature-title">Carte Virtuelle C-Pay</div><div class="feature-desc">Émission de cartes virtuelles GIMAC via GTP. Schéma 1 (débit direct) et Schéma 2 (token CPlus).</div></div>
+      <div class="feature-card"><div class="feature-icon">🔗</div><div class="feature-title">Pay Links</div><div class="feature-desc">Créez un lien de paiement en secondes. Partagez par SMS ou WhatsApp. Suivi en temps réel.</div></div>
+      <div class="feature-card"><div class="feature-icon">📲</div><div class="feature-title">Tap to Phone NFC</div><div class="feature-desc">Transformez votre smartphone Android en terminal de paiement. Aucun matériel supplémentaire.</div></div>
+      <div class="feature-card"><div class="feature-icon">🔒</div><div class="feature-title">Sécurité des données</div><div class="feature-desc">Architecture alignée sur les exigences PCI-DSS v4.0 : tokenisation AES-256-GCM, journal d'audit complet, session 30 min, détection d'anomalies en temps réel.</div></div>
+      <div class="feature-card"><div class="feature-icon">🌍</div><div class="feature-title">Réseau GIMAC</div><div class="feature-desc">Interopérabilité complète sur le réseau interbancaire monétique d'Afrique Centrale.</div></div>
+    </div>
+  </section>
+
+  <section class="portals">
+    <div class="portals-inner">
+      <div class="section-tag" style="color:rgba(255,255,255,0.5)">Accès aux portails</div>
+      <div class="portals-title">Choisissez votre espace</div>
+      <div class="portals-sub">Deux espaces dédiés pour deux profils différents</div>
+      <div class="portals-grid">
+        <div class="portal-card">
+          <div class="portal-tag">Marchand</div>
+          <div class="portal-icon">🏪</div>
+          <div class="portal-name">Espace Marchand</div>
+          <div class="portal-desc">Pour les entreprises et commerçants qui souhaitent accepter des paiements digitaux.</div>
+          <ul class="portal-features">
+            <li>Tableau de bord et analytics</li>
+            <li>Pay Links QR + SMS + WhatsApp</li>
+            <li>Tap to Phone NFC</li>
+            <li>Règlements J+1</li>
+            <li>Application mobile Android</li>
+          </ul>
+          <a href="https://merchant.c-pay.global" class="portal-btn">Accéder →</a>
+        </div>
+        <div class="portal-card">
+          <div class="portal-tag">Cardholder</div>
+          <div class="portal-icon">💳</div>
+          <div class="portal-name">Espace Cardholder</div>
+          <div class="portal-desc">Pour les porteurs de carte virtuelle C-Pay qui souhaitent gérer leurs finances.</div>
+          <ul class="portal-features">
+            <li>Carte virtuelle GIMAC</li>
+            <li>Top-up Mobile Money</li>
+            <li>Paiement tokenisé sécurisé</li>
+            <li>Transfert vers Mobile Money</li>
+            <li>Historique et notifications</li>
+          </ul>
+          <a href="https://app.c-pay.global" class="portal-btn">Accéder →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Section Developers -->
+  <section style="background:linear-gradient(135deg,#1d4f92,#12b6c7);padding:80px 40px;text-align:center">
+    <div style="max-width:700px;margin:0 auto">
+      <div style="font-size:48px;margin-bottom:16px">🔌</div>
+      <h2 style="color:#fff;font-size:32px;font-weight:800;margin-bottom:12px;font-family:var(--font)">Intégrez CPlus dans votre application</h2>
+      <p style="color:rgba(255,255,255,0.85);font-size:16px;margin-bottom:32px;line-height:1.6">
+        API REST complète pour intégrer les paiements Mobile Money et carte bancaire dans vos applications web et mobiles.
+      </p>
+      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
+        <a href="/developers.html" style="background:#fff;color:#1d4f92;border-radius:10px;padding:14px 28px;font-weight:700;text-decoration:none;font-size:15px;font-family:var(--font)">
+          📖 Documentation
+        </a>
+        <a href="https://api.c-pay.global/api/v1/docs/" style="background:rgba(255,255,255,0.15);color:#fff;border:2px solid rgba(255,255,255,0.5);border-radius:10px;padding:14px 28px;font-weight:700;text-decoration:none;font-size:15px;font-family:var(--font)">
+          ⚡ API Reference (Swagger)
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <footer style="background:#1d4f92;color:rgba(255,255,255,0.7);text-align:center;padding:28px 20px;font-size:12px;margin-top:0">
+    <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:4px">C-Pay</div>
+    <div style="margin-bottom:14px">Innover · Transformer · Réussir</div>
+    <p style="margin-bottom:10px">
+      <a href="https://merchant.c-pay.global" style="color:rgba(255,255,255,0.85);margin:0 8px">Portail Marchand</a> |
+      <a href="https://app.c-pay.global" style="color:rgba(255,255,255,0.85);margin:0 8px">Portail Cardholder</a> |
+      <a href="/developers.html" style="color:rgba(255,255,255,0.85);margin:0 8px">Développeurs</a>
+    </p>
+    <p style="margin-bottom:10px">
+      <a href="/legal/cgu.html" style="color:rgba(255,255,255,0.7);margin:0 8px">CGU</a> |
+      <a href="/legal/confidentialite.html" style="color:rgba(255,255,255,0.7);margin:0 8px">Confidentialité</a> |
+      <a href="/legal/mentions-legales.html" style="color:rgba(255,255,255,0.7);margin:0 8px">Mentions légales</a> |
+      <a href="mailto:support@c-pay.global" style="color:rgba(255,255,255,0.7);margin:0 8px">support@c-pay.global</a>
+    </p>
+    <p>© 2026 Calculus Plus SAS — Tous droits réservés</p>
+  </footer>
+</body>
+</html>

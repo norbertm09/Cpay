@@ -19,7 +19,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       currency:      currency || 'XAF',
       phone:         phone.replace('+', ''),
       reference:     txnId,
-      description:   description || 'CPlus 2.0',
+      description:   description || 'CPlus 2.6.0',
       callback_url:  `${process.env.API_BASE_URL}/webhooks/express_union/${txnId}`,
     },
     { 'Authorization': `ApiKey ${config.apiKey}`, 'Content-Type': 'application/json' }

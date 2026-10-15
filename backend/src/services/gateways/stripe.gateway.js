@@ -1,5 +1,5 @@
 /**
- * Stripe Gateway — CPlus 2.0
+ * Stripe Gateway — CPlus 2.6.0
  *
  * Doc  : https://stripe.com/docs/api
  * Auth : Bearer sk_live_... / sk_test_...
@@ -117,7 +117,7 @@ const createIntent = async ({
       currency:            currency.toLowerCase(),
       payment_method_types: paymentMethodTypes,
       capture_method:      captureMethod,
-      description:         description || 'CPlus 2.0',
+      description:         description || 'CPlus 2.6.0',
       metadata:            { internal_txn_id: txnId, ...metadata },
     });
 

@@ -4,7 +4,28 @@
  */
 'use strict';
 const https  = require('https');
+const crypto = require('crypto');
 const logger = require('../../../config/logger');
+
+// Airtel Congo attend un msisdn local 0XXXXXXXX (sans indicatif)
+const toLocalMsisdn = (ph) => {
+  let n = String(ph || '').replace(/[^0-9]/g, '');
+  if (n.startsWith('242')) n = n.slice(3);
+  if (n[0] !== '0') n = '0' + n;
+  return n;
+};
+// Reference/id purement numerique apres prefixe (Airtel sandbox rejette les lettres hex)
+
+// Airtel v3 disbursement : PIN chiffre en RSA/ECB/OAEPWithSHA-256AndMGF1Padding (cle 2048), resultat base64
+const encryptPin = (pin, pubKeyB64) => {
+  const key = crypto.createPublicKey({ key: Buffer.from(pubKeyB64, 'base64'), format: 'der', type: 'spki' });
+  return crypto.publicEncrypt(
+    { key, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256', mgf1Hash: 'sha256' },
+    Buffer.from(String(pin))
+  ).toString('base64');
+};
+
+const genRef = () => 'CPAY' + Date.now() + Math.floor(Math.random() * 1000);
 
 const getToken = async (config) => {
   const r = await httpRequest('POST', config.baseUrl || 'https://openapi.airtel.africa',
@@ -18,46 +39,63 @@ const getToken = async (config) => {
 const collectPayment = async ({ txnId, amount, currency, phone, config }) => {
   logger.info('Airtel collectPayment', { txnId, amount });
   const token = await getToken(config);
-
+  const ref = genRef();
+  const cc = currency === 'CDF' ? 'CD' : 'CG';
   const r = await httpRequest('POST', config.baseUrl || 'https://openapi.airtel.africa',
     '/merchant/v1/payments/',
     {
-      reference:   txnId,
-      subscriber:  { country: currency === 'CDF' ? 'CD' : 'CG', currency, msisdn: phone.replace('+', '') },
-      transaction: { amount, id: txnId, country: currency === 'CDF' ? 'CD' : 'CG', currency },
+      reference:   ref,
+      subscriber:  { country: cc, currency, msisdn: toLocalMsisdn(phone) },
+      transaction: { amount, id: ref, country: cc, currency },
     },
-    { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Country': currency === 'CDF' ? 'CD' : 'CG', 'X-Currency': currency }
+    { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Country': cc, 'X-Currency': currency }
   );
-
-  const success = r.body?.data?.transaction?.status === 'TS';
+  logger.info('AIRTEL RAW collectPayment', { txnId, rawBody: JSON.stringify(r.body || {}) });
+  const txStatus = r.body?.data?.transaction?.status;
+  const apiOk = r.body?.status?.success === true || r.body?.status?.code === '200';
+  // Succes de CREATION = requete acceptee par Airtel (push envoye). TF/TE = echec immediat.
+  const success = apiOk && txStatus !== 'TF' && txStatus !== 'TE';
   return {
     success,
-    transactionId:  r.body?.data?.transaction?.id,
-    errorMessage:   success ? null : (r.body?.status?.message || 'Airtel payment failed'),
+    transactionId: r.body?.data?.transaction?.id || ref,
+    airtelMoneyId: r.body?.data?.transaction?.airtel_money_id || null,
+    errorMessage:  success ? null : (r.body?.status?.message || 'Airtel payment failed'),
   };
 };
 
-const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
+const sendPayout = async ({ txnId, amount, currency, phone, config, txType }) => {
   const token = await getToken(config);
+  const ref = genRef();
+  const cc = currency === 'CDF' ? 'CD' : 'CG';
+  const encPin = (config.pin && config.rsaPubKey) ? encryptPin(config.pin, config.rsaPubKey) : (config.encryptedPin || config.pin || '');
   const r = await httpRequest('POST', config.baseUrl || 'https://openapi.airtel.africa',
-    '/standard/v1/disbursements/',
+    '/standard/v3/disbursements',
     {
-      payee:       { msisdn: phone.replace('+', '') },
-      reference:   txnId,
-      pin:         config.encryptedPin || '',
-      transaction: { amount, id: txnId },
+      payee:       { msisdn: toLocalMsisdn(phone), wallet_type: 'NORMAL' },
+      reference:   ref,
+      pin:         encPin,
+      transaction: { amount, id: ref, type: txType === 'B2B' ? 'B2B' : 'B2C' },
     },
-    { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+    { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Country': cc, 'X-Currency': currency }
   );
-  return { success: r.statusCode === 200, transactionId: r.body?.data?.transaction?.id };
+  logger.info('AIRTEL RAW sendPayout', { txnId, rawBody: JSON.stringify(r.body || {}) });
+  const success = r.body?.data?.transaction?.status === 'TS';
+  return {
+    success,
+    transactionId: r.body?.data?.transaction?.id || ref,
+    airtelMoneyId: r.body?.data?.transaction?.reference_id || r.body?.data?.transaction?.airtel_money_id || null,
+    rawResponse: JSON.stringify(r.body || {}),
+    errorMessage:  success ? null : (r.body?.status_message || r.body?.status?.message || 'Airtel payout failed'),
+  };
 };
 
 const httpRequest = (method, baseUrl, path, body, headers) => new Promise((resolve, reject) => {
   const u = new URL(baseUrl + path);
-  const payload = typeof body === 'string' ? body : JSON.stringify(body);
+  const hasBody = body !== null && body !== undefined && method !== 'GET';
+  const payload = hasBody ? (typeof body === 'string' ? body : JSON.stringify(body)) : '';
   const req = https.request({
     hostname: u.hostname, port: 443, path: u.pathname,
-    method, headers: { ...headers, 'Content-Length': Buffer.byteLength(payload) },
+    method, headers: hasBody ? { ...headers, 'Content-Length': Buffer.byteLength(payload) } : { ...headers },
     timeout: 15000,
   }, res => {
     let data = '';
@@ -66,8 +104,48 @@ const httpRequest = (method, baseUrl, path, body, headers) => new Promise((resol
   });
   req.on('error', reject);
   req.on('timeout', () => { req.destroy(); reject(new Error('Airtel timeout')); });
-  req.write(payload);
+  if (payload) req.write(payload);
   req.end();
 });
 
-module.exports = { collectPayment, sendPayout };
+const queryTransaction = async ({ txId, currency, config }) => {
+  const token = await getToken(config);
+  const cc = currency === 'CDF' ? 'CD' : 'CG';
+  const r = await httpRequest('GET', config.baseUrl || 'https://openapi.airtel.africa',
+    '/standard/v1/payments/' + txId, null,
+    { 'Authorization': `Bearer ${token}`, 'Accept': '*/*', 'X-Country': cc, 'X-Currency': currency }
+  );
+  logger.info('AIRTEL RAW queryTransaction', { txId, rawBody: JSON.stringify(r.body || {}) });
+  const t = (r.body && r.body.data && r.body.data.transaction) || {};
+  return {
+    rawStatus: t.status,
+    success:   t.status === 'TS',
+    failed:    t.status === 'TF' || t.status === 'TE',
+    pending:   t.status === 'TIP' || t.status === 'TA' || t.status === 'Success.',
+    airtelMoneyId: t.airtel_money_id || null,
+    message:   t.message || null,
+    rawResponse: JSON.stringify(r.body || {}),
+  };
+};
+
+const queryDisbursement = async ({ txId, currency, config }) => {
+  const token = await getToken(config);
+  const cc = currency === 'CDF' ? 'CD' : 'CG';
+  const r = await httpRequest('GET', config.baseUrl || 'https://openapi.airtel.africa',
+    '/standard/v3/disbursements/' + txId, null,
+    { 'Authorization': `Bearer ${token}`, 'Accept': '*/*', 'X-Country': cc, 'X-Currency': currency }
+  );
+  logger.info('AIRTEL RAW queryTransaction', { txId, rawBody: JSON.stringify(r.body || {}) });
+  const t = (r.body && r.body.data && r.body.data.transaction) || {};
+  return {
+    rawStatus: t.status,
+    success:   t.status === 'TS',
+    failed:    t.status === 'TF' || t.status === 'TE',
+    pending:   t.status === 'TIP' || t.status === 'TA',
+    airtelMoneyId: t.reference_id || t.airtel_money_id || null,
+    message:   t.message || null,
+    rawResponse: JSON.stringify(r.body || {}),
+  };
+};
+
+module.exports = { collectPayment, sendPayout, queryTransaction, queryDisbursement };

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="24dp">
+
+        <!-- Header -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_balance_card"
+            android:padding="28px" android:layout_marginTop="16dp" android:layout_marginBottom="28dp">
+            <TextView android:id="@+id/tv_title" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Connexion"
+                android:textSize="24sp" android:textStyle="bold" android:textColor="#FFFFFF"/>
+            <TextView android:id="@+id/tv_subtitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Entrez vos identifiants"
+                android:textColor="#CCF0F4F8" android:textSize="14sp" android:layout_marginTop="4dp"/>
+        </LinearLayout>
+
+        <!-- Email -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Email ou téléphone *" android:textSize="13sp" android:textStyle="bold"
+            android:textColor="@color/text" android:layout_marginBottom="6dp"/>
+        <EditText android:id="@+id/et_email" android:layout_width="match_parent"
+            android:layout_height="52dp" android:inputType="textEmailAddress"
+            android:background="@drawable/bg_card" android:padding="14dp"
+            android:hint="email@exemple.com" android:textColor="@color/text"
+            android:textColorHint="@color/text_secondary" android:layout_marginBottom="16dp"
+            android:textSize="15sp"/>
+
+        <!-- Password -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Mot de passe *" android:textSize="13sp" android:textStyle="bold"
+            android:textColor="@color/text" android:layout_marginBottom="6dp"/>
+        <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp">
+            <EditText android:id="@+id/et_password" android:layout_width="match_parent"
+                android:layout_height="52dp" android:inputType="textPassword"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:paddingEnd="52dp" android:hint="••••••••"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:textSize="15sp"/>
+            <ImageView android:id="@+id/iv_toggle_password"
+                android:layout_width="28dp" android:layout_height="28dp"
+                android:layout_gravity="end|center_vertical" android:layout_marginEnd="12dp"
+                android:src="@drawable/ic_eye" android:clickable="true" android:focusable="true"
+                android:tint="@color/text_secondary"/>
+        </FrameLayout>
+
+        <!-- Forgot -->
+        <TextView android:id="@+id/tv_forgot_password" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="Mot de passe oublié ?"
+            android:textColor="@color/primary" android:textSize="13sp"
+            android:layout_gravity="end" android:layout_marginBottom="20dp"
+            android:clickable="true" android:focusable="true"/>
+
+        <!-- Error -->
+        <LinearLayout android:id="@+id/layout_error" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="horizontal"
+            android:background="#FFF0F0" android:padding="12dp" android:layout_marginBottom="12dp"
+            android:visibility="gone">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="⚠️ " android:textSize="14sp"/>
+            <TextView android:id="@+id/tv_error" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:textColor="#CC0000"
+                android:textSize="13sp"/>
+        </LinearLayout>
+
+        <!-- Progress -->
+        <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_gravity="center"
+            android:visibility="gone" android:layout_marginBottom="8dp"/>
+
+        <!-- Login Button -->
+        <TextView android:id="@+id/btn_login" android:layout_width="match_parent"
+            android:layout_height="52dp" android:text="Se connecter"
+            android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold"
+            android:background="@drawable/bg_btn_primary"
+            android:gravity="center" android:layout_marginBottom="16dp"
+            android:clickable="true" android:focusable="true"/>
+
+        <!-- Register -->
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_gravity="center"
+            android:layout_marginBottom="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Pas de compte ? " android:textColor="@color/text_secondary" android:textSize="14sp"/>
+            <TextView android:id="@+id/tv_register" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="S'inscrire"
+                android:textColor="@color/primary" android:textSize="14sp" android:textStyle="bold"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tv_back" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="← Changer de profil"
+            android:textColor="@color/text_secondary" android:textSize="13sp"
+            android:layout_gravity="center" android:clickable="true" android:focusable="true"
+            android:layout_marginBottom="12dp"/>
+
+        <TextView android:id="@+id/btn_biometric" android:layout_width="match_parent"
+            android:layout_height="52dp" android:text="👆 Connexion par empreinte digitale"
+            android:textColor="@color/primary_dark" android:textSize="14sp" android:textStyle="bold"
+            android:background="@drawable/bg_card" android:gravity="center"
+            android:visibility="gone" android:clickable="true" android:focusable="true"/>
+    </LinearLayout>
+</ScrollView>

@@ -1,5 +1,5 @@
 /**
- * MIGS — Mastercard Internet Gateway Service — CPlus 2.0
+ * MIGS — Mastercard Internet Gateway Service — CPlus 2.6.0
  *
  * MIGS est l'ancienne plateforme Mastercard utilisée principalement
  * par les banques ANZ, CommerzBank, et plusieurs banques africaines.

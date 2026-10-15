@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "CPlus 2.6.0",
+    "slug": "cplus-2-6-mobile",
+    "version": "2.6.0",
+    "orientation": "portrait",
+    "scheme": "cplus",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "global.cpay.mobile",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "global.cpay.mobile",
+      "versionCode": 260,
+      "permissions": ["INTERNET"]
+    },
+    "extra": {
+      "apiBaseUrl": "https://api.c-pay.global"
+    }
+  }
+}

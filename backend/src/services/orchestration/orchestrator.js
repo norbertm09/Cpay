@@ -1,7 +1,7 @@
 /**
  * Payment Orchestration Hub
  *
- * Point d'entrée unique pour TOUTES les transactions Calculus Plus.
+ * Point d'entrée unique pour TOUTES les transactions CPlus 2.6.0.
  * Le marchand envoie uniquement : montant + phone OU montant + emvPayload.
  * Le hub décide de tout le reste.
  *
@@ -22,6 +22,9 @@ const mobileMoneyRouter = require('../mobilemoney/mobilemoney.router');
 const cardRouter        = require('../gateways/card.router');
 const settlementQueue   = require('../settlement/settlement.queue');
 const logger            = require('../../config/logger');
+const { deliverEvent }  = require('../integrations/integration.service');
+const pilotControl      = require('../pilot/pilot-control.service');
+let fraudEngine; try { fraudEngine = require('../fraud/fraud.engine'); } catch { /* fraud engine optionnel */ }
 
 // ─── Types de transaction ─────────────────────────────────────────
 
@@ -66,6 +69,18 @@ const processTransaction = async (params) => {
   const validation = validateInput(params);
   if (!validation.valid) {
     return { success: false, error: validation.error, txnId };
+  }
+
+  const featureKey = customerPhone ? 'payment_mobile_money' : 'tap_to_phone';
+  if (featureKey === 'tap_to_phone') {
+    const gate = await pilotControl.evaluateFeature({
+      merchantId,
+      flagKey: featureKey,
+      context: { txnId, type, amount, deviceId, aidDetected: !!aidDetected, emvPayload: !!emvPayload },
+    });
+    if (!gate.allowed) {
+      return { success: false, error: gate.reason || 'Fonction non activee pour ce pilote', code: 'FEATURE_NOT_ENABLED', txnId, gate };
+    }
   }
 
   // ── 2. Détection automatique ────────────────────────────────────
@@ -115,13 +130,31 @@ const processTransaction = async (params) => {
     status:         'pending',
   });
 
+  // ── 4b. Fraud Engine ────────────────────────────────────────────
+  if (fraudEngine) {
+    const fraudResult = await fraudEngine.evaluate({
+      txnId, merchantId, amount, currency: detection.currency || merchantCheck.merchantCurrency,
+      paymentMethod: customerPhone ? 'mobile_money' : 'card_nfc',
+      deviceId, ip: null,
+    }).catch(() => ({ action: 'allow', score: 0 }));
+
+    if (fraudResult.action === 'block') {
+      logger.warn('Fraud: transaction blocked', { txnId, score: fraudResult.score });
+      await updateTransactionStatus(txnId, 'failed', { error: fraudResult.blockReason });
+      return { success: false, txnId, error: 'Transaction bloquée par le système de sécurité', message: 'Transaction bloquée', amount, currency: detection.currency || merchantCheck.merchantCurrency };
+    }
+  }
+
   // ── 5. Router vers la bonne passerelle ─────────────────────────
   let gatewayResult;
 
   try {
     if (customerPhone) {
       // Mobile Money
-      gatewayResult = await mobileMoneyRouter.processPayment({
+      const mmAction = type === TRANSACTION_TYPES.PAYOUT
+        ? mobileMoneyRouter.sendPayout
+        : mobileMoneyRouter.processPayment;
+      gatewayResult = await mmAction({
         txnId, amount,
         currency:    detection.currency,
         phone:       detection.phone,
@@ -151,17 +184,29 @@ const processTransaction = async (params) => {
   }
 
   // ── 6. Mettre à jour et répondre ───────────────────────────────
-  const finalStatus = gatewayResult.approved ? 'authorized' : 'failed';
+  const finalStatus = gatewayResult.pending ? 'pending' : (gatewayResult.approved ? 'authorized' : 'failed');
   await updateTransactionStatus(txnId, finalStatus, gatewayResult);
+  await addTransactionEvent({
+    txnId,
+    merchantId,
+    eventType: finalStatus === 'authorized' ? 'GATEWAY_APPROVED' : (finalStatus === 'pending' ? 'GATEWAY_PENDING' : 'GATEWAY_DECLINED'),
+    payload: { responseCode: gatewayResult.responseCode, gateway: gatewayResult._gateway || gatewayResult._operator, retryable: gatewayResult.retryable || false },
+  });
 
-  if (gatewayResult.approved) {
+  if (gatewayResult.approved && !gatewayResult.pending) {
     // Enqueue pour le settlement J+1
     await settlementQueue.enqueue({ txnId, merchantId, amount, currency: detection.currency || merchantCheck.merchantCurrency });
     logger.info('Orchestrator: transaction approved', { txnId, amount });
   }
 
+  deliverEvent({
+    merchantId,
+    eventType: `transaction.${finalStatus}`,
+    payload: { txnId, type, amount, currency: detection.currency || merchantCheck.merchantCurrency, paymentMethod: customerPhone ? 'mobile_money' : 'card', status: finalStatus },
+  }).catch((err) => logger.warn('Integration event delivery skipped', { txnId, err: err.message }));
+
   return {
-    success:         gatewayResult.approved,
+    success:         gatewayResult.approved || gatewayResult.pending,
     txnId,
     status:          finalStatus,
     amount,
@@ -179,12 +224,21 @@ const processTransaction = async (params) => {
  * Générer un QR Code de paiement mixte (Mobile Money + Carte).
  */
 const generateQRPayload = async ({ merchantId, amount, currency, description }) => {
+  const gate = await pilotControl.evaluateFeature({
+    merchantId,
+    flagKey: 'qr_code',
+    context: { amount, currency, description },
+  });
+  if (!gate.allowed) {
+    return { success: false, error: gate.reason || 'QR Code non active pour ce pilote', code: 'FEATURE_NOT_ENABLED', gate };
+  }
+
   const qrId = uuidv4();
-  const url  = `${process.env.PAY_LINK_BASE_URL || 'https://pay.calculus.africa'}/q/${qrId}`;
+  const url  = `${process.env.PAY_LINK_BASE_URL || 'https://pay.c-pay.global'}/q/${qrId}`;
 
   await savePaymentLink({
     id: qrId, merchantId, amount, currency, description,
-    type: 'qr', expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+    type: 'qr', url, expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
   });
 
   return {
@@ -205,9 +259,18 @@ const generateQRPayload = async ({ merchantId, amount, currency, description }) 
  * Générer un lien de paiement partageable.
  */
 const generatePayLink = async ({ merchantId, amount, currency, description }) => {
+  const gate = await pilotControl.evaluateFeature({
+    merchantId,
+    flagKey: 'pay_by_link',
+    context: { amount, currency, description },
+  });
+  if (!gate.allowed) {
+    return { success: false, error: gate.reason || 'Pay by Link non active pour ce pilote', code: 'FEATURE_NOT_ENABLED', gate };
+  }
+
   const linkId = uuidv4();
   const shortId = linkId.split('-')[0];
-  const url  = `${process.env.PAY_LINK_BASE_URL || 'https://pay.calculus.africa'}/p/${shortId}`;
+  const url  = `${process.env.PAY_LINK_BASE_URL || 'https://pay.c-pay.global'}/p/${shortId}`;
 
   await savePaymentLink({
     id: linkId, shortId, merchantId, amount, currency, description,
@@ -219,7 +282,7 @@ const generatePayLink = async ({ merchantId, amount, currency, description }) =>
     linkId,
     shortId,
     url,
-    shareText: `Payer ${amount} ${currency} via Calculus Plus : ${url}`,
+    shareText: `Payer ${amount} ${currency} via CPlus 2.6.0 : ${url}`,
     channels: {
       whatsapp: `https://wa.me/?text=${encodeURIComponent(`Payer ${amount} ${currency} : ${url}`)}`,
       sms:      `sms:?body=${encodeURIComponent(`Payer ${amount} ${currency} : ${url}`)}`,
@@ -251,23 +314,46 @@ const MERCHANT_LIMITS = {
 };
 
 const checkMerchantLimits = async (merchantId, amount, currency) => {
-  // TODO: charger depuis DB
-  // Pour l'instant, simuler niveau 1
-  const merchant = { kybLevel: 1, currency: currency || 'XOF', dailyVolume: 0 };
-  const limit    = MERCHANT_LIMITS[merchant.kybLevel];
-  const newDaily = merchant.dailyVolume + amount;
+  const { query } = require('../../config/database');
+  const merchantResult = await query(
+    `SELECT merchant_id, currency, kyb_level, merchant_status
+     FROM merchants WHERE merchant_id = $1`,
+    [merchantId]
+  );
+  if (!merchantResult.rows.length) {
+    return { allowed: false, reason: 'Marchand introuvable', merchantCurrency: currency || 'XOF' };
+  }
+  const merchant = merchantResult.rows[0];
+  if (merchant.merchant_status !== 'active') {
+    return { allowed: false, reason: 'Compte marchand inactif', merchantCurrency: merchant.currency };
+  }
+
+  const volumeResult = await query(
+    `SELECT COALESCE(SUM(amount), 0)::numeric AS daily_volume
+     FROM transactions
+     WHERE merchant_id = $1
+       AND currency = $2
+       AND DATE(initiated_at) = CURRENT_DATE
+       AND status IN ('pending', 'authorized')`,
+    [merchantId, currency || merchant.currency]
+  );
+
+  const kybLevel = Number(merchant.kyb_level || 0);
+  const limit    = MERCHANT_LIMITS[kybLevel] || MERCHANT_LIMITS[0];
+  const dailyVolume = Number(volumeResult.rows[0].daily_volume || 0);
+  const newDaily = dailyVolume + amount;
 
   if (newDaily > limit.daily) {
     return {
       allowed:          false,
       reason:           `Plafond journalier atteint (${limit.daily.toLocaleString()} ${merchant.currency})`,
-      currentVolume:    merchant.dailyVolume,
+      currentVolume:    dailyVolume,
       limit:            limit.daily,
       merchantCurrency: merchant.currency,
     };
   }
 
-  return { allowed: true, merchantCurrency: merchant.currency };
+  return { allowed: true, merchantCurrency: merchant.currency, kybLevel, currentVolume: dailyVolume, limit: limit.daily };
 };
 
 // ─── DB helpers (stubs — brancher sur le vrai pool) ───────────────
@@ -293,7 +379,8 @@ const createTransactionRecord = async (data) => {
       ]
     );
   } catch (err) {
-    logger.warn('createTransactionRecord failed (DB may not exist yet)', { error: err.message });
+    logger.error('createTransactionRecord failed', { txnId: data.txnId, error: err.message });
+    throw err;
   }
 };
 
@@ -305,19 +392,22 @@ const updateTransactionStatus = async (txnId, status, gatewayData) => {
          status = $1, auth_code = $2,
          response_code = $3, response_message = $4,
          gateway_payment_id = $5,
+         gateway_name = $6,
          completed_at = CASE WHEN $1 = 'authorized' THEN NOW() ELSE NULL END
-       WHERE transaction_id = $6`,
+       WHERE transaction_id = $7`,
       [
         status,
         gatewayData.authCode     || null,
         gatewayData.responseCode || null,
         gatewayData.declineReason || gatewayData.message || null,
         gatewayData.gatewayRef   || null,
+        gatewayData._gateway || gatewayData._operator || null,
         txnId,
       ]
     );
   } catch (err) {
-    logger.warn('updateTransactionStatus failed', { error: err.message });
+    logger.error('updateTransactionStatus failed', { txnId, error: err.message });
+    throw err;
   }
 };
 
@@ -325,14 +415,24 @@ const savePaymentLink = async (data) => {
   const { query } = require('../../config/database');
   try {
     await query(
-      `INSERT INTO pay_links (pay_link_id, merchant_id, amount, currency, description, type, short_url, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [data.id, data.merchantId, data.amount, data.currency, data.description, data.type,
-       data.url || null, data.expiresAt]
+      `INSERT INTO pay_links (pay_link_id, merchant_id, short_id, amount, currency, description, type, short_url, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [data.id, data.merchantId, data.shortId || null, data.amount, data.currency,
+       data.description, data.type, data.url || null, data.expiresAt]
     );
   } catch (err) {
-    logger.warn('savePaymentLink failed', { error: err.message });
+    logger.error('savePaymentLink failed', { error: err.message });
+    throw err;
   }
+};
+
+const addTransactionEvent = async ({ txnId, merchantId, eventType, payload }) => {
+  const { query } = require('../../config/database');
+  await query(
+    `INSERT INTO transaction_events (transaction_id, merchant_id, event_type, payload)
+     VALUES ($1, $2, $3, $4)`,
+    [txnId, merchantId, eventType, payload || {}]
+  );
 };
 
 module.exports = {

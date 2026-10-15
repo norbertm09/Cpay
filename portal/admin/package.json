@@ -1,6 +1,6 @@
 {
-  "name": "cplus-2-admin-portal",
-  "version": "1.0.0",
+  "name": "cplus-2-6-admin-portal",
+  "version": "2.6.0",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",

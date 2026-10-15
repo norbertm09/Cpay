@@ -19,7 +19,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       amount:          String(amount),
       currency:        currency || 'CDF',
       reference:       txnId,
-      description:     description || 'CPlus 2.0',
+      description:     description || 'CPlus 2.6.0',
       callback_url:    `${process.env.API_BASE_URL}/webhooks/africell/${txnId}`,
     },
     { 'X-API-Key': config.apiKey, 'X-API-Secret': config.apiSecret || '', 'Content-Type': 'application/json' }

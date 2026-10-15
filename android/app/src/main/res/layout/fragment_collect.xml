@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg" android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_balance_card"
+            android:padding="20dp" android:layout_marginBottom="16dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="💳 Encaissement" android:textSize="22sp"
+                android:textStyle="bold" android:textColor="#FFFFFF"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Choisissez le mode de collecte"
+                android:textColor="#CCF0F4F8" android:textSize="13sp" android:layout_marginTop="4dp"/>
+        </LinearLayout>
+
+        <!-- Tabs mode paiement -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="16dp"
+            android:background="@drawable/bg_card" android:padding="4dp">
+            <TextView android:id="@+id/tab_momo"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                android:text="📱 MoMo" android:textColor="@color/primary"
+                android:textSize="12sp" android:textStyle="bold"
+                android:gravity="center" android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/tab_qr"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                android:text="🔲 QR Code" android:textColor="@color/text_secondary"
+                android:textSize="12sp" android:textStyle="bold"
+                android:gravity="center" android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/tab_link"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                android:text="🔗 Lien" android:textColor="@color/text_secondary"
+                android:textSize="12sp" android:textStyle="bold"
+                android:gravity="center" android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/tab_nfc"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                android:text="📡 NFC" android:textColor="@color/text_secondary"
+                android:textSize="12sp" android:textStyle="bold"
+                android:gravity="center" android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <!-- Succès -->
+        <LinearLayout android:id="@+id/layout_success"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_success_card"
+            android:padding="20dp" android:layout_marginBottom="16dp"
+            android:gravity="center" android:visibility="gone">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="✅" android:textSize="48sp" android:layout_marginBottom="8dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Paiement effectué !" android:textSize="18sp"
+                android:textStyle="bold" android:textColor="#007a5a"/>
+            <TextView android:id="@+id/tv_success_amount" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textSize="24sp"
+                android:textStyle="bold" android:textColor="@color/primary_dark"
+                android:layout_marginTop="4dp"/>
+            <TextView android:id="@+id/tv_success_ref" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+                android:textSize="12sp" android:layout_marginTop="4dp"/>
+            <TextView android:id="@+id/btn_new_collect"
+                android:layout_width="match_parent" android:layout_height="44dp"
+                android:text="Nouveau paiement" android:textColor="@color/primary"
+                android:textSize="14sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_outline" android:gravity="center"
+                android:layout_marginTop="16dp" android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <!-- ── MoMo Form ── -->
+        <LinearLayout android:id="@+id/layout_form"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Montant (XAF) *" android:textSize="13sp" android:textStyle="bold"
+                android:textColor="@color/text" android:layout_marginBottom="6dp"/>
+            <EditText android:id="@+id/et_amount" android:layout_width="match_parent"
+                android:layout_height="60dp" android:inputType="numberDecimal"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textSize="24sp" android:textStyle="bold" android:textColor="@color/primary"
+                android:textColorHint="@color/text_secondary" android:hint="5 000"
+                android:layout_marginBottom="12dp"/>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Numéro client *" android:textSize="13sp" android:textStyle="bold"
+                android:textColor="@color/text" android:layout_marginBottom="6dp"/>
+            <EditText android:id="@+id/et_phone" android:layout_width="match_parent"
+                android:layout_height="52dp" android:inputType="phone"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="+242 06 000 00 01" android:layout_marginBottom="12dp"/>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Nom du client" android:textSize="13sp"
+                android:textColor="@color/text" android:layout_marginBottom="6dp"/>
+            <EditText android:id="@+id/et_customer_name" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_card"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary"
+                android:hint="Jean Dupont (optionnel)" android:layout_marginBottom="12dp"/>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Référence (auto)" android:textSize="13sp"
+                android:textColor="@color/text" android:layout_marginBottom="6dp"/>
+            <EditText android:id="@+id/et_reference" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_card"
+                android:padding="12dp" android:textColor="@color/text_secondary"
+                android:textSize="13sp" android:focusable="false" android:clickable="false"
+                android:layout_marginBottom="12dp"/>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Opérateur *" android:textSize="13sp" android:textStyle="bold"
+                android:textColor="@color/text" android:layout_marginBottom="8dp"/>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginBottom="20dp">
+                <TextView android:id="@+id/btn_airtel"
+                    android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                    android:text="🔴 Airtel Money" android:textColor="@color/primary"
+                    android:textSize="13sp" android:textStyle="bold"
+                    android:background="@drawable/bg_card" android:gravity="center"
+                    android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+                <TextView android:id="@+id/btn_mtn"
+                    android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                    android:text="🟡 MTN MoMo" android:textColor="@color/text_secondary"
+                    android:textSize="13sp" android:textStyle="bold"
+                    android:background="@drawable/bg_card" android:gravity="center"
+                    android:clickable="true" android:focusable="true"/>
+            </LinearLayout>
+
+            <TextView android:id="@+id/tv_error" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:textColor="#CC0000"
+                android:textSize="13sp" android:visibility="gone" android:layout_marginBottom="8dp"/>
+            <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:layout_gravity="center"
+                android:visibility="gone" android:layout_marginBottom="8dp"/>
+            <TextView android:id="@+id/btn_collect"
+                android:layout_width="match_parent" android:layout_height="56dp"
+                android:text="💳 Encaisser maintenant" android:textColor="#FFFFFF"
+                android:textSize="16sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <!-- ── QR Code Form ── -->
+        <LinearLayout android:id="@+id/layout_qr"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:visibility="gone">
+
+            <EditText android:id="@+id/et_amount_qr" android:layout_width="match_parent"
+                android:layout_height="60dp" android:inputType="numberDecimal"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textSize="24sp" android:textStyle="bold" android:textColor="@color/primary"
+                android:textColorHint="@color/text_secondary" android:hint="Montant XAF"
+                android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_phone_qr" android:layout_width="match_parent"
+                android:layout_height="48dp" android:inputType="phone"
+                android:background="@drawable/bg_card" android:padding="12dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Numéro client (optionnel)" android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_name_qr" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_card"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary"
+                android:hint="Nom client (optionnel)" android:layout_marginBottom="12dp"/>
+            <TextView android:id="@+id/btn_gen_qr"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:text="🔲 Générer le QR Code" android:textColor="#FFFFFF"
+                android:textSize="15sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+            <LinearLayout android:id="@+id/layout_qr_result"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:visibility="gone"
+                android:gravity="center" android:layout_marginTop="16dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="📱 Présentez ce QR Code au client"
+                    android:textColor="@color/text_secondary" android:textSize="13sp"
+                    android:layout_marginBottom="8dp"/>
+                <ImageView android:id="@+id/iv_qr_code"
+                    android:layout_width="220dp" android:layout_height="220dp"
+                    android:scaleType="fitCenter"/>
+                <TextView android:id="@+id/tv_qr_amount"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:textSize="20sp" android:textStyle="bold"
+                    android:textColor="@color/primary_dark" android:layout_marginTop="8dp"/>
+                <TextView android:id="@+id/tv_qr_ref"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:textSize="12sp" android:textColor="@color/text_secondary"
+                    android:layout_marginTop="4dp"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ── Pay Link Form ── -->
+        <LinearLayout android:id="@+id/layout_link"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:visibility="gone">
+            <EditText android:id="@+id/et_amount_link" android:layout_width="match_parent"
+                android:layout_height="60dp" android:inputType="numberDecimal"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textSize="24sp" android:textStyle="bold" android:textColor="@color/primary"
+                android:textColorHint="@color/text_secondary" android:hint="Montant XAF"
+                android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_phone_link" android:layout_width="match_parent"
+                android:layout_height="48dp" android:inputType="phone"
+                android:background="@drawable/bg_card" android:padding="12dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Numéro client (SMS automatique)" android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_name_link" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_card"
+                android:padding="12dp" android:textColor="@color/text"
+                android:textColorHint="@color/text_secondary"
+                android:hint="Nom client (optionnel)" android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_desc_link" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_card"
+                android:padding="12dp" android:textColor="@color/text_secondary"
+                android:textSize="13sp" android:focusable="false"
+                android:hint="Référence (auto)" android:layout_marginBottom="12dp"/>
+            <TextView android:id="@+id/btn_gen_link"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:text="🔗 Générer le lien de paiement" android:textColor="#FFFFFF"
+                android:textSize="15sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+            <LinearLayout android:id="@+id/layout_link_result"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:visibility="gone"
+                android:layout_marginTop="12dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="✅ Lien généré !" android:textSize="15sp"
+                    android:textStyle="bold" android:textColor="#007a5a"
+                    android:layout_marginBottom="8dp"/>
+                <EditText android:id="@+id/et_pay_link" android:layout_width="match_parent"
+                    android:layout_height="48dp" android:background="@drawable/bg_card"
+                    android:padding="12dp" android:textColor="@color/text" android:textSize="12sp"
+                    android:focusable="false"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:layout_marginTop="8dp">
+                    <TextView android:id="@+id/btn_copy_link"
+                        android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                        android:text="📋 Copier" android:textColor="@color/primary"
+                        android:textSize="14sp" android:textStyle="bold"
+                        android:background="@drawable/bg_btn_outline" android:gravity="center"
+                        android:layout_marginEnd="8dp" android:clickable="true" android:focusable="true"/>
+                    <TextView android:id="@+id/btn_share_link"
+                        android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                        android:text="📤 Partager" android:textColor="#FFFFFF"
+                        android:textSize="14sp" android:textStyle="bold"
+                        android:background="@drawable/bg_btn_primary" android:gravity="center"
+                        android:clickable="true" android:focusable="true"/>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ── NFC Form ── -->
+        <LinearLayout android:id="@+id/layout_nfc"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:visibility="gone"
+            android:gravity="center">
+            <EditText android:id="@+id/et_amount_nfc" android:layout_width="match_parent"
+                android:layout_height="60dp" android:inputType="numberDecimal"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textSize="24sp" android:textStyle="bold" android:textColor="@color/primary"
+                android:textColorHint="@color/text_secondary" android:hint="Montant XAF"
+                android:layout_marginBottom="16dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="📡" android:textSize="80sp" android:layout_marginBottom="16dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Approchez la carte ou le téléphone du client"
+                android:textColor="@color/text" android:textSize="15sp"
+                android:gravity="center" android:layout_marginBottom="20dp"/>
+            <TextView android:id="@+id/btn_nfc_collect"
+                android:layout_width="match_parent" android:layout_height="56dp"
+                android:text="📡 Activer la lecture NFC" android:textColor="#FFFFFF"
+                android:textSize="16sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

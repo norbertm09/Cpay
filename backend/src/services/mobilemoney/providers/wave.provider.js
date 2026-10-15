@@ -49,7 +49,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
       receive_amount:  String(amount),
       mobile:          phone.replace('+', ''),
       client_reference: txnId,
-      description:     'CPlus 2.0 retrait',
+      description:     'CPlus 2.6.0 retrait',
     },
     { 'Authorization': `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' }
   );

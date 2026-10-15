@@ -1,4 +1,16 @@
-# Calculus Plus
+# CPlus 2.6.0 Production OVH
+
+Version production OVH de CPlus 2.6.0.
+
+Voir `OVH_DEPLOYMENT.md` pour le deploiement OVH et `PILOT_CONTROL_RUNBOOK.md` pour le pilotage production.
+
+## Production pilot control
+
+La plateforme inclut un module de pilotage production pour CPlus 2.6.0:
+programmes pilotes, enrolement marchand, feature flags, overrides par marchand,
+journalisation des decisions et script `npm run check:pilot`.
+
+Voir `PILOT_CONTROL_RUNBOOK.md` pour le lancement controle et le rollback.
 
 **Plateforme de paiement panafricaine — Le marchand ne choisit jamais rien.**
 
@@ -7,7 +19,7 @@
 ## Architecture
 
 ```
-Application Android (Kotlin + Jetpack Compose)
+Apps mobiles Android/iOS (Expo) + Android natif (Kotlin)
               │
               ▼
   Payment Orchestration Hub (Node.js)
@@ -74,6 +86,61 @@ cp ../backend/.env.example ../backend/.env
 docker compose up -d
 ```
 
+## Mise en production rapide
+
+Domaines cibles:
+- API: `https://api.c-pay.global`
+- Admin: `https://admin.c-pay.global`
+- Marchand: `https://merchant.c-pay.global`
+- Paiement/QR: `https://pay.c-pay.global`
+
+Preparation serveur Linux:
+```bash
+cp backend/.env.production.example backend/.env
+nano backend/.env
+./scripts/preflight.sh
+```
+
+Demarrage production Docker:
+```bash
+cd docker
+docker compose --env-file ../backend/.env up -d --build
+```
+
+Initialisation TLS Let's Encrypt:
+```bash
+export LETSENCRYPT_EMAIL=ops@c-pay.global
+./scripts/init-tls.sh
+```
+
+Deploiement automatise:
+```bash
+./scripts/deploy-prod.sh
+```
+
+Sauvegarde et restauration:
+```bash
+./scripts/backup-db.sh
+./scripts/restore-db.sh backups/cplus-db-YYYYMMDD-HHMMSS.sql.gz
+```
+
+Verification apres deploiement:
+```bash
+./scripts/healthcheck-prod.sh
+```
+
+La CI GitHub Actions inclut les tests backend, les builds des portails, une verification mobile Expo et une validation Docker Compose.
+
+## Feuille de route CPlus 3.0
+
+La feuille de route vers CPlus 3.0 est documentee dans `ROADMAP_CPLUS_3_0.md`.
+
+Axes principaux:
+- 30 jours: Fraud Engine, AML Engine, OpenSanctions, Device Fingerprint, Velocity Rules.
+- 60 jours: Prometheus, Grafana, OpenTelemetry, Alert Manager.
+- 90 jours: PCI DSS, Token Vault avance, HSM, Key Rotation.
+- 120 jours: multi-tenant complet, KYB avance, Merchant Risk Scoring, settlement multi-banques.
+
 ## Structure backend
 
 ```
@@ -117,7 +184,7 @@ android/
     │   │   ├── AuthScreens.kt      # Login, Onboarding
     │   │   └── ListScreens.kt      # Transactions, Settlements
     │   ├── components/             # Composants UI partagés
-    │   ├── theme/                  # Palette couleurs Calculus Plus
+    │   ├── theme/                  # Palette couleurs CPlus 2.6.0
     │   └── viewmodel/              # ViewModels (MVVM)
     ├── domain/
     │   ├── model/                  # Transaction, PaymentResult…
@@ -130,6 +197,37 @@ android/
     └── di/
         └── AppModule.kt            # Injection Hilt
 ```
+
+## Application mobile Android/iOS
+
+Une application cross-platform est disponible dans `mobile/cplus-mobile`.
+
+Fonctions principales:
+- Connexion marchand et administrateur.
+- Self-registration marchand.
+- Encaissement, retrait, QR Code et Pay Link.
+- Partage natif, WhatsApp, SMS et copie du lien.
+- Transactions, règlements et compte marchand.
+- Gestion admin mobile: APIs, defaults pays, marchands, monitoring.
+- Rails Visa: Visa Direct push/pull funds et Visa Account/Wallet payouts.
+
+```bash
+cd mobile/cplus-mobile
+npm install
+npm run start
+```
+
+Build Android:
+```bash
+npm run android
+```
+
+Build iOS:
+```bash
+npm run ios
+```
+
+Pour iOS, utiliser macOS/Xcode ou EAS Build.
 
 ## Modules Android
 

@@ -1,5 +1,5 @@
 /**
- * Settlement Engine — Calculus Plus
+ * Settlement Engine — CPlus 2.6.0
  *
  * Flux complet :
  *   Transaction autorisée
@@ -38,17 +38,13 @@ const COMMISSION_RATES = {
 // ─── Queue de settlement ──────────────────────────────────────────
 
 const enqueue = async ({ txnId, merchantId, amount, currency }) => {
-  try {
-    await query(
-      `INSERT INTO settlement_queue (transaction_id, merchant_id, amount, currency, queued_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (transaction_id) DO NOTHING`,
-      [txnId, merchantId, amount, currency]
-    );
-    logger.debug('Settlement: enqueued', { txnId });
-  } catch (err) {
-    logger.warn('Settlement enqueue failed', { txnId, error: err.message });
-  }
+  await query(
+    `INSERT INTO settlement_queue (transaction_id, merchant_id, amount, currency, queued_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (transaction_id) DO NOTHING`,
+    [txnId, merchantId, amount, currency]
+  );
+  logger.debug('Settlement: enqueued', { txnId });
 };
 
 // ─── Job de settlement (à lancer chaque nuit à 23h) ───────────────

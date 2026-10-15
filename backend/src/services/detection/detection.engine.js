@@ -1,5 +1,5 @@
 /**
- * Detection Engine — Le cerveau de Calculus Plus
+ * Detection Engine — Le cerveau de CPlus 2.6.0
  *
  * Principe : le marchand ne choisit jamais rien.
  * À partir d'un numéro de téléphone ou d'un BIN/IIN carte,
@@ -13,7 +13,7 @@
  */
 
 'use strict';
-// CPlus 2.0
+// CPlus 2.6.0
 
 // ─── Table pays → préfixes mobiles ───────────────────────────────
 
@@ -47,11 +47,11 @@ const MOBILE_MONEY_OPERATORS = {
 
   // ─── Côte d'Ivoire (+225) ───────────────────────────────────────
   CI: [
-    { pattern: /^225(07|08|09|77|78|79|01|02)\d{7}$/, operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_ci' },
-    { pattern: /^225(05|06|55|56|57|58)\d{7}$/,       operator: 'MTN_MOMO',    brand: 'MTN Mobile Money', gateway: 'mtn_ci' },
-    { pattern: /^225(01|02|03)\d{7}$/,                 operator: 'MOOV_MONEY',  brand: 'Moov Money',   gateway: 'moov_ci' },
-    { pattern: /^225(22|23|24|25)\d{7}$/,              operator: 'WAVE',        brand: 'Wave',          gateway: 'wave_ci' },
-    { pattern: /^225\d{10}$/,                          operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_ci' },
+    { pattern: /^225(07|08|09|77|78|79|01|02)\d{7,9}$/, operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_ci' },
+    { pattern: /^225(05|06|55|56|57|58)\d{7,9}$/,       operator: 'MTN_MOMO',    brand: 'MTN Mobile Money', gateway: 'mtn_ci' },
+    { pattern: /^225(01|02|03)\d{7,9}$/,                operator: 'MOOV_MONEY',  brand: 'Moov Money',   gateway: 'moov_ci' },
+    { pattern: /^225(22|23|24|25)\d{7,9}$/,             operator: 'WAVE',        brand: 'Wave',          gateway: 'wave_ci' },
+    { pattern: /^225\d{9,11}$/,                         operator: 'ORANGE_MONEY', brand: 'Orange Money', gateway: 'orange_ci' },
   ],
 
   // ─── Cameroun (+237) ────────────────────────────────────────────

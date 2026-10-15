@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg" android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:background="@drawable/bg_card"
+            android:padding="4dp" android:layout_marginBottom="16dp">
+            <TextView android:id="@+id/tab_disburse" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1"
+                android:text="📤 Décaisser" android:textColor="@color/primary"
+                android:textSize="14sp" android:textStyle="bold" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+            <TextView android:id="@+id/tab_withdraw" android:layout_width="0dp"
+                android:layout_height="44dp" android:layout_weight="1"
+                android:text="🏦 Retrait" android:textColor="@color/text_secondary"
+                android:textSize="14sp" android:textStyle="bold" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tv_available" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Disponible: — XAF"
+            android:textColor="@color/accent" android:textSize="14sp" android:textStyle="bold"
+            android:background="@drawable/bg_card" android:padding="14dp"
+            android:layout_marginBottom="16dp"/>
+
+        <LinearLayout android:id="@+id/layout_disburse" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical">
+            <EditText android:id="@+id/et_amount_disburse" android:layout_width="match_parent"
+                android:layout_height="60dp" android:inputType="numberDecimal"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textSize="24sp" android:textStyle="bold" android:textColor="@color/warning"
+                android:textColorHint="@color/text_secondary" android:hint="Montant XAF"
+                android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_phone_disburse" android:layout_width="match_parent"
+                android:layout_height="52dp" android:inputType="phone"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Numéro bénéficiaire" android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_ref_disburse" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_card"
+                android:padding="12dp" android:textColor="@color/text_secondary"
+                android:textSize="13sp" android:focusable="false" android:clickable="false"
+                android:layout_marginBottom="12dp"/>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginBottom="8dp">
+                <TextView android:id="@+id/btn_dis_airtel" android:layout_width="0dp"
+                    android:layout_height="48dp" android:layout_weight="1"
+                    android:text="🔴 Airtel Money" android:textColor="@color/primary"
+                    android:textSize="13sp" android:textStyle="bold"
+                    android:background="@drawable/bg_card" android:gravity="center"
+                    android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+                <TextView android:id="@+id/btn_dis_mtn" android:layout_width="0dp"
+                    android:layout_height="48dp" android:layout_weight="1"
+                    android:text="🟡 MTN MoMo" android:textColor="@color/text_secondary"
+                    android:textSize="13sp" android:textStyle="bold"
+                    android:background="@drawable/bg_card" android:gravity="center"
+                    android:clickable="true" android:focusable="true"/>
+            </LinearLayout>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Frais: 1%" android:textColor="@color/text_secondary"
+                android:textSize="12sp" android:layout_marginBottom="16dp"/>
+            <TextView android:id="@+id/tv_err_disburse" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:textColor="@color/danger"
+                android:textSize="13sp" android:visibility="gone" android:layout_marginBottom="8dp"/>
+            <ProgressBar android:id="@+id/progress_disburse" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:layout_gravity="center"
+                android:visibility="gone" android:layout_marginBottom="8dp"/>
+            <TextView android:id="@+id/btn_disburse" android:layout_width="match_parent"
+                android:layout_height="56dp" android:text="📤 Décaisser"
+                android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/layout_withdraw" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:visibility="gone">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="🏦 Retirez votre solde marchand vers Mobile Money"
+                android:textColor="@color/text_secondary" android:textSize="13sp"
+                android:layout_marginBottom="14dp"/>
+            <EditText android:id="@+id/et_amount_withdraw" android:layout_width="match_parent"
+                android:layout_height="60dp" android:inputType="numberDecimal"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textSize="24sp" android:textStyle="bold" android:textColor="@color/primary"
+                android:textColorHint="@color/text_secondary" android:hint="Montant XAF"
+                android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_phone_withdraw" android:layout_width="match_parent"
+                android:layout_height="52dp" android:inputType="phone"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:textColor="@color/text" android:textColorHint="@color/text_secondary"
+                android:hint="Votre numéro Mobile Money" android:layout_marginBottom="12dp"/>
+            <EditText android:id="@+id/et_ref_withdraw" android:layout_width="match_parent"
+                android:layout_height="48dp" android:background="@drawable/bg_card"
+                android:padding="12dp" android:textColor="@color/text_secondary"
+                android:textSize="13sp" android:focusable="false" android:clickable="false"
+                android:layout_marginBottom="12dp"/>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginBottom="8dp">
+                <TextView android:id="@+id/btn_wdr_airtel" android:layout_width="0dp"
+                    android:layout_height="48dp" android:layout_weight="1"
+                    android:text="🔴 Airtel" android:textColor="@color/primary"
+                    android:textSize="13sp" android:textStyle="bold"
+                    android:background="@drawable/bg_card" android:gravity="center"
+                    android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
+                <TextView android:id="@+id/btn_wdr_mtn" android:layout_width="0dp"
+                    android:layout_height="48dp" android:layout_weight="1"
+                    android:text="🟡 MTN" android:textColor="@color/text_secondary"
+                    android:textSize="13sp" android:textStyle="bold"
+                    android:background="@drawable/bg_card" android:gravity="center"
+                    android:clickable="true" android:focusable="true"/>
+            </LinearLayout>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Frais: 1% · Minimum 1000 XAF" android:textColor="@color/text_secondary"
+                android:textSize="12sp" android:layout_marginBottom="16dp"/>
+            <TextView android:id="@+id/tv_err_withdraw" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:textColor="@color/danger"
+                android:textSize="13sp" android:visibility="gone" android:layout_marginBottom="8dp"/>
+            <ProgressBar android:id="@+id/progress_withdraw" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:layout_gravity="center"
+                android:visibility="gone" android:layout_marginBottom="8dp"/>
+            <TextView android:id="@+id/btn_withdraw" android:layout_width="match_parent"
+                android:layout_height="56dp" android:text="🏦 Retirer mon solde"
+                android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold"
+                android:background="@drawable/bg_btn_primary" android:gravity="center"
+                android:clickable="true" android:focusable="true"/>
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

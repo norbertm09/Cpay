@@ -1,5 +1,5 @@
 /**
- * Tests du Detection Engine — le cœur de l'automatisation Calculus Plus
+ * Tests du Detection Engine — le cœur de l'automatisation CPlus 2.6.0
  */
 
 'use strict';

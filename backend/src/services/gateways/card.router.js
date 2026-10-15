@@ -1,5 +1,5 @@
 /**
- * Card Router — CPlus 2.0
+ * Card Router — CPlus 2.6.0
  *
  * Routing automatique basé sur le réseau carte + priorité acquéreur.
  *
@@ -171,10 +171,10 @@ const voidTransaction = async ({ txnId, gatewayName, gatewayPaymentId, gatewayOr
 const tryGateway = async (gwName, params) => {
   const factory = GW[gwName];
   if (!factory) {
-    return { approved: false, responseCode: '05', message: `Gateway ${gwName} non enregistré`, declineCategory: 'network_error' };
+    return { approved: false, responseCode: '05', message: `Gateway ${gwName} non enregistré`, declineCategory: 'configuration_error', retryable: false };
   }
   if (!isConfigured(gwName)) {
-    return { approved: false, responseCode: '05', message: `Gateway ${gwName} non configuré`, declineCategory: 'network_error' };
+    return { approved: false, responseCode: '05', message: `Gateway ${gwName} non configuré`, declineCategory: 'configuration_error', retryable: false };
   }
   try {
     const gw = factory();

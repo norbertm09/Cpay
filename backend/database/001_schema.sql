@@ -1,10 +1,10 @@
 -- ================================================================
--- Calculus Plus — Schéma PostgreSQL
+-- CPlus 2.6.0 — Schéma PostgreSQL
 -- Principe : toute la complexité est dans la plateforme, pas dans le schéma
 -- ================================================================
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+
 
 -- ─── Enum types ───────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ DO $$ BEGIN CREATE TYPE settlement_type    AS ENUM ('bank','mobile_money'); EXCE
 -- ─── Marchands ────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS merchants (
-  merchant_id       UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  merchant_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   business_name     VARCHAR(255)  NOT NULL,
   rccm              VARCHAR(100),
   nif               VARCHAR(100),
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS merchants (
 -- ─── Utilisateurs marchands ───────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS merchant_users (
-  user_id       UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_id   UUID NOT NULL REFERENCES merchants(merchant_id),
   email         VARCHAR(255) UNIQUE NOT NULL,
   phone         VARCHAR(32)  UNIQUE NOT NULL,
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS merchant_users (
 -- Le schéma stocke les infos détectées pour l'audit, pas pour l'affichage marchand
 
 CREATE TABLE IF NOT EXISTS transactions (
-  transaction_id      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  transaction_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_id         UUID NOT NULL REFERENCES merchants(merchant_id),
   type                txn_type       NOT NULL,
   amount              NUMERIC(15,2)  NOT NULL,
@@ -96,7 +96,50 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_txn_merchant    ON transactions(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_txn_status      ON transactions(status);
 CREATE INDEX IF NOT EXISTS idx_txn_initiated   ON transactions(initiated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_txn_date        ON transactions(merchant_id, DATE(initiated_at));
+CREATE INDEX IF NOT EXISTS idx_txn_date        ON transactions(merchant_id, initiated_at);
+
+-- Journal d'evenements transactionnels pour audit, webhooks et reconciliation
+CREATE TABLE IF NOT EXISTS transaction_events (
+  event_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  transaction_id UUID REFERENCES transactions(transaction_id),
+  merchant_id    UUID REFERENCES merchants(merchant_id),
+  event_type     VARCHAR(64) NOT NULL,
+  payload        JSONB NOT NULL DEFAULT '{}',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_txn_events_txn     ON transaction_events(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_txn_events_merchant ON transaction_events(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_txn_events_created ON transaction_events(created_at DESC);
+
+-- Idempotence API: evite les doubles debits lors des retries mobiles
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  merchant_id   UUID NOT NULL REFERENCES merchants(merchant_id),
+  endpoint      VARCHAR(128) NOT NULL,
+  key           VARCHAR(128) NOT NULL,
+  request_hash  CHAR(64) NOT NULL,
+  status_code   INTEGER,
+  response_body JSONB,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at  TIMESTAMPTZ,
+  PRIMARY KEY (merchant_id, endpoint, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_keys(created_at DESC);
+
+-- Refresh tokens stockes hashes pour rotation et revocation
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  token_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject_id  UUID NOT NULL,
+  actor_type  VARCHAR(32) NOT NULL,
+  token_hash  CHAR(64) UNIQUE NOT NULL,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  revoked_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_subject ON refresh_tokens(subject_id, actor_type);
+CREATE INDEX IF NOT EXISTS idx_refresh_expiry  ON refresh_tokens(expires_at);
 
 -- ─── Queue de settlement ──────────────────────────────────────────
 
@@ -117,7 +160,7 @@ CREATE TABLE IF NOT EXISTS settlement_queue (
 -- ─── Batches de settlement ────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS settlement_batches (
-  batch_id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  batch_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_id         UUID          NOT NULL REFERENCES merchants(merchant_id),
   batch_date          DATE          NOT NULL,
   total_gross         NUMERIC(15,2) NOT NULL,
@@ -140,7 +183,7 @@ CREATE INDEX IF NOT EXISTS idx_batch_date     ON settlement_batches(batch_date);
 -- ─── Pay Links & QR Codes ─────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS pay_links (
-  pay_link_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  pay_link_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_id   UUID NOT NULL REFERENCES merchants(merchant_id),
   short_id      VARCHAR(16) UNIQUE,
   amount        NUMERIC(15,2),
@@ -189,10 +232,10 @@ GROUP BY t.merchant_id;
 
 INSERT INTO merchants (merchant_id, business_name, phone, email, country, currency, settlement_type, settlement_account, kyb_level, merchant_status)
 VALUES (
-  uuid_generate_v4(),
+  gen_random_uuid(),
   'Boutique Test',
   '+237699000001',
-  'test@calculus.africa',
+  'test@c-pay.global',
   'CM', 'XAF',
   'mobile_money', '+237699000001',
   1, 'active'

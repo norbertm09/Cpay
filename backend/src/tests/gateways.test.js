@@ -1,5 +1,5 @@
 /**
- * Tests gateways CPlus 2.0
+ * Tests gateways CPlus 2.6.0
  * CyberSource · MPGS · Stripe · MIGS · Card Router
  */
 'use strict';

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/bg" android:padding="16dp">
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="💰 Règlements" android:textSize="20sp" android:textStyle="bold"
+        android:textColor="@color/text" android:layout_marginBottom="14dp"/>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:background="@drawable/bg_balance_card"
+        android:padding="18dp" android:layout_marginBottom="14dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Règlement demain" android:textColor="#B3FFFFFF" android:textSize="12sp"/>
+        <TextView android:id="@+id/tv_settling_tomorrow" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="— XAF"
+            android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold"
+            android:layout_marginTop="4dp"/>
+        <TextView android:id="@+id/tv_fee_rate" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="Commission: —"
+            android:textColor="#99FFFFFF" android:textSize="12sp" android:layout_marginTop="8dp"/>
+    </LinearLayout>
+
+    <TextView android:id="@+id/tv_count" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+        android:textSize="13sp" android:layout_marginBottom="10dp"/>
+
+    <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:layout_gravity="center"
+        android:visibility="gone" android:layout_marginBottom="10dp"/>
+
+    <TextView android:id="@+id/tv_empty" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:text="Aucun règlement pour le moment"
+        android:textColor="@color/text_secondary" android:textSize="14sp"
+        android:gravity="center" android:padding="24dp" android:visibility="gone"
+        android:background="@drawable/bg_card"/>
+
+    <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_settlements"
+        android:layout_width="match_parent" android:layout_height="match_parent"/>
+</LinearLayout>

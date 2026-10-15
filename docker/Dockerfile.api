@@ -1,17 +1,24 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
+COPY backend/package*.json ./
+RUN npm ci --omit=dev
 
 FROM node:20-alpine AS runner
-RUN addgroup -S calculus && adduser -S calculus -G calculus
+RUN apk add --no-cache wget tini \
+  && addgroup -S cplus \
+  && adduser -S cplus -G cplus
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
-COPY src ./src
-COPY package.json .
-RUN chown -R calculus:calculus /app
-USER calculus
+COPY backend/src ./src
+COPY backend/database ./database
+COPY backend/package.json .
+COPY docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
+RUN chmod +x /usr/local/bin/api-entrypoint.sh \
+  && chmod -R 755 /app/src \
+  && chown -R cplus:cplus /app
+USER cplus
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s \
   CMD wget -qO- http://localhost:3000/health || exit 1
+ENTRYPOINT ["tini", "--", "api-entrypoint.sh"]
 CMD ["node", "src/server.js"]

@@ -1,5 +1,5 @@
 /**
- * Mastercard Payment Gateway Services (MPGS) — CPlus 2.0
+ * Mastercard Payment Gateway Services (MPGS) — CPlus 2.6.0
  *
  * Doc     : https://ap-gateway.mastercard.com/api/documentation/
  * Auth    : Basic  →  merchant.{merchantId}:{apiPassword}

@@ -1,5 +1,5 @@
 /**
- * Mobile Money Router — CPlus 2.0
+ * Mobile Money Router — CPlus 2.6.0
  *
  * Config chargée depuis la table api_configurations (DB).
  * Si la config n'est pas en DB, fallback sur les variables d'environnement.
@@ -23,6 +23,14 @@ const PROVIDERS = {
   airtel_cg:       () => require('./providers/airtel.provider'),
   vodacom_cd:      () => require('./providers/vodacom.provider'),
   africell_cd:     () => require('./providers/africell.provider'),
+  interswitch_mpesa_cd:   () => require('./providers/interswitch_wallet.provider'),
+  interswitch_orange_cd:  () => require('./providers/interswitch_wallet.provider'),
+  interswitch_airtel_cd:  () => require('./providers/interswitch_wallet.provider'),
+  interswitch_africell_cd:() => require('./providers/interswitch_wallet.provider'),
+  paymenthub_mpesa_cd:    () => require('./providers/paymenthub.provider'),
+  paymenthub_orange_cd:   () => require('./providers/paymenthub.provider'),
+  paymenthub_airtel_cd:   () => require('./providers/paymenthub.provider'),
+  paymenthub_africell_cd: () => require('./providers/paymenthub.provider'),
   wave_sn:         () => require('./providers/wave.provider'),
   wave_ci:         () => require('./providers/wave.provider'),
   moov_ci:         () => require('./providers/moov.provider'),
@@ -49,6 +57,7 @@ const getConfig = async (providerKey) => {
       _configCache = {};
       for (const row of result.rows) {
         _configCache[row.provider_key] = {
+          providerKey:  row.provider_key,
           baseUrl:     row.base_url,
           apiKey:      row.api_key,
           apiSecret:   row.api_secret,
@@ -133,11 +142,19 @@ const normalize = (raw, operator) => ({
 
 // Fallback env vars si pas de config DB
 const buildConfigFromEnv = (key) => ({
+  providerKey:key,
   baseUrl:   process.env[`${key.toUpperCase()}_BASE_URL`]    || process.env[`${key.toUpperCase()}_URL`],
   apiKey:    process.env[`${key.toUpperCase()}_API_KEY`]     || process.env[`${key.toUpperCase()}_CLIENT_ID`],
   apiSecret: process.env[`${key.toUpperCase()}_SECRET`]      || process.env[`${key.toUpperCase()}_CLIENT_SECRET`],
   merchantId:process.env[`${key.toUpperCase()}_MERCHANT_ID`],
   serviceCode:process.env[`${key.toUpperCase()}_SERVICE_CODE`],
+  merchantCode:process.env[`${key.toUpperCase()}_MERCHANT_CODE`],
+  payItemId:process.env[`${key.toUpperCase()}_PAY_ITEM_ID`],
+  authBaseUrl:process.env[`${key.toUpperCase()}_AUTH_BASE_URL`],
+  walletProvider:process.env[`${key.toUpperCase()}_WALLET_PROVIDER`],
+  companyCode:process.env[`${key.toUpperCase()}_COMPANY_CODE`],
+  debitAccountNo:process.env[`${key.toUpperCase()}_DEBIT_ACCOUNT_NO`],
+  callbackUrl:process.env[`${key.toUpperCase()}_CALLBACK_URL`],
 });
 
 module.exports = { processPayment, sendPayout, testProvider, invalidateCache };

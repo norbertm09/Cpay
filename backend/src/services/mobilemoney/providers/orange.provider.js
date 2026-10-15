@@ -20,7 +20,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       cancel_url:  process.env.PAY_LINK_BASE_URL + `/cancel/orange/${txnId}`,
       notif_url:   process.env.API_BASE_URL      + `/webhooks/orange`,
       lang:        'fr',
-      reference:   description || 'Calculus Plus',
+      reference:   description || 'CPlus 2.6.0',
     }
   );
 

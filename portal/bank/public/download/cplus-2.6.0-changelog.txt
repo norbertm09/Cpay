@@ -1,0 +1,15 @@
+CPlus 2.6.0 — Changelog
+========================
+
+[2026-06-15] v2.6.0 — Production Release
+- Tap to Phone (NFC) — paiement sans terminal physique
+- Mobile Money : MTN, Orange, Airtel, Vodacom
+- Pay Link et QR Code
+- Détection automatique opérateur/pays
+- Fraud Engine temps réel
+- Dashboard marchand
+- Support multi-devises (XAF, XOF, CDF)
+- Notifications WhatsApp & SMS
+
+[2026-03-01] v2.5.0 — Beta
+- Version pilote CEMAC

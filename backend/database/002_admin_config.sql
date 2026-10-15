@@ -1,5 +1,5 @@
 -- ================================================================
--- CPlus 2.0 — Migration 002
+-- CPlus 2.6.0 — Migration 002
 -- api_configurations  : paramètres des opérateurs MM et gateways
 -- terminals           : terminaux marchands (multi-device)
 -- admin_users         : administrateurs plateforme
@@ -29,7 +29,7 @@ DO $$ BEGIN CREATE TYPE admin_role AS ENUM (
 -- échoue au moment de l'appel (pas de blocage au login).
 
 CREATE TABLE IF NOT EXISTS api_configurations (
-  config_id       UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  config_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   provider_key    VARCHAR(64)  NOT NULL UNIQUE,  -- ex: mtn_cm, orange_sn, cybersource
   provider_type   api_provider_type NOT NULL,
   display_name    VARCHAR(128) NOT NULL,
@@ -56,9 +56,31 @@ CREATE INDEX IF NOT EXISTS idx_api_config_provider ON api_configurations(provide
 CREATE INDEX IF NOT EXISTS idx_api_config_country  ON api_configurations(country);
 CREATE INDEX IF NOT EXISTS idx_api_config_status   ON api_configurations(status);
 
+-- Affectation par pays: chaque marchand recoit les providers Mobile Money
+-- de son pays et MIGS comme gateway Mastercard par defaut.
+CREATE TABLE IF NOT EXISTS country_payment_defaults (
+  country                 CHAR(2) PRIMARY KEY,
+  currency                CHAR(3) NOT NULL,
+  mobile_money_providers  TEXT[] NOT NULL DEFAULT '{}',
+  default_card_gateway    VARCHAR(64) NOT NULL DEFAULT 'migs',
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS merchant_api_assignments (
+  merchant_id    UUID NOT NULL REFERENCES merchants(merchant_id) ON DELETE CASCADE,
+  provider_key   VARCHAR(64) NOT NULL REFERENCES api_configurations(provider_key),
+  provider_type  api_provider_type NOT NULL,
+  is_default     BOOLEAN NOT NULL DEFAULT FALSE,
+  assigned_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (merchant_id, provider_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_merchant_api_assignments_provider ON merchant_api_assignments(provider_key);
+
 -- ─── Terminaux marchands ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS terminals (
-  terminal_id     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  terminal_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_id     UUID NOT NULL REFERENCES merchants(merchant_id) ON DELETE CASCADE,
   terminal_code   VARCHAR(32) UNIQUE NOT NULL,    -- ex: TERM-CM-001
   terminal_name   VARCHAR(128),                   -- nom libre : "Caisse principale"
@@ -79,7 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_terminals_status     ON terminals(status);
 
 -- ─── Administrateurs plateforme ───────────────────────────────────
 CREATE TABLE IF NOT EXISTS admin_users (
-  admin_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  admin_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email           VARCHAR(255) UNIQUE NOT NULL,
   password_hash   VARCHAR(255) NOT NULL,
   first_name      VARCHAR(100),
@@ -93,7 +115,7 @@ CREATE TABLE IF NOT EXISTS admin_users (
 
 -- ─── Audit logs ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS audit_logs (
-  log_id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  log_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id        UUID,                     -- admin_id ou user_id
   actor_type      VARCHAR(16) NOT NULL,     -- 'admin' | 'merchant'
   actor_email     VARCHAR(255),
@@ -119,10 +141,10 @@ VALUES
   ('wave_sn',         'mobile_money', 'Wave Sénégal',                'SN', 'inactive'),
   ('free_money_sn',   'mobile_money', 'Free Money Sénégal',          'SN', 'inactive'),
   -- Mobile Money — Côte d'Ivoire
-  ('orange_ci',       'mobile_money', "Orange Money Côte d'Ivoire",  'CI', 'inactive'),
-  ('mtn_ci',          'mobile_money', "MTN Mobile Money Côte d'Ivoire", 'CI', 'inactive'),
-  ('moov_ci',         'mobile_money', "Moov Money Côte d'Ivoire",    'CI', 'inactive'),
-  ('wave_ci',         'mobile_money', "Wave Côte d'Ivoire",           'CI', 'inactive'),
+  ('orange_ci',       'mobile_money', 'Orange Money Cote d''Ivoire',  'CI', 'inactive'),
+  ('mtn_ci',          'mobile_money', 'MTN Mobile Money Cote d''Ivoire', 'CI', 'inactive'),
+  ('moov_ci',         'mobile_money', 'Moov Money Cote d''Ivoire',    'CI', 'inactive'),
+  ('wave_ci',         'mobile_money', 'Wave Cote d''Ivoire',           'CI', 'inactive'),
   -- Mobile Money — Cameroun
   ('mtn_cm',          'mobile_money', 'MTN Mobile Money Cameroun',    'CM', 'inactive'),
   ('orange_cm',       'mobile_money', 'Orange Money Cameroun',        'CM', 'inactive'),
@@ -142,14 +164,48 @@ VALUES
   ('mpgs',            'card_gateway', 'MPGS (Mastercard ToP)',         NULL, 'inactive'),
   ('stripe',          'card_gateway', 'Stripe Terminal',               NULL, 'inactive'),
   ('migs',            'card_gateway', 'MIGS (Mastercard IGS)',         NULL, 'inactive'),
-  ('gimac',           'card_gateway', 'GIMAC (Réseau CEMAC)',          NULL, 'inactive')
+  ('gimac',           'card_gateway', 'GIMAC (Réseau CEMAC)',          NULL, 'inactive'),
+  ('visa_direct',     'card_gateway', 'Visa Direct Funds Transfer',     NULL, 'inactive'),
+  ('visa_account_wallet', 'card_gateway', 'Visa Account and Wallet Payouts', NULL, 'inactive'),
+  ('mastercard_developers', 'card_gateway', 'Mastercard Developers API', NULL, 'inactive')
 ON CONFLICT (provider_key) DO NOTHING;
 
--- ─── Seed admin par défaut ────────────────────────────────────────
--- Mot de passe : Admin@CPlus2024  (changer immédiatement en production)
-INSERT INTO admin_users (email, password_hash, first_name, last_name, role)
-VALUES (
-  'admin@cplus.africa',
-  '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewBRQmjqEIy3l5Wy',
-  'Super', 'Admin', 'super_admin'
-) ON CONFLICT (email) DO NOTHING;
+INSERT INTO api_configurations (provider_key, provider_type, display_name, country, status, extra_params, notes)
+VALUES
+  ('interswitch_mpesa_cd',    'mobile_money', 'Interswitch Wallet DRC - M-Pesa',        'CD', 'inactive', '{"walletProvider":"MPESA"}',       'Wallet Payments API DRC: collect via mobile-wallet/initialize'),
+  ('interswitch_orange_cd',   'mobile_money', 'Interswitch Wallet DRC - Orange Money',  'CD', 'inactive', '{"walletProvider":"ORANGE"}',      'Wallet Payments API DRC: collect via mobile-wallet/initialize'),
+  ('interswitch_airtel_cd',   'mobile_money', 'Interswitch Wallet DRC - Airtel Money',  'CD', 'inactive', '{"walletProvider":"AIRTELMONEY"}', 'Wallet Payments API DRC: collect via mobile-wallet/initialize'),
+  ('interswitch_africell_cd', 'mobile_money', 'Interswitch Wallet DRC - Africell Money','CD', 'inactive', '{"walletProvider":"AFRIMONEY"}',   'Wallet Payments API DRC: collect via mobile-wallet/initialize'),
+  ('paymenthub_mpesa_cd',     'mobile_money', 'PaymentHub DRC - M-Pesa Payout',         'CD', 'inactive', '{"paymentItemCode":"MPESA"}',      'PaymentHub API v1.1: payout payment instruction'),
+  ('paymenthub_orange_cd',    'mobile_money', 'PaymentHub DRC - Orange Money Payout',   'CD', 'inactive', '{"paymentItemCode":"OM"}',         'PaymentHub API v1.1: payout payment instruction'),
+  ('paymenthub_airtel_cd',    'mobile_money', 'PaymentHub DRC - Airtel Money Payout',   'CD', 'inactive', '{"paymentItemCode":"AM"}',         'PaymentHub API v1.1: payout payment instruction'),
+  ('paymenthub_africell_cd',  'mobile_money', 'PaymentHub DRC - Africell Money Payout', 'CD', 'inactive', '{"paymentItemCode":"AFM"}',        'PaymentHub API v1.1: payout payment instruction')
+ON CONFLICT (provider_key) DO UPDATE SET
+  display_name = EXCLUDED.display_name,
+  country = EXCLUDED.country,
+  extra_params = api_configurations.extra_params || EXCLUDED.extra_params,
+  notes = EXCLUDED.notes,
+  updated_at = NOW();
+
+INSERT INTO country_payment_defaults (country, currency, mobile_money_providers, default_card_gateway)
+VALUES
+  ('SN', 'XOF', ARRAY['orange_sn','wave_sn','free_money_sn'], 'migs'),
+  ('CI', 'XOF', ARRAY['orange_ci','mtn_ci','moov_ci','wave_ci'], 'migs'),
+  ('CM', 'XAF', ARRAY['mtn_cm','orange_cm','express_union_cm','moov_cm'], 'migs'),
+  ('CG', 'XAF', ARRAY['mtn_cg','airtel_cg','orange_cg'], 'migs'),
+  ('CD', 'CDF', ARRAY[
+    'vodacom_cd','airtel_cd','orange_cd','africell_cd',
+    'interswitch_mpesa_cd','interswitch_orange_cd','interswitch_airtel_cd','interswitch_africell_cd',
+    'paymenthub_mpesa_cd','paymenthub_orange_cd','paymenthub_airtel_cd','paymenthub_africell_cd'
+  ], 'migs')
+ON CONFLICT (country) DO UPDATE SET
+  currency = EXCLUDED.currency,
+  mobile_money_providers = EXCLUDED.mobile_money_providers,
+  default_card_gateway = EXCLUDED.default_card_gateway,
+  updated_at = NOW();
+
+-- ─── Premier administrateur ────────────────────────────────────────
+-- Initialisation admin: utiliser une procedure d'exploitation securisee.
+-- Aucun compte admin par defaut n'est cree.
+-- Creer le premier super_admin via une procedure d'exploitation securisee
+-- avec un mot de passe unique hashe en bcrypt.

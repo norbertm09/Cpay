@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CPlus — Télécharger l'application</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f6f8fb; color: #243247; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .wrap { width: 100%; max-width: 680px; padding: 24px; }
+    .logo { text-align: center; margin-bottom: 32px; }
+    .logo img { height: 52px; object-fit: contain; }
+    .card { background: #fff; border: 1px solid #d7dee8; border-radius: 16px; padding: 32px; margin-bottom: 20px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .sub { color: #5a6270; font-size: 14px; margin-bottom: 28px; }
+    .btn-primary { display: flex; align-items: center; gap: 14px; background: #12b6c7; color: #fff; border: none; border-radius: 12px; padding: 16px 24px; font-size: 16px; font-weight: 700; cursor: pointer; text-decoration: none; width: 100%; margin-bottom: 12px; }
+    .btn-primary:hover { background: #0fa3b3; }
+    .btn-play { display: flex; align-items: center; gap: 14px; background: #1d4f92; color: #fff; border: none; border-radius: 12px; padding: 16px 24px; font-size: 16px; font-weight: 700; cursor: pointer; text-decoration: none; width: 100%; margin-bottom: 12px; }
+    .btn-play:hover { background: #163d72; }
+    .btn-icon { width: 36px; height: 36px; flex-shrink: 0; }
+    .btn-text small { display: block; font-size: 11px; font-weight: 400; opacity: 0.85; }
+    .qr-section { display: flex; gap: 24px; align-items: center; margin-top: 24px; padding-top: 24px; border-top: 1px solid #d7dee8; }
+    .qr-box { flex-shrink: 0; }
+    .qr-box img { width: 120px; height: 120px; border: 1px solid #d7dee8; border-radius: 10px; }
+    .qr-info h3 { font-size: 15px; margin-bottom: 6px; }
+    .qr-info p { font-size: 13px; color: #5a6270; line-height: 1.6; }
+    .specs { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-top: 20px; }
+    .spec { background: #f6f8fb; border-radius: 10px; padding: 14px; text-align: center; }
+    .spec .val { font-size: 20px; font-weight: 700; color: #12b6c7; }
+    .spec .lbl { font-size: 11px; color: #5a6270; margin-top: 2px; }
+    .steps { counter-reset: step; }
+    .step { display: flex; gap: 14px; margin-bottom: 16px; align-items: flex-start; }
+    .step-num { width: 28px; height: 28px; border-radius: 50%; background: #12b6c7; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+    .step-content h4 { font-size: 14px; margin-bottom: 3px; }
+    .step-content p { font-size: 13px; color: #5a6270; line-height: 1.5; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: #12b6c722; color: #12b6c7; }
+    .version-info { font-size: 12px; color: #5a6270; text-align: center; margin-top: 16px; }
+    @media(max-width: 520px) { .qr-section { flex-direction: column; } .specs { grid-template-columns: repeat(2,1fr); } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <img src="/logo-calculus.png" alt="Calculus Plus" />
+  </div>
+
+  <!-- Card principale téléchargement -->
+  <div class="card">
+    <h1>📱 Application CPlus</h1>
+    <p class="sub">Terminal de paiement mobile — Android SoftPOS</p>
+
+    <!-- Téléchargement direct APK -->
+    <a href="/download/cplus-2.6.0.apk" class="btn-primary" download>
+      <svg class="btn-icon" viewBox="0 0 36 36" fill="none">
+        <circle cx="18" cy="18" r="18" fill="rgba(255,255,255,0.2)"/>
+        <path d="M18 10v12M12 16l6 6 6-6" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M10 26h16" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <div class="btn-text">
+        Télécharger l'APK directement
+        <small>CPlus v2.6.0 · Android 10+ · ~18 MB</small>
+      </div>
+    </a>
+
+    <!-- Google Play Store -->
+    <a href="https://play.google.com/store/apps/details?id=africa.calculus.plus" target="_blank" class="btn-play" id="playstore-btn">
+      <svg class="btn-icon" viewBox="0 0 36 36" fill="none">
+        <circle cx="18" cy="18" r="18" fill="rgba(255,255,255,0.2)"/>
+        <path d="M13 10.5l13 7.5-13 7.5V10.5z" fill="#fff"/>
+      </svg>
+      <div class="btn-text">
+        Disponible sur Google Play
+        <small>africa.calculus.plus</small>
+      </div>
+    </a>
+
+    <!-- Specs -->
+    <div class="specs">
+      <div class="spec"><div class="val">2.6.0</div><div class="lbl">Version</div></div>
+      <div class="spec"><div class="val">Android 10+</div><div class="lbl">Requis</div></div>
+      <div class="spec"><div class="val">NFC</div><div class="lbl">Tap to Phone</div></div>
+    </div>
+
+    <!-- QR Code -->
+    <div class="qr-section">
+      <div class="qr-box">
+        <canvas id="qr-canvas" width="120" height="120"></canvas>
+      </div>
+      <div class="qr-info">
+        <h3>Scanner pour télécharger</h3>
+        <p>Pointez la caméra de votre téléphone Android sur le QR code pour accéder directement au téléchargement.</p>
+        <div style="margin-top:8px"><span class="badge">NFC requis</span> <span class="badge" style="background:#1d4f9222;color:#1d4f92">Android 10+</span></div>
+      </div>
+    </div>
+
+    <p class="version-info">Version 2.6.0 · Mis à jour le <span id="update-date"></span> · <a href="/download/cplus-2.6.0-changelog.txt" style="color:#12b6c7">Changelog</a></p>
+  </div>
+
+  <!-- Card installation -->
+  <div class="card">
+    <h1 style="font-size:17px;margin-bottom:16px">📋 Guide d'installation</h1>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h4>Télécharger l'APK</h4>
+          <p>Cliquez sur "Télécharger l'APK" ci-dessus depuis votre téléphone Android. Assurez-vous d'être connecté au réseau.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h4>Autoriser les sources inconnues</h4>
+          <p>Allez dans <strong>Paramètres → Sécurité → Sources inconnues</strong> et activez l'option pour permettre l'installation.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h4>Installer l'APK</h4>
+          <p>Ouvrez le fichier téléchargé depuis le gestionnaire de fichiers et suivez les instructions d'installation.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <h4>Se connecter</h4>
+          <p>Lancez l'application CPlus et connectez-vous avec vos identifiants marchand. L'app se synchronise automatiquement.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+          <h4>Activer le NFC</h4>
+          <p>Vérifiez que le NFC est activé sur votre appareil : <strong>Paramètres → Connexions → NFC</strong>. Indispensable pour le Tap to Phone.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p style="text-align:center;font-size:12px;color:#5a6270;margin-top:16px">
+    Support : <a href="mailto:support@c-pay.global" style="color:#12b6c7">support@c-pay.global</a> · 
+    <a href="https://merchant.c-pay.global" style="color:#12b6c7">Espace marchand</a>
+  </p>
+</div>
+
+<script>
+  // Date de mise à jour
+  document.getElementById('update-date').textContent = new Date().toLocaleDateString('fr-FR');
+
+  // QR Code simple (canvas)
+  const canvas = document.getElementById('qr-canvas');
+  const ctx = canvas.getContext('2d');
+  const url = window.location.origin + '/download/cplus-2.6.0.apk';
+
+  // QR Code via API publique (Google Charts)
+  const img = new Image();
+  img.onload = () => ctx.drawImage(img, 0, 0, 120, 120);
+  img.src = `https://chart.googleapis.com/chart?cht=qr&chs=120x120&chl=${encodeURIComponent(url)}&choe=UTF-8`;
+
+  // Vérifier si APK disponible
+  fetch('/download/cplus-2.6.0.apk', { method: 'HEAD' })
+    .then(r => {
+      if (!r.ok) {
+        document.querySelector('.btn-primary').style.opacity = '0.5';
+        document.querySelector('.btn-primary').title = 'APK en cours de préparation';
+      }
+    }).catch(() => {});
+</script>
+</body>
+</html>

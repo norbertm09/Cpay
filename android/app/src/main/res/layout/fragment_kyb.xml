@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="16dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Documents KYB" android:textSize="20sp" android:textStyle="bold"
+            android:textColor="@color/primary_dark" android:layout_marginBottom="4dp"/>
+        <TextView android:id="@+id/tv_kyb_status" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:textSize="13sp"
+            android:textColor="@color/text_secondary" android:layout_marginBottom="16dp"/>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Type de document" android:textSize="12sp"
+            android:textColor="@color/text_secondary" android:layout_marginBottom="6dp"/>
+        <Spinner android:id="@+id/spinner_doc_type" android:layout_width="match_parent"
+            android:layout_height="48dp" android:background="@drawable/bg_input"
+            android:layout_marginBottom="12dp"/>
+        <TextView android:id="@+id/btn_pick_file" android:layout_width="match_parent"
+            android:layout_height="48dp" android:text="📎 Choisir un fichier"
+            android:textColor="@color/primary" android:textSize="14sp" android:textStyle="bold"
+            android:background="@drawable/bg_input" android:gravity="center"
+            android:layout_marginBottom="8dp" android:clickable="true" android:focusable="true"/>
+        <TextView android:id="@+id/tv_selected_file" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textSize="12sp"
+            android:textColor="@color/success" android:layout_marginBottom="12dp"/>
+        <TextView android:id="@+id/btn_upload_kyb" android:layout_width="match_parent"
+            android:layout_height="48dp" android:text="⬆ Envoyer le document"
+            android:textColor="#FFFFFF" android:textSize="14sp" android:textStyle="bold"
+            android:background="@drawable/bg_btn_primary" android:gravity="center"
+            android:layout_marginBottom="20dp" android:clickable="true" android:focusable="true"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Documents soumis" android:textSize="15sp" android:textStyle="bold"
+            android:textColor="@color/primary_dark" android:layout_marginBottom="8dp"/>
+        <TextView android:id="@+id/tv_no_docs" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Aucun document soumis"
+            android:textColor="@color/text_secondary" android:textSize="13sp"
+            android:gravity="center" android:padding="20dp" android:visibility="gone"/>
+        <LinearLayout android:id="@+id/layout_docs_list" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"/>
+    </LinearLayout>
+</ScrollView>

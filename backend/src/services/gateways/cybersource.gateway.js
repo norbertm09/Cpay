@@ -1,5 +1,5 @@
 /**
- * CyberSource REST API Gateway — CPlus 2.0
+ * CyberSource REST API Gateway — CPlus 2.6.0
  *
  * Doc officielle : https://developer.cybersource.com/api-reference-assets/index.html
  * Auth           : HTTP Signature v1 (HMAC-SHA256) — draft-cavage-http-signatures

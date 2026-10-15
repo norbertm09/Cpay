@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: '/api/v1/admin' });
+const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '';
+const api = axios.create({ baseURL: `${apiBaseUrl}/api/v1/admin` });
 
 api.interceptors.request.use(cfg => {
   const token = localStorage.getItem('admin_token');
@@ -46,6 +47,23 @@ export const terminalsApi = {
 
 export const auditApi = {
   list: (params) => api.get('/audit-logs', { params }),
+};
+
+export const supportApi = {
+  list: (params) => api.get('/support/tickets', { params }),
+  get: (id) => api.get(`/support/tickets/${id}`),
+  reply: (id, data) => api.post(`/support/tickets/${id}/messages`, data),
+  update: (id, data) => api.patch(`/support/tickets/${id}`, data),
+};
+
+export const pilotApi = {
+  programs: () => api.get('/pilot/programs'),
+  features: () => api.get('/pilot/features'),
+  readiness: () => api.get('/pilot/readiness'),
+  updateFeature: (flagKey, data) => api.put(`/pilot/features/${flagKey}`, data),
+  enroll: (pilotKey, data) => api.post(`/pilot/programs/${pilotKey}/enroll`, data),
+  merchantState: (merchantId) => api.get(`/pilot/merchants/${merchantId}`),
+  evaluate: (data) => api.post('/pilot/evaluate', data),
 };
 
 export default api;
