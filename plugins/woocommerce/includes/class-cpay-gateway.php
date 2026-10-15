@@ -1,14 +1,17 @@
 <?php
 defined('ABSPATH') || exit;
 
-class WC_CPlus_Gateway extends WC_Payment_Gateway {
+class WC_CPay_Gateway extends WC_Payment_Gateway {
 
     public function __construct() {
+        // L'identifiant `cplus` est conserve : il nomme la cle d'options
+        // (woocommerce_cplus_settings) et la section de reglages des boutiques
+        // deja configurees.
         $this->id                 = 'cplus';
-        $this->icon               = CPLUS_PLUGIN_URL . 'assets/logo-cplus.png';
+        $this->icon               = CPAY_PLUGIN_URL . 'assets/logo-cpay.png';
         $this->has_fields         = true;
-        $this->method_title       = 'CPlus — Mobile Money & Carte';
-        $this->method_description = 'Acceptez les paiements Mobile Money (Airtel Money, MTN MoMo) et carte bancaire via CPlus. Zone CEMAC.';
+        $this->method_title       = 'C-Pay — Mobile Money & Carte';
+        $this->method_description = 'Acceptez les paiements Mobile Money (Airtel Money, MTN MoMo) et carte bancaire via C-Pay (Calculus Plus). Zone CEMAC.';
         $this->supports           = ['products', 'refunds'];
 
         $this->init_form_fields();
@@ -29,21 +32,21 @@ class WC_CPlus_Gateway extends WC_Payment_Gateway {
             'enabled' => [
                 'title'   => 'Activer/Désactiver',
                 'type'    => 'checkbox',
-                'label'   => 'Activer CPlus Payment Gateway',
+                'label'   => 'Activer C-Pay Payment Gateway',
                 'default' => 'yes',
             ],
             'title' => [
                 'title'       => 'Titre',
                 'type'        => 'text',
                 'description' => 'Titre affiché au client lors du paiement.',
-                'default'     => '📱 CPlus — Mobile Money & Carte',
+                'default'     => '📱 C-Pay — Mobile Money & Carte',
                 'desc_tip'    => true,
             ],
             'description' => [
                 'title'       => 'Description',
                 'type'        => 'textarea',
                 'description' => 'Description affichée au client.',
-                'default'     => 'Payez avec Airtel Money, MTN MoMo ou votre carte bancaire via CPlus.',
+                'default'     => 'Payez avec Airtel Money, MTN MoMo ou votre carte bancaire via C-Pay.',
             ],
             'environment' => [
                 'title'       => 'Environnement',
@@ -58,21 +61,22 @@ class WC_CPlus_Gateway extends WC_Payment_Gateway {
             'api_key' => [
                 'title'       => 'API Key (sk_live_xxx)',
                 'type'        => 'text',
-                'description' => 'Votre clé API CPlus. Disponible dans Merchant Portal → API Keys.',
+                'description' => 'Votre clé API C-Pay. Disponible dans le portail marchand (merchant.c-pay.global) → Clés API.',
                 'default'     => '',
                 'desc_tip'    => true,
             ],
             'api_secret' => [
                 'title'       => 'API Secret',
                 'type'        => 'password',
-                'description' => 'Votre secret API CPlus.',
+                'description' => 'Votre secret API C-Pay.',
                 'default'     => '',
                 'desc_tip'    => true,
             ],
             'webhook_secret' => [
                 'title'       => 'Webhook Secret',
                 'type'        => 'password',
-                'description' => 'Secret pour valider les webhooks CPlus. URL webhook : ' . home_url('/wc-api/cplus_webhook'),
+                'description' => 'Secret pour valider les webhooks C-Pay (en-tête X-CPay-Signature). URL webhook à déclarer dans le portail marchand : '
+                                 . home_url('/wc-api/cpay_webhook') . ' (l\'ancienne URL /wc-api/cplus_webhook reste acceptée).',
                 'default'     => '',
                 'desc_tip'    => true,
             ],
@@ -154,8 +158,8 @@ class WC_CPlus_Gateway extends WC_Payment_Gateway {
         $phone  = sanitize_text_field($_POST['cplus_phone'] ?? '');
         $amount = $order->get_total();
 
-        // Appel API CPlus
-        $api      = new CPlus_API($this->api_key, $this->api_secret, $this->environment);
+        // Appel API C-Pay
+        $api      = new CPay_API($this->api_key, $this->api_secret, $this->environment);
         $response = $api->create_pay_link([
             'amount'      => $amount,
             'currency'    => 'XAF',
@@ -164,19 +168,20 @@ class WC_CPlus_Gateway extends WC_Payment_Gateway {
             'reference'   => 'WC-' . $order_id,
             'description' => 'Commande #' . $order_id . ' — ' . get_bloginfo('name'),
             'returnUrl'   => $this->get_return_url($order),
-            'webhookUrl'  => home_url('/wc-api/cplus_webhook'),
+            'webhookUrl'  => home_url('/wc-api/cpay_webhook'),
         ]);
 
         if (is_wp_error($response)) {
-            wc_add_notice('Erreur CPlus: ' . $response->get_error_message(), 'error');
+            wc_add_notice('Erreur C-Pay: ' . $response->get_error_message(), 'error');
             return ['result' => 'fail'];
         }
 
-        // Sauvegarder l'ID de transaction CPlus
+        // Sauvegarder l'ID de transaction C-Pay (meta `_cplus_*` conservees
+        // pour les commandes existantes)
         $order->update_meta_data('_cplus_txn_id',  $response['txnId'] ?? '');
         $order->update_meta_data('_cplus_method',   $method);
         $order->update_meta_data('_cplus_ref',      $response['reference'] ?? '');
-        $order->update_status('pending', 'En attente de confirmation CPlus.');
+        $order->update_status('pending', 'En attente de confirmation C-Pay.');
         $order->save();
 
         // Redirection selon le mode
@@ -195,11 +200,14 @@ class WC_CPlus_Gateway extends WC_Payment_Gateway {
     public function process_refund($order_id, $amount = null, $reason = '') {
         $order  = wc_get_order($order_id);
         $txn_id = $order->get_meta('_cplus_txn_id');
-        if (!$txn_id) return new WP_Error('no_txn', 'Transaction CPlus introuvable');
-        $api    = new CPlus_API($this->api_key, $this->api_secret, $this->environment);
+        if (!$txn_id) return new WP_Error('no_txn', 'Transaction C-Pay introuvable');
+        $api    = new CPay_API($this->api_key, $this->api_secret, $this->environment);
         $result = $api->refund($txn_id, $amount, $reason);
         if (is_wp_error($result)) return $result;
-        $order->add_order_note('Remboursement CPlus effectué — ' . $amount . ' XAF');
+        $order->add_order_note('Remboursement C-Pay effectué — ' . $amount . ' XAF');
         return true;
     }
 }
+
+// Alias historique (2.6.x)
+if (!class_exists('WC_CPlus_Gateway', false)) { class_alias('WC_CPay_Gateway', 'WC_CPlus_Gateway'); }

@@ -1,9 +1,11 @@
-export interface CPlusOptions {
+export interface CPayOptions {
   apiKey: string;
   baseUrl?: string;
   timeout?: number;
   currency?: string;
 }
+/** @deprecated utiliser CPayOptions */
+export type CPlusOptions = CPayOptions;
 
 export interface CollectMomoParams {
   amount: number;
@@ -49,13 +51,13 @@ export interface PayLinkResponse {
   expires_at: string;
 }
 
-export class CPlusError extends Error {
+export class CPayError extends Error {
   code: string;
   statusCode: number;
 }
 
-export class CPlusClient {
-  constructor(options: CPlusOptions);
+export class CPayClient {
+  constructor(options: CPayOptions);
   readonly sandbox: boolean;
 
   collection: {
@@ -79,5 +81,16 @@ export class CPlusClient {
     cancel(payLinkId: string): Promise<{ success: boolean }>;
   };
 
-  static verifyWebhook(payload: string, signature: string, webhookSecret: string): boolean;
+  /** Lit X-CPay-Signature, puis X-CPlus-Signature (ancien nom). */
+  static signatureFromHeaders(headers: Record<string, string | string[] | undefined>): string | null;
+  /** `signature` peut etre la valeur de l'en-tete ou l'objet req.headers. */
+  static verifyWebhook(payload: string | Buffer | object, signature: string | Record<string, string | string[] | undefined>, webhookSecret: string): boolean;
 }
+
+/** En-tetes de signature acceptes, par ordre de preference. */
+export const SIGNATURE_HEADERS: readonly string[];
+
+/** @deprecated utiliser CPayClient */
+export const CPlusClient: typeof CPayClient;
+/** @deprecated utiliser CPayError */
+export const CPlusError: typeof CPayError;

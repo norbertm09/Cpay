@@ -7,7 +7,7 @@ import global.cpay.sdk.models.*
 import global.cpay.sdk.ui.CPlusPaymentSheet
 
 /**
- * CPlus SDK v2.6.0
+ * C-Pay Android SDK v2.7.0
  * Calculus Plus SAS — https://c-pay.global
  *
  * Usage:
@@ -23,7 +23,7 @@ object CPlus {
     internal var api: CPlusAPI? = null
 
     /**
-     * Initialiser le SDK CPlus
+     * Initialiser le SDK C-Pay
      * @param context ApplicationContext
      * @param config  Configuration (apiKey, apiSecret, env)
      */
@@ -31,7 +31,7 @@ object CPlus {
         this.config = config
         this.api    = CPlusAPI(config)
         CPlusLogger.enabled = config.debugMode
-        CPlusLogger.log("CPlus SDK v2.6.0 initialisé — env: ${config.env}")
+        CPlusLogger.log("C-Pay SDK v2.7.0 initialisé — env: ${config.env}")
     }
 
     /**
@@ -120,7 +120,7 @@ object CPlus {
 
     private fun checkInit() {
         if (config == null || api == null) {
-            throw CPlusException("CPlus SDK non initialisé. Appelez CPlus.init(context, config) dans votre Application.onCreate()")
+            throw CPlusException("C-Pay SDK non initialisé. Appelez CPay.init(context, config) dans votre Application.onCreate()")
         }
     }
 

@@ -2,36 +2,77 @@ import React, { useState, useEffect, useCallback, createContext, useContext } fr
 import axios from 'axios';
 import { BrowserRouter, Routes, Route, Link, useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { Toaster, toast } from 'react-hot-toast';
+import { QRCodeSVG } from 'qrcode.react';
 
 const BASE = process.env.REACT_APP_API_BASE_URL || '';
-const api  = axios.create({ baseURL: `${BASE}/api/v1/partners` });
+
+// Jeton d'acces (15 min) dans localStorage sous pt_token ; le refresh opaque
+// est dans le cookie HttpOnly cp_rt_partner (path /api/v1/partners/auth)
+// pose par le backend, d'ou withCredentials sur l'instance.
+const TOKEN_KEY = 'pt_token', USER_KEY = 'pt_user';
+const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } };
+const setToken = (t) => { try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* navigation privee */ } };
+const purgeSession = () => { try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); } catch (e) {} };
+
+// Decodage local du JWT (base64url, expiration verifiee). Repli si
+// /auth/me est injoignable ; GET /auth/me reste la source du profil.
+const decodeJwt = (t) => {
+  try {
+    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const p = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
+    if (!p.exp || p.exp * 1000 <= Date.now()) return null;
+    return p;
+  } catch { return null; }
+};
+const tokenValid = (t) => !!decodeJwt(t || '');
+
+const api  = axios.create({ baseURL: `${BASE}/api/v1/partners`, withCredentials: true });
 api.interceptors.request.use(cfg => {
-  const t = localStorage.getItem('pt_token');
+  const t = getToken();
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
   return cfg;
 });
-api.interceptors.response.use(r => r, e => {
+
+// Refresh nu (hors instance api) et single-flight : les 401 concurrents
+// attendent la meme promesse, sinon la rotation revoquerait les suivants.
+const callRefresh = () => axios.post(`${BASE}/api/v1/partners/auth/refresh`, {}, { withCredentials: true });
+let refreshPromise = null;
+const refreshAccessToken = () => {
+  if (!refreshPromise) {
+    refreshPromise = callRefresh()
+      .then(({ data }) => {
+        if (!data.access_token) throw new Error('no access_token');
+        setToken(data.access_token);
+        return data.access_token;
+      })
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+};
+
+// Routes d'authentification non protegees : un 401 est une reponse metier.
+const NO_REFRESH_RE = /\/auth\/(login|refresh|2fa\/validate|forgot-password|reset-password)(\?|$)/;
+// Purge token ET utilisateur, sinon AuthProvider relit pt_user -> boucle /login -> / -> 401
+const logoutLocal = () => { purgeSession(); if (window.location.pathname !== '/login') window.location = '/login'; };
+
+api.interceptors.response.use(r => r, async e => {
   const st = e.response?.status;
-  if (st === 401) {
-    // Purge token ET utilisateur, sinon AuthProvider relit pt_user -> boucle /login -> / -> 401
-    localStorage.removeItem('pt_token'); localStorage.removeItem('pt_user');
-    if (window.location.pathname !== '/login') window.location = '/login';
+  const original = e.config;
+  const isAuthRoute = NO_REFRESH_RE.test(original?.url || '');
+  if (st === 401 && original && !original._retry && !isAuthRoute) {
+    original._retry = true;
+    try {
+      const t = await refreshAccessToken();
+      original.headers.Authorization = `Bearer ${t}`;
+      return api(original);
+    } catch (err) { logoutLocal(); }
   } else if (st === 403) {
     toast.error('Accès refusé');
   } else if (st === 410 || e.response?.data?.code === 'FEATURE_DISABLED') {
-    toast.error('Fonctionnalité en cours d\u2019intégration'); // collect / disburse partenaires (hotfix v1)
+    toast.error('Fonctionnalité en cours d’intégration'); // collect / disburse partenaires (hotfix v1)
   }
   return Promise.reject(e);
 });
-
-// Session valide uniquement si le JWT n'est pas expire (base64url -> base64).
-const tokenValid = (t) => {
-  try {
-    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const payload = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
-    return !!payload.exp && payload.exp * 1000 > Date.now();
-  } catch { return false; }
-};
 
 const FONT = "Inter, 'Century Gothic', 'URW Gothic', Jost, system-ui, sans-serif";
 const FONT_TITRE = "Jost, 'Century Gothic', 'URW Gothic', Questrial, system-ui, sans-serif";
@@ -170,20 +211,81 @@ const getNav = (role) => [
   { p:'/profile',       l:'👤 Mon Profil',     roles:['bank_admin','bank_user','agency_admin','agency_user','agent','caissier_maker','caissier_checker','controleur','financier','customer_care'] },
 ].filter(i => i.roles.includes(role));
 
-const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => {
-    try {
-      const t = localStorage.getItem('pt_token');
-      if (!t || !tokenValid(t)) { localStorage.removeItem('pt_token'); localStorage.removeItem('pt_user'); return null; }
-      return JSON.parse(localStorage.getItem('pt_user'));
-    } catch { return null; }
-  });
-  const login  = (token, u) => { localStorage.setItem('pt_token', token); localStorage.setItem('pt_user', JSON.stringify(u)); setUser(u); };
-  const logout = () => { localStorage.removeItem('pt_token'); localStorage.removeItem('pt_user'); setUser(null); };
-  return <AuthCtx.Provider value={{ user, login, logout }}>{children}</AuthCtx.Provider>;
+// GET /auth/me renvoie les colonnes brutes (user_id/agent_id, first_name,
+// bank_name, is_mfa_enabled...). On les ramene a la forme renvoyee par
+// /auth/login ({ id, name, email, role, type, bankName... }) que tout le
+// portail consomme, en conservant ce que l'on savait deja (prev).
+const normalizeProfile = (raw, prev, claims) => ({
+  ...(prev || {}),
+  id:           raw.agent_id || raw.user_id || prev?.id || claims?.sub,
+  name:         [raw.first_name, raw.last_name].filter(Boolean).join(' ') || prev?.name || '',
+  email:        raw.email ?? prev?.email ?? claims?.email,
+  role:         raw.role ?? prev?.role ?? claims?.role,
+  type:         raw.agent_id ? 'agent' : (prev?.type || claims?.type || 'bank_user'),
+  phone:        raw.phone ?? prev?.phone ?? null,
+  bankId:       raw.bank_id ?? prev?.bankId ?? claims?.bankId ?? null,
+  agencyId:     raw.agency_id ?? prev?.agencyId ?? claims?.agencyId ?? null,
+  bankName:     raw.bank_name ?? prev?.bankName ?? null,
+  agencyName:   raw.agency_name ?? prev?.agencyName ?? null,
+  floatBalance: raw.float_balance ?? prev?.floatBalance ?? null,
+  floatLimit:   raw.float_limit ?? prev?.floatLimit ?? null,
+  mfaEnabled:   raw.is_mfa_enabled != null ? !!raw.is_mfa_enabled : !!prev?.mfaEnabled,
+});
+
+// Repli (reseau coupe) : profil stocke au login, sinon claims du jeton.
+const userFromClaims = (c, stored) => stored || (c ? ({ id: c.sub, email: c.email, role: c.role, type: c.type, bankId: c.bankId, agencyId: c.agencyId, name: c.email }) : null);
+
+const readStoredUser = () => { try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch { return null; } };
+
+const fetchProfile = async (t) => {
+  const stored = readStoredUser();
+  try {
+    const { data } = await api.get('/auth/me');
+    const u = { ...normalizeProfile(data.user || {}, stored, decodeJwt(t)), mustChangePassword: !!data.mustChangePassword };
+    try { localStorage.setItem(USER_KEY, JSON.stringify(u)); } catch (e) {}
+    return u;
+  } catch (err) {
+    const st = err.response?.status;
+    if (st === 401 || st === 404) { logoutLocal(); return null; }
+    return userFromClaims(decodeJwt(t), stored);
+  }
 };
 
-const Guard = ({ children }) => { const { user } = useAuth(); return user ? children : <Navigate to="/login" />; };
+const AuthProvider = ({ children }) => {
+  // Etat initial : profil stocke si le jeton est encore valide, sinon null en
+  // attendant le refresh silencieux (le cookie survit au jeton de 15 min).
+  const [user, setUser] = useState(() => (tokenValid(getToken()) ? readStoredUser() : null));
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const boot = async () => {
+      let t = getToken();
+      if (!tokenValid(t)) {
+        // Jeton absent/expire : on ne tente le refresh que si une session a existe.
+        if (!readStoredUser() && !t) return;
+        try { t = await refreshAccessToken(); } catch { purgeSession(); return; }
+      }
+      const p = await fetchProfile(t);
+      if (!cancelled) setUser(p);
+    };
+    boot().finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const login  = (token, u) => { setToken(token); try { localStorage.setItem(USER_KEY, JSON.stringify(u)); } catch (e) {} setUser(u); fetchProfile(token).then(p => { if (p) setUser(p); }); };
+  // Etat local vide immediatement (la page /login ne renvoie pas sur '/'),
+  // puis revocation du refresh cote serveur et purge du stockage.
+  const logout = () => { setUser(null); api.post('/auth/logout').catch(() => {}).finally(() => purgeSession()); };
+  const reloadUser = async () => { const t = getToken(); if (!t) return null; const p = await fetchProfile(t); if (p) setUser(p); return p; };
+  return <AuthCtx.Provider value={{ user, login, logout, loading, reloadUser }}>{children}</AuthCtx.Provider>;
+};
+
+const Guard = ({ children }) => {
+  const { user, loading } = useAuth();
+  if (loading) return <Spin />;
+  return user ? children : <Navigate to="/login" />;
+};
 
 
 // ─── CONSENT MODAL ────────────────────────────────────────────────
@@ -269,7 +371,7 @@ const Login = () => {
     if (data.mustChangePassword) {
       // Token pose pour autoriser /auth/change-password, mais l'utilisateur n'est
       // "connecte" (AuthProvider) qu'une fois le mot de passe change.
-      localStorage.setItem('pt_token', data.access_token);
+      setToken(data.access_token);
       setForcePwd({ token: data.access_token, user: data.user }); setView('password'); return;
     }
     login(data.access_token, data.user); navigate('/');
@@ -1372,8 +1474,15 @@ const Profile = () => {
                 2. Entrez le code à 6 chiffres pour confirmer
               </div>
               <div style={{ textAlign:'center', marginBottom:12 }}>
-                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(mfaSetup.qrCode)}`}
-                  alt="QR 2FA" style={{ width:180, height:180, border:`1px solid ${BORDER}`, borderRadius:8 }} />
+                {/* QR genere localement a partir de l'URI otpauth (plus d'appel a un
+                    service tiers). Repli : image data: renvoyee par le backend. */}
+                {mfaSetup.otpauthUrl ? (
+                  <div role="img" aria-label="QR 2FA" style={{ width:180, height:180, border:`1px solid ${BORDER}`, borderRadius:8, background:'#fff', boxSizing:'border-box', padding:8, display:'inline-block' }}>
+                    <QRCodeSVG value={mfaSetup.otpauthUrl} size={162} level="M" />
+                  </div>
+                ) : mfaSetup.qrCode ? (
+                  <img src={mfaSetup.qrCode} alt="QR 2FA" style={{ width:180, height:180, border:`1px solid ${BORDER}`, borderRadius:8 }} />
+                ) : null}
               </div>
               <div style={{ background:BG, borderRadius:6, padding:'6px 10px', fontSize:11, fontFamily:'monospace', marginBottom:12, wordBreak:'break-all' }}>
                 {mfaSetup.secret}

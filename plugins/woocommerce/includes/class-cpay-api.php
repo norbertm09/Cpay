@@ -1,7 +1,7 @@
 <?php
 defined('ABSPATH') || exit;
 
-class CPlus_API {
+class CPay_API {
     private $api_key;
     private $api_secret;
     private $base_url;
@@ -9,7 +9,7 @@ class CPlus_API {
     public function __construct($api_key, $api_secret, $environment = 'sandbox') {
         $this->api_key    = $api_key;
         $this->api_secret = $api_secret;
-        $this->base_url   = 'https://api.c-pay.global/api/v1';
+        $this->base_url   = defined('CPAY_API_BASE') ? CPAY_API_BASE : 'https://api.c-pay.global/api/v1';
     }
 
     private function request($method, $endpoint, $data = []) {
@@ -20,7 +20,7 @@ class CPlus_API {
                 'Content-Type'  => 'application/json',
                 'X-API-Key'     => $this->api_key,
                 'X-API-Secret'  => $this->api_secret,
-                'User-Agent'    => 'CPlus-WooCommerce/' . CPLUS_VERSION,
+                'User-Agent'    => 'CPay-WooCommerce/' . CPAY_VERSION,
             ],
             'timeout' => 30,
         ];
@@ -30,7 +30,7 @@ class CPlus_API {
         $body = json_decode(wp_remote_retrieve_body($response), true);
         $code = wp_remote_retrieve_response_code($response);
         if ($code >= 400) {
-            return new WP_Error('cplus_api_error', $body['error'] ?? 'Erreur API CPlus (' . $code . ')');
+            return new WP_Error('cpay_api_error', $body['error'] ?? 'Erreur API C-Pay (' . $code . ')');
         }
         return $body;
     }
@@ -51,3 +51,6 @@ class CPlus_API {
         ]);
     }
 }
+
+// Alias historique (2.6.x)
+if (!class_exists('CPlus_API', false)) { class_alias('CPay_API', 'CPlus_API'); }

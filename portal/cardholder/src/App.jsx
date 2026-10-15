@@ -1,4 +1,4 @@
-// C-Pay 2.6.0 — Cardholder Portal
+// C-Pay 2.7.0 — Cardholder Portal
 // Virtual Card: Payment, Top-up, Unload, History, PIN, Profile
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
@@ -7,27 +7,154 @@ import toast, { Toaster } from 'react-hot-toast';
 
 // ─── Config ───────────────────────────────────────────────────────
 const BASE = process.env.REACT_APP_API_BASE_URL || '';
-const api  = axios.create({ baseURL: `${BASE}/api/v1/cardholder` });
+
+// Jeton d'acces (15 min) dans localStorage sous ch_token ; le refresh opaque
+// est dans le cookie HttpOnly cp_rt_cardholder (path /api/v1/cardholder/auth)
+// pose par le backend, d'ou withCredentials sur l'instance.
+const TOKEN_KEY = 'ch_token';
+const tokenListeners = new Set();
+const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } };
+const setToken = (t) => {
+  try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* navigation privee */ }
+  tokenListeners.forEach(fn => fn(t || null));
+};
+const clearToken = () => setToken(null);
+
+// Decodage local du JWT (base64url, expiration verifiee). Repli si
+// /auth/me est injoignable ; GET /auth/me reste la source du profil.
+const decodeJwt = (t) => {
+  try {
+    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const p = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
+    if (!p.exp || p.exp * 1000 <= Date.now()) return null;
+    return p;
+  } catch (e) { return null; }
+};
+
+const api  = axios.create({ baseURL: `${BASE}/api/v1/cardholder`, withCredentials: true });
 api.interceptors.request.use(cfg => {
-  const token = localStorage.getItem('ch_token');
+  const token = getToken();
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
   return cfg;
 });
-api.interceptors.response.use(r => r, err => {
+
+// Refresh nu (hors instance api) et single-flight : les 401 concurrents
+// attendent la meme promesse, sinon la rotation revoquerait les suivants.
+const callRefresh = () => axios.post(`${BASE}/api/v1/cardholder/auth/refresh`, {}, { withCredentials: true });
+let refreshPromise = null;
+const refreshAccessToken = () => {
+  if (!refreshPromise) {
+    refreshPromise = callRefresh()
+      .then(({ data }) => {
+        if (!data.access_token) throw new Error('no access_token');
+        setToken(data.access_token);
+        return data.access_token;
+      })
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+};
+
+// Routes d'authentification non protegees : un 401 est une reponse metier.
+const NO_REFRESH_RE = /\/auth\/(login|refresh|register|2fa\/validate|forgot-password|reset-password|verify-email)(\?|$)/;
+const logoutLocal = () => { clearToken(); if (window.location.pathname !== '/login') window.location.href = '/login'; };
+
+api.interceptors.response.use(r => r, async err => {
   const st = err.response?.status;
-  if (st === 401) { localStorage.removeItem('ch_token'); if (window.location.pathname !== '/login') window.location.href = '/login'; }
+  const original = err.config;
+  const isAuthRoute = NO_REFRESH_RE.test(original?.url || '');
+  if (st === 401 && original && !original._retry && !isAuthRoute) {
+    original._retry = true;
+    try {
+      const t = await refreshAccessToken();
+      original.headers.Authorization = `Bearer ${t}`;
+      return api(original);
+    } catch (e) { logoutLocal(); }
+  }
   else if (st === 403) { toast.error('Accès refusé'); }
-  else if (st === 410 || err.response?.data?.code === 'FEATURE_DISABLED') { toast.error('Fonctionnalité en cours d\u2019intégration'); } // topup / unload / paiement tokenisé (hotfix v1)
+  else if (st === 410 || err.response?.data?.code === 'FEATURE_DISABLED') { toast.error('Fonctionnalité en cours d’intégration'); } // topup / unload / paiement tokenisé (hotfix v1)
   return Promise.reject(err);
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────
-const useAuth = () => {
-  const token = localStorage.getItem('ch_token');
-  const user  = token ? (() => { try { return JSON.parse(atob(token.split('.')[1])); } catch { return null; } })() : null;
-  return { isAuth: !!user && user.exp * 1000 > Date.now(), user };
+//
+// Profil de reference : GET /auth/me -> { cardholder:{cardholderId,firstName,
+// lastName,email,phone,kycLevel,mfaEnabled}, card, mustChangePassword }.
+// userId (consentement) = cardholderId.
+const userFromClaims = (c) => c ? ({ userId: c.sub, cardholderId: c.sub, cardId: c.cardId, email: c.email, _source: 'token' }) : null;
+
+const fetchProfile = async (t) => {
+  try {
+    const { data } = await api.get('/auth/me');
+    const ch = data.cardholder || {};
+    return { ...ch, userId: ch.cardholderId, card: data.card || null, mustChangePassword: !!data.mustChangePassword, _source: 'me' };
+  } catch (err) {
+    const st = err.response?.status;
+    if (st === 401 || st === 404) { logoutLocal(); return null; }
+    return userFromClaims(decodeJwt(t));
+  }
 };
-const Guard = ({ children }) => { const { isAuth } = useAuth(); return isAuth ? children : <Navigate to="/login" replace />; };
+
+const AuthContext = React.createContext(null);
+const AuthProvider = ({ children }) => {
+  const [token, setTok] = useState(getToken());
+  const [user, setUser] = useState(null);
+  const [refreshing, setRefreshing] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  useEffect(() => { tokenListeners.add(setTok); return () => { tokenListeners.delete(setTok); }; }, []);
+
+  // Jeton absent ou expire au demarrage : refresh silencieux par cookie.
+  useEffect(() => {
+    let cancelled = false;
+    if (decodeJwt(getToken() || '')) { setRefreshing(false); return; }
+    refreshAccessToken()
+      .catch(() => { if (!cancelled) clearToken(); })
+      .finally(() => { if (!cancelled) setRefreshing(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const reloadUser = useCallback(async () => {
+    const t = getToken();
+    if (!t) { setUser(null); return null; }
+    setProfileLoading(true);
+    try { const p = await fetchProfile(t); setUser(p); return p; }
+    finally { setProfileLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (!token) { setUser(null); return; }
+    if (user && user._source === 'me') return; // simple renouvellement du jeton
+    let cancelled = false;
+    setProfileLoading(true);
+    fetchProfile(token)
+      .then(p => { if (!cancelled) setUser(p); })
+      .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const isAuth = !!token && !!decodeJwt(token);
+  const loading = refreshing || (isAuth && !user);
+  return <AuthContext.Provider value={{ isAuth, loading, user, reloadUser }}>{children}</AuthContext.Provider>;
+};
+
+const useAuth = () => {
+  const ctx = React.useContext(AuthContext);
+  if (!ctx) {
+    const claims = decodeJwt(getToken() || '');
+    return { isAuth: !!claims, loading: false, user: userFromClaims(claims), reloadUser: async () => null };
+  }
+  return ctx;
+};
+
+const AuthSplash = () => (
+  <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#f0f4f8', color:'#5a6677', fontSize:14 }}>Chargement…</div>
+);
+const Guard = ({ children }) => {
+  const { isAuth, loading } = useAuth();
+  if (loading) return <AuthSplash />;
+  return isAuth ? children : <Navigate to="/login" replace />;
+};
 
 // ─── i18n ─────────────────────────────────────────────────────────
 const T = {
@@ -389,7 +516,7 @@ const Layout = ({ children, lang, toggleLang }) => {
         </nav>
         <div style={{ padding:'12px 16px', borderTop:`1px solid ${BORDER}` }}>
           <button onClick={toggleLang} style={{ background:'none', border:`1px solid ${BORDER}`, color:TEXT, padding:'6px 10px', borderRadius:6, cursor:'pointer', fontSize:12, marginBottom:8, width:'100%', fontFamily:FONT }}>🌐 {t('language')}</button>
-          <button onClick={() => { localStorage.removeItem('ch_token'); navigate('/login'); }} style={{ background:'none', border:`1px solid ${BORDER}`, color:MUTED, padding:'6px 10px', borderRadius:6, cursor:'pointer', fontSize:12, width:'100%', fontFamily:FONT }}>{t('logout')}</button>
+          <button onClick={() => { api.post('/auth/logout').catch(() => {}).finally(() => { clearToken(); navigate('/login'); }); }} style={{ background:'none', border:`1px solid ${BORDER}`, color:MUTED, padding:'6px 10px', borderRadius:6, cursor:'pointer', fontSize:12, width:'100%', fontFamily:FONT }}>{t('logout')}</button>
           <div style={{ marginTop:12, paddingTop:10, borderTop:`1px solid ${BORDER}`, fontSize:10, color:MUTED, textAlign:'center' }}>
             <a href="https://c-pay.global/legal/cgu.html" target="_blank" rel="noreferrer" style={{ color:MUTED, display:'block', marginBottom:2 }}>CGU</a>
             <a href="https://c-pay.global/legal/confidentialite.html" target="_blank" rel="noreferrer" style={{ color:MUTED }}>Confidentialité</a>
@@ -695,7 +822,7 @@ const Login = ({ lang, toggleLang }) => {
 
   const finishLogin = (data) => {
     if (data.mfaRequired && data.mfaToken) { setMfa({ mfaToken: data.mfaToken }); return; }
-    if (data.access_token) localStorage.setItem('ch_token', data.access_token);
+    if (data.access_token) setToken(data.access_token);
     if (data.mustChangePassword) { setForcePwd(true); return; }
     navigate('/');
   };
@@ -3176,6 +3303,7 @@ export default function App() {
   const { lang, toggle } = useLang();
   return (
     <BrowserRouter>
+      <AuthProvider>
       <Toaster position="top-right" toastOptions={{ style:{ fontFamily:FONT, fontSize:13 } }} />
       <Routes>
         <Route path="/login"          element={<Login         lang={lang} toggleLang={toggle} />} />
@@ -3200,6 +3328,7 @@ export default function App() {
           </Guard>
         } />
       </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

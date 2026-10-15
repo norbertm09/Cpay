@@ -257,16 +257,16 @@ function verify(rawBody, signatureHeader, secret) {
     <section class="section" id="sdk">
       <div class="container doc">
         <h2>SDK Android et extension WooCommerce</h2>
-        <p class="note">Les archives ci-dessous sont celles de la version 2.6.0. Vérifiez l'empreinte SHA-256 après téléchargement (<code>sha256sum fichier.zip</code>).</p>
+        <p class="note">Les archives ci-dessous sont celles de la version 2.7.0. Vérifiez l'empreinte SHA-256 après téléchargement (<code>sha256sum fichier.zip</code>).</p>
 
         <div class="card mb-4">
           <div class="dl-card">
             <div>
               <h3>Extension WooCommerce</h3>
               <p>Ajoute C-Pay comme moyen de paiement dans WooCommerce 6.0+ (PHP 7.4+). Encaissement Mobile Money et lien de paiement ; configuration avec votre clé API et votre secret.</p>
-              <p class="note m-0">SHA-256 : <code>ac9800cee8a2d159adfc15b426302e06cbf0af2f1fff55dbb7ad179b586a65a0</code></p>
+              <p class="note m-0">SHA-256 : <code>ca914b734fd16ecadca85f2382b46e363ca755414a5864f8595d09becc4afe8f</code></p>
             </div>
-            <a class="btn btn--primary" href="/downloads/cplus-payment-gateway-v2.6.0.zip">Télécharger (720 Ko)</a>
+            <a class="btn btn--primary" href="/downloads/cpay-payment-gateway-v2.7.0.zip">Télécharger (735 Ko)</a>
           </div>
           <pre class="mt-4"><code>1. WordPress → Extensions → Ajouter → Téléverser l'archive
 2. Activer, puis WooCommerce → Réglages → Paiements → C-Pay
@@ -279,9 +279,9 @@ function verify(rawBody, signatureHeader, secret) {
             <div>
               <h3>SDK Android</h3>
               <p>Bibliothèque Kotlin/Java (AAR, Android 5.0+ / API 21) pour encaisser depuis une application marchande.</p>
-              <p class="note m-0">SHA-256 : <code>54196b0e201c092dc8c3ed47a960d94213419b9bdd98818984107c071308d481</code></p>
+              <p class="note m-0">SHA-256 : <code>52bbf97dc8d7f73ec7ea3f0c4d449dd690897abf2878877a0ad046d9a62a8c77</code></p>
             </div>
-            <a class="btn btn--primary" href="/downloads/cplus-android-sdk-v2.6.0.zip">Télécharger (13 Ko)</a>
+            <a class="btn btn--primary" href="/downloads/cpay-android-sdk-v2.7.0.zip">Télécharger (13 Ko)</a>
           </div>
           <pre class="mt-4"><code>// Initialisation — les identifiants doivent être fournis par votre backend, jamais embarqués dans l'APK
 CPay.init(context, CPayConfig(apiKey = cleFournieParVotreServeur, env = CPayEnv.PRODUCTION))

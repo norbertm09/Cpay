@@ -1,8 +1,8 @@
-# CPlus Android SDK v2.6.0
+# C-Pay Android SDK v2.7.0
 
-SDK Android natif pour intégrer les paiements CPlus (Mobile Money + Carte) dans vos applications Android.
+SDK Android natif pour intégrer les paiements **C-Pay** (Mobile Money + Carte) dans vos applications Android.
 
-**Développé par [Calculus Plus SAS](https://c-pay.global)**
+**Édité par [Calculus Plus SAS](https://c-pay.global)** — API : `https://api.c-pay.global/api/v1`
 
 ---
 
@@ -11,12 +11,12 @@ SDK Android natif pour intégrer les paiements CPlus (Mobile Money + Carte) dans
 ### Gradle (recommandé)
 ```gradle
 dependencies {
-    implementation 'global.cpay:cplus-sdk:2.6.0'
+    implementation 'global.cpay:cpay-sdk:2.7.0'
 }
 ```
 
 ### Manuel (AAR)
-1. Téléchargez `cplus-sdk-2.6.0.aar` depuis [c-pay.global/developers](https://c-pay.global/developers)
+1. Téléchargez `cpay-sdk-2.7.0.aar` depuis [c-pay.global/developers](https://c-pay.global/developers)
 2. Copiez dans votre dossier `app/libs/`
 3. Ajoutez dans `build.gradle` :
 ```gradle
@@ -29,15 +29,19 @@ dependencies {
 
 ## Initialisation
 
+Les identifiants doivent être fournis par votre backend, jamais embarqués en dur dans l'APK.
+
 ```kotlin
 // Application.kt
+import global.cpay.sdk.*
+
 class MyApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        CPlus.init(this, CPlusConfig(
-            apiKey    = "sk_live_votre_cle",
-            apiSecret = "sk_secret_votre_secret",
-            env       = CPlusEnv.PRODUCTION,
+        CPay.init(this, CPayConfig(
+            apiKey    = cleFournieParVotreServeur,
+            apiSecret = secretFourniParVotreServeur,
+            env       = CPayEnv.PRODUCTION,
             debugMode = BuildConfig.DEBUG
         ))
     }
@@ -50,7 +54,7 @@ class MyApp : Application() {
 
 ```kotlin
 // Dans votre Activity ou Fragment
-CPlus.collect(
+CPay.collect(
     activity    = this,
     amount      = 5000.0,
     currency    = "XAF",
@@ -58,12 +62,12 @@ CPlus.collect(
     description = "Commande #${orderId}",
     onSuccess   = { txn ->
         // Paiement confirmé
-        Log.d("CPlus", "Paiement ✅ — Réf: ${txn.reference}, Auth: ${txn.authCode}")
+        Log.d("C-Pay", "Paiement ✅ — Réf: ${txn.reference}, Auth: ${txn.authCode}")
         confirmerCommande(txn.txnId)
     },
     onError = { err ->
         // Paiement échoué
-        Log.e("CPlus", "Erreur: ${err.code} — ${err.message}")
+        Log.e("C-Pay", "Erreur: ${err.code} — ${err.message}")
         afficherErreur(err.message)
     },
     onPending = { ref ->
@@ -78,14 +82,14 @@ CPlus.collect(
 ## Décaissement
 
 ```kotlin
-CPlus.disburse(
+CPay.disburse(
     activity    = this,
     amount      = 10000.0,
     phone       = "+242060000001",
     method      = PaymentMethod.AIRTEL_MONEY,
     reference   = "DSB-001",
-    onSuccess   = { txn -> Log.d("CPlus", "Décaissement ✅") },
-    onError     = { err -> Log.e("CPlus", err.message) }
+    onSuccess   = { txn -> Log.d("C-Pay", "Décaissement ✅") },
+    onError     = { err -> Log.e("C-Pay", err.message) }
 )
 ```
 
@@ -94,7 +98,7 @@ CPlus.disburse(
 ## Scan QR Code
 
 ```kotlin
-CPlus.scanQR(
+CPay.scanQR(
     activity = this,
     onResult = { qrData ->
         // qrData = URL pay link ou merchant ID
@@ -109,7 +113,7 @@ CPlus.scanQR(
 ## Vérifier le statut d'une transaction
 
 ```kotlin
-CPlus.getTransaction(
+CPay.getTransaction(
     txnId     = "uuid-transaction",
     onSuccess = { txn ->
         when (txn.status) {
@@ -119,7 +123,7 @@ CPlus.getTransaction(
             else                        -> {}
         }
     },
-    onError = { err -> Log.e("CPlus", err.message) }
+    onError = { err -> Log.e("C-Pay", err.message) }
 )
 ```
 
@@ -141,12 +145,29 @@ CPlus.getTransaction(
 
 | Paramètre | Type | Défaut | Description |
 |---|---|---|---|
-| `apiKey` | String | — | Clé API CPlus (sk_live_xxx) |
-| `apiSecret` | String | — | Secret API CPlus |
-| `env` | CPlusEnv | SANDBOX | SANDBOX ou PRODUCTION |
-| `debugMode` | Boolean | false | Logs détaillés |
+| `apiKey` | String | — | Clé API C-Pay (sk_live_xxx) |
+| `apiSecret` | String | — | Secret API C-Pay |
+| `env` | CPayEnv | SANDBOX | SANDBOX ou PRODUCTION |
+| `debugMode` | Boolean | false | Logs détaillés (tag `C-Pay SDK`) |
 | `timeout` | Long | 30000 | Timeout réseau (ms) |
 | `currency` | String | XAF | Devise par défaut |
+
+---
+
+## Compatibilité avec les intégrations existantes
+
+`CPay`, `CPayConfig`, `CPayEnv`, `CPayTransaction`, `CPayError`, `CPayException`
+et `CPayPaymentRequest` sont des alias (`typealias`) des classes historiques
+`CPlus*` du paquet `global.cpay.sdk`. Le code écrit contre la version 2.6.0
+continue de compiler sans modification.
+
+---
+
+## Changelog
+
+### 2.7.0
+* Marque C-Pay (alias `CPay*`, User-Agent `CPay-Android-SDK/2.7.0`, textes de l'écran de paiement).
+* Aucun changement d'API réseau.
 
 ---
 

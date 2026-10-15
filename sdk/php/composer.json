@@ -1,12 +1,18 @@
 {
-  "name": "calculus-plus/cplus-sdk",
-  "description": "SDK officiel CPlus — Paiements Mobile Money et carte pour l'Afrique Centrale",
-  "version": "1.0.0",
+  "name": "calculus-plus/cpay-sdk",
+  "description": "SDK officiel C-Pay (Calculus Plus) — Paiements Mobile Money et carte pour l'Afrique Centrale",
+  "version": "1.1.0",
   "type": "library",
-  "keywords": ["cplus", "payment", "momo", "airtel", "mtn", "africa", "cemac"],
+  "keywords": ["c-pay", "cpay", "payment", "momo", "airtel", "mtn", "africa", "cemac"],
   "homepage": "https://c-pay.global/developers",
   "license": "MIT",
-  "authors": [{ "name": "Calculus Plus", "email": "dev@c-pay.global" }],
+  "authors": [{ "name": "Calculus Plus SAS", "email": "dev@c-pay.global" }],
+  "replace": { "calculus-plus/cplus-sdk": "self.version" },
   "require": { "php": ">=7.4", "ext-curl": "*", "ext-json": "*" },
-  "autoload": { "psr-4": { "CPlusSDK\\": "src/" } }
+  "autoload": {
+    "psr-4": {
+      "CPay\\": "src/",
+      "CPlusSDK\\": "src/compat/"
+    }
+  }
 }
