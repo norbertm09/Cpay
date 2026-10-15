@@ -1,0 +1,195 @@
+# Release C-Pay — voir docs/CI-CD.md et docs/VERSIONING.md
+# Declenchee par le push d'un tag vX.Y.Z (apres merge dans main) :
+#   1. verifie VERSION == tag, la coherence des versions et les tests backend
+#   2. construit l'APK + l'AAB Android release (signes si les secrets ANDROID_* sont presents)
+#   3. reconstruit les archives SDK Android / plugin WooCommerce
+#   4. cree la GitHub Release (corps = section du CHANGELOG) avec APK/AAB/zips/SHA256SUMS
+#   5. lance deploy.yml sur le tag (le deploiement attend l'approbation de l'environnement production)
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+  actions: write   # pour lancer deploy.yml (workflow_dispatch)
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  verify:
+    name: Verification (tag = VERSION, tests)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Le tag correspond a VERSION
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [ "$TAG_VERSION" != "$FILE_VERSION" ]; then
+            echo "::error::le tag $GITHUB_REF_NAME ne correspond pas a VERSION ($FILE_VERSION) — lancer scripts/bump-version.sh $TAG_VERSION avant de taguer"
+            exit 1
+          fi
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release $TAG_VERSION"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: bash scripts/check-version.sh
+      - name: Section du changelog presente
+        run: sh scripts/changelog-section.sh "${{ steps.version.outputs.version }}" > /dev/null
+      - name: Tests backend
+        working-directory: backend
+        run: npm ci && npm test
+        env:
+          CI: 'true'
+          NODE_ENV: test
+
+  # ────────────────────────────────────────────────────────────────
+  android:
+    name: Android release (APK + AAB)
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - name: SDK du runner
+        run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+      - name: gradlew :app:assembleRelease :app:bundleRelease
+        working-directory: android
+        run: ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
+      - name: Signature (apksigner / jarsigner) si le keystore est fourni
+        id: sign
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          OUT="$GITHUB_WORKSPACE/release-android"; mkdir -p "$OUT"
+          APK_DIR=app/build/outputs/apk/release
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          ls -1 "$APK_DIR"/*.apk "$AAB"
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KS_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            umask 077
+            KS="$RUNNER_TEMP/release.jks"
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS"
+            BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+            for apk in "$APK_DIR"/*.apk; do
+              abi="$(basename "$apk" .apk)"; abi="${abi#app-}"; abi="${abi%-release-unsigned}"; abi="${abi%-release}"
+              "$BT/zipalign" -p -f 4 "$apk" "$RUNNER_TEMP/aligned.apk"
+              "$BT/apksigner" sign --ks "$KS" --ks-pass env:KS_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS \
+                --out "$OUT/cpay-$VERSION-$abi.apk" "$RUNNER_TEMP/aligned.apk"
+              "$BT/apksigner" verify "$OUT/cpay-$VERSION-$abi.apk"
+            done
+            jarsigner -keystore "$KS" -storepass:env KS_PASS -keypass:env KEY_PASS \
+              -sigalg SHA256withRSA -digestalg SHA-256 \
+              -signedjar "$OUT/cpay-$VERSION.aab" "$AAB" "$KEY_ALIAS"
+            rm -f "$KS" "$RUNNER_TEMP/aligned.apk"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "APK/AAB signes avec le keystore de release"
+          else
+            for apk in "$APK_DIR"/*.apk; do
+              abi="$(basename "$apk" .apk)"; abi="${abi#app-}"; abi="${abi%-release-unsigned}"; abi="${abi%-release}"
+              cp "$apk" "$OUT/cpay-$VERSION-$abi-unsigned.apk"
+            done
+            cp "$AAB" "$OUT/cpay-$VERSION-unsigned.aab"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::secrets ANDROID_KEYSTORE_* absents : APK/AAB non signes (voir docs/CI-CD.md)"
+          fi
+          ls -la "$OUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: release-android/*
+          retention-days: 30
+          if-no-files-found: error
+
+  # ────────────────────────────────────────────────────────────────
+  archives:
+    name: Archives SDK Android + plugin WooCommerce
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/build-archives.sh "${{ needs.verify.outputs.version }}" --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archives
+          path: |
+            dist/*.zip
+          retention-days: 30
+          if-no-files-found: error
+
+  # ────────────────────────────────────────────────────────────────
+  release:
+    name: GitHub Release
+    needs: [verify, android, archives]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Sommes SHA-256
+        working-directory: assets
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Notes de version (section du CHANGELOG)
+        run: |
+          {
+            sh scripts/changelog-section.sh "$VERSION"
+            echo
+            echo "### Fichiers"
+            if [ "${{ needs.android.outputs.signed }}" = "true" ]; then
+              echo "- APK et AAB Android **signes** avec le keystore de release (secrets \`ANDROID_KEYSTORE_*\`)."
+            else
+              echo "- APK et AAB Android **non signes** (secrets \`ANDROID_KEYSTORE_*\` absents) : a signer avant publication sur le Play Store ou distribution."
+            fi
+            echo "- \`cpay-android-sdk-v$VERSION.zip\` et \`cpay-payment-gateway-v$VERSION.zip\` : archives SDK Android et plugin WooCommerce (disposition identique a celles de la page developpeurs)."
+            echo "- \`SHA256SUMS\` : empreintes de tous les fichiers joints."
+            echo
+            echo '```'
+            cat assets/SHA256SUMS
+            echo '```'
+          } > notes.md
+          cat notes.md
+      - name: Creation (ou mise a jour) de la release
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG existante : mise a jour des notes et des fichiers"
+            gh release edit "$TAG" --title "C-Pay $VERSION" --notes-file notes.md
+            gh release upload "$TAG" assets/* --clobber
+          else
+            gh release create "$TAG" --title "C-Pay $VERSION" --notes-file notes.md --verify-tag assets/*
+          fi
+      - name: Lancer le deploiement production (attend l'approbation de l'environnement)
+        run: gh workflow run deploy.yml --ref "$GITHUB_REF_NAME" -f ref="$GITHUB_REF_NAME" -f skip_backup=false

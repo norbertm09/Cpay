@@ -1,0 +1,128 @@
+# Deploiement production OVH — voir docs/CI-CD.md
+# Lance a la main (workflow_dispatch), par release.yml apres la creation d'une release, ou par la
+# publication d'une release dans l'interface GitHub. Le job est rattache a l'environnement GitHub
+# `production` : y configurer des « required reviewers » (Settings → Environments → production)
+# pour que chaque deploiement attende une approbation.
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, branche ou tag a deployer (ex. v2.7.0)'
+        type: string
+        required: true
+        default: main
+      skip_backup:
+        description: 'Ne pas sauvegarder la base avant le deploiement'
+        type: boolean
+        required: false
+        default: false
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# Jamais deux deploiements en parallele, et on n'annule pas un deploiement en cours
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploiement sur /opt/cplus
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://c-pay.global
+    env:
+      OVH_SSH_HOST: ${{ secrets.OVH_SSH_HOST }}
+      OVH_SSH_PORT: ${{ secrets.OVH_SSH_PORT || '22' }}
+      OVH_SSH_USER: ${{ secrets.OVH_SSH_USER }}
+    steps:
+      - name: Reference a deployer
+        id: ref
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_SKIP_BACKUP: ${{ inputs.skip_backup }}
+        run: |
+          REF="${INPUT_REF:-$RELEASE_TAG}"
+          # ref stricte : pas d'espace, de quote ni de `..` (elle est injectee dans la commande distante)
+          if ! printf '%s' "$REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$' || printf '%s' "$REF" | grep -q '\.\.'; then
+            echo "::error::reference invalide : '$REF'"; exit 1
+          fi
+          ARGS=""
+          [ "$INPUT_SKIP_BACKUP" = "true" ] && ARGS="--skip-backup"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+          echo "Deploiement de '$REF' ${ARGS:+($ARGS)}"
+
+      - name: Cle SSH et known_hosts
+        env:
+          OVH_SSH_KEY: ${{ secrets.OVH_SSH_KEY }}
+          OVH_KNOWN_HOSTS: ${{ secrets.OVH_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          for v in OVH_SSH_HOST OVH_SSH_USER OVH_SSH_KEY; do
+            eval "val=\${$v:-}"
+            [ -n "$val" ] || { echo "::error::secret $v manquant (Settings → Secrets → Actions)"; exit 1; }
+          done
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$OVH_SSH_KEY" > "$RUNNER_TEMP/ssh/key"
+          if [ -n "$OVH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$OVH_KNOWN_HOSTS" > "$RUNNER_TEMP/ssh/known_hosts"
+          else
+            echo "::warning::OVH_KNOWN_HOSTS absent : empreinte du serveur acceptee au premier contact (ssh-keyscan). Renseigner le secret pour eviter une attaque de l'homme du milieu."
+            ssh-keyscan -p "$OVH_SSH_PORT" -H "$OVH_SSH_HOST" > "$RUNNER_TEMP/ssh/known_hosts" 2>/dev/null
+            [ -s "$RUNNER_TEMP/ssh/known_hosts" ] || { echo "::error::ssh-keyscan n'a rien retourne"; exit 1; }
+          fi
+
+      - name: Deploiement distant (git checkout + scripts/deploy.sh)
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+          DEPLOY_ARGS: ${{ steps.ref.outputs.args }}
+        run: |
+          set -eu
+          ssh -i "$RUNNER_TEMP/ssh/key" -p "$OVH_SSH_PORT" \
+              -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
+              "$OVH_SSH_USER@$OVH_SSH_HOST" "REF='$REF' DEPLOY_ARGS='$DEPLOY_ARGS' sh -s" <<'REMOTE'
+          set -eu
+          cd /opt/cplus
+          echo "== $(hostname) : $(git rev-parse --short HEAD) -> $REF"
+          git fetch --all --tags --prune
+          TARGET="$REF"
+          # une branche se deploie depuis origin/<branche> (la branche locale n'est pas mise a jour par fetch)
+          if git rev-parse -q --verify "refs/remotes/origin/$REF" >/dev/null 2>&1; then TARGET="origin/$REF"; fi
+          git -c advice.detachedHead=false checkout --detach "$TARGET"
+          echo "== commit $(git rev-parse HEAD) — version $(cat VERSION)"
+          ./scripts/deploy.sh $DEPLOY_ARGS
+          REMOTE
+
+      - name: Smoke test HTTP depuis le runner
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          set -eu
+          check() { # check <url> <motif attendu>
+            for i in $(seq 1 12); do
+              body="$(curl -fsS --max-time 10 "$1" 2>/dev/null || true)"
+              if printf '%s' "$body" | grep -q "$2"; then echo "ok  $1"; return 0; fi
+              sleep 5
+            done
+            echo "::error::$1 ne repond pas comme attendu ($2)"; return 1
+          }
+          check https://api.c-pay.global/health '"status":"ok"'
+          check https://c-pay.global/ '<html'
+          DEPLOYED="$(curl -fsS --max-time 10 https://api.c-pay.global/health | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+          echo "version exposee par /health : ${DEPLOYED:-?}"
+          case "$REF" in
+            v[0-9]*) [ "$DEPLOYED" = "${REF#v}" ] || { echo "::error::/health expose $DEPLOYED, attendu ${REF#v}"; exit 1; } ;;
+          esac
+
+      - name: Nettoyage de la cle
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ssh"

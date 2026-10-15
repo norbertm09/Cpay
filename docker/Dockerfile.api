@@ -11,6 +11,7 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY backend/src ./src
 COPY backend/database ./database
+COPY backend/scripts ./scripts
 COPY backend/package.json .
 COPY docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 RUN chmod +x /usr/local/bin/api-entrypoint.sh \

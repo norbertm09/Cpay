@@ -19,3 +19,10 @@ docker/certbot/
 node_modules/
 dist/
 build/
+
+# Etat de deploiement ecrit par scripts/deploy.sh sur le serveur
+/.deployed
+/.deploy-history
+
+# Android local SDK path (CI le regenere)
+android/local.properties
