@@ -183,3 +183,10 @@ python3 -c "import yaml,sys;[yaml.safe_load(open(f)) for f in sys.argv[1:]]" .gi
 - `docker/Dockerfile.api` ne copie pas `backend/scripts/` : `deploy.sh` monte ce dossier en lecture seule pour le
   contrôle d'environnement ; les commandes `docker compose run … node scripts/…` citées dans `docs/WAVE-2.md` /
   `docs/WAVE-3.md` nécessitent le même montage (`-v "$PWD/../backend/scripts:/app/scripts:ro"`).
+
+## Déploiement automatique (depuis la vague 5)
+
+Chaque fusion sur `main` déclenche le pipeline CI ; s'il est vert, `deploy.yml` se lance automatiquement
+(`workflow_run`) et déploie le commit testé sur OVH. L'environnement GitHub `production` reste le point de
+contrôle : sans « required reviewers », le déploiement part seul ; avec, il attend une approbation.
+Le déploiement manuel (`workflow_dispatch`) et le déploiement par release restent disponibles.

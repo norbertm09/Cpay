@@ -1,6 +1,7 @@
 # Deploiement production OVH — voir docs/CI-CD.md
-# Lance a la main (workflow_dispatch), par release.yml apres la creation d'une release, ou par la
-# publication d'une release dans l'interface GitHub. Le job est rattache a l'environnement GitHub
+# Lance automatiquement quand le pipeline CI est vert sur main (workflow_run), a la main
+# (workflow_dispatch), par release.yml apres la creation d'une release, ou par la publication
+# d'une release dans l'interface GitHub. Le job est rattache a l'environnement GitHub
 # `production` : y configurer des « required reviewers » (Settings → Environments → production)
 # pour que chaque deploiement attende une approbation.
 name: Deploy production
@@ -20,6 +21,11 @@ on:
         default: false
   release:
     types: [published]
+  # Deploiement automatique : des que le pipeline CI est vert sur main
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -32,6 +38,8 @@ concurrency:
 jobs:
   deploy:
     name: Deploiement sur /opt/cplus
+    # Sur workflow_run : uniquement si la CI de main a reussi
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -46,9 +54,10 @@ jobs:
         env:
           INPUT_REF: ${{ inputs.ref }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           INPUT_SKIP_BACKUP: ${{ inputs.skip_backup }}
         run: |
-          REF="${INPUT_REF:-$RELEASE_TAG}"
+          REF="${INPUT_REF:-${RELEASE_TAG:-$RUN_SHA}}"
           # ref stricte : pas d'espace, de quote ni de `..` (elle est injectee dans la commande distante)
           if ! printf '%s' "$REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$' || printf '%s' "$REF" | grep -q '\.\.'; then
             echo "::error::reference invalide : '$REF'"; exit 1
