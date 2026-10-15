@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Développeurs — API C-Pay</title>
-  <meta name="description" content="Intégrez les paiements Mobile Money, QR et lien de paiement C-Pay : API REST, clés API, idempotence, webhooks, SDK Android et extension WooCommerce.">
+  <meta name="description" content="Intégrez la caisse C-Pay : API REST (Mobile Money, QR, lien de paiement, retraits, transferts, journal), clés API, idempotence, webhooks, SDK Android et extension WooCommerce.">
   <link rel="canonical" href="https://c-pay.global/developers.html">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon.png">
@@ -37,14 +37,15 @@
         <a href="#demarrage">Démarrage</a>
         <a href="#auth">Authentification</a>
         <a href="#endpoints">Endpoints</a>
+        <a href="#caisse-api">Caisse</a>
         <a href="#exemples">Exemples</a>
         <a href="#webhooks">Webhooks</a>
-        <a href="#sdk">SDK et plugin</a>
+        <a href="#sdk">SDK</a>
         <a href="/#contact">Contact</a>
       </nav>
       <div class="header-cta">
-        <a class="btn btn--outline btn--sm" href="https://api.c-pay.global/api/v1/docs/" rel="noopener">Référence Swagger</a>
-        <a class="btn btn--primary btn--sm" href="https://merchant.c-pay.global">Portail marchand</a>
+        <a class="btn btn--outline btn--sm" href="https://api.c-pay.global/api/v1/docs/" rel="noopener">Swagger</a>
+        <a class="btn btn--primary btn--sm" href="https://merchant.c-pay.global">Portail</a>
       </div>
     </div>
   </header>
@@ -54,7 +55,7 @@
       <div class="container">
         <span class="eyebrow eyebrow--light">Espace développeurs</span>
         <h1>Intégrez C-Pay à votre site ou votre application</h1>
-        <p>Une API REST pour encaisser par Mobile Money, générer des QR codes et des liens de paiement, reverser des fonds et recevoir des webhooks. Le pays, la devise et l'opérateur sont détectés à partir du numéro du client : votre code n'a rien à choisir.</p>
+        <p>Une API REST pour alimenter et piloter la caisse C-Pay : encaisser par Mobile Money et par carte (lien ou QR hébergé), retirer vers le wallet du marchand, transférer entre wallet et banque, lire le journal, et recevoir des webhooks. Le pays, la devise et l'opérateur sont détectés à partir du numéro du client : votre code n'a rien à choisir.</p>
         <p class="mt-5">
           <a class="btn btn--light" href="https://api.c-pay.global/api/v1/docs/" rel="noopener">Référence API (Swagger)</a>
           <a class="btn btn--ghost-light" href="mailto:developers@c-pay.global?subject=Acc%C3%A8s%20sandbox%20C-Pay">Demander un accès sandbox</a>
@@ -68,8 +69,8 @@
         <div class="grid grid--4">
           <article class="card"><h3>Encaisser</h3><p>Une demande de paiement part vers le téléphone du client ; il confirme avec son code Mobile Money. Statut en temps réel par webhook.</p></article>
           <article class="card"><h3>QR et lien de paiement</h3><p>Générez un QR à afficher ou un lien à envoyer par SMS, WhatsApp ou e-mail. Le client paie sans application.</p></article>
-          <article class="card"><h3>Reverser</h3><p>Envoyez des fonds vers un portefeuille Mobile Money ou un compte bancaire : remboursements, paiements fournisseurs.</p></article>
-          <article class="card"><h3>Suivre</h3><p>Listez vos transactions, recevez des webhooks signés et gérez vos clés API depuis le portail marchand.</p></article>
+          <article class="card"><h3>Retirer et transférer</h3><p>Retrait du solde vers le wallet enregistré du marchand, transferts wallet → banque et ordres d'approvisionnement banque → wallet, avec confirmation forte (<a href="#caisse-api">API Caisse</a>).</p></article>
+          <article class="card"><h3>Suivre</h3><p>Journal de caisse unifié avec export CSV, liste des transactions, webhooks signés et clés API gérées depuis le portail marchand.</p></article>
         </div>
       </div>
     </section>
@@ -119,7 +120,51 @@
       </div>
     </section>
 
-    <section class="section" id="exemples">
+    <section class="section" id="caisse-api">
+      <div class="container doc">
+        <h2>API Caisse (session marchand)</h2>
+        <p>Ces endpoints portent les opérations de caisse du portail marchand et de l'application Android : <strong>encaisser, retirer, transférer, journal</strong>. Ils sont authentifiés par la <strong>session du marchand</strong> (jeton d'accès obtenu via <code>POST /merchant/auth/login</code>, en-tête <code>Authorization: Bearer &lt;access&gt;</code>, valable 15 minutes et renouvelé par <code>/merchant/auth/refresh</code>), <strong>pas par clé API</strong>. Les endpoints publics <code>/merchant/public/*</code> à clé API ci-dessus restent inchangés. Toute requête qui crée un mouvement exige l'en-tête <code>Idempotency-Key</code>.</p>
+        <p class="note">Base : <code>https://api.c-pay.global/api/v1</code>. Montants en unité de la devise (entiers pour XOF, XAF, CDF). Erreurs : <code>{ "error", "code", "details?" }</code>.</p>
+
+        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/merchant/cash/collect</span> <span class="badge badge--session">session</span>
+          <p>Encaisser. Corps : <code>amount</code>, <code>method</code> (<code>mobile_money</code> ou <code>card</code>), <code>customerPhone</code> (requis en Mobile Money ; l'opérateur est détecté, <code>operator</code> ne sert qu'à forcer un service au choix du client comme Wave ou Express Union), <code>currency</code>, <code>description</code>, <code>reference</code>. Mobile Money : <code>201</code> avec <code>txnId</code>, <code>status: "pending"</code>, <code>operator</code>, <code>operatorLabel</code>, <code>country</code>, <code>currency</code>, <code>amount</code>, <code>fee</code>, <code>net</code>, <code>statusUrl</code>. Carte : <code>201</code> avec <code>payLink { shortId, shortUrl, expiresAt }</code> (page hébergée pay.c-pay.global) si une passerelle carte est configurée pour le pays, sinon <code>410 FEATURE_DISABLED</code>. Autres codes : <code>422 CURRENCY_MISMATCH</code>, <code>422 VALIDATION_ERROR</code>, <code>403 MERCHANT_INACTIVE</code>, <code>429</code>.</p></div>
+        <div class="endpoint"><span class="badge badge--get">GET</span><span class="path">/merchant/cash/collect/:txnId</span> <span class="badge badge--session">session</span>
+          <p>Statut d'un encaissement : <code>status</code> (<code>pending</code>, <code>authorized</code>, <code>failed</code>, <code>expired</code>), <code>amount</code>, <code>fee</code>, <code>net</code>, <code>operator</code>, <code>customerPhone</code>, <code>createdAt</code>, <code>finalizedAt</code>, <code>receiptUrl</code> (si disponible). Interrogez toutes les 3 secondes pendant 90 secondes, puis affichez « en attente de confirmation ».</p></div>
+        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/merchant/cash/withdraw</span> <span class="badge badge--session">session</span>
+          <p>Retirer du solde disponible vers le wallet enregistré du marchand (<code>GET</code>/<code>PUT /merchant/cash/wallet</code>). Corps : <code>amount</code>, <code>description</code>, <code>confirm</code> (voir ci-dessous). Réponse <code>201</code> : <code>transferId</code>, <code>reference</code> (<code>PAY-XXXXXX</code>), <code>status</code> (<code>pending</code> ou <code>processing</code>), <code>amount</code>, <code>fee</code>, <code>net</code>, <code>wallet { operator, phone }</code>. Erreurs : <code>422 INSUFFICIENT_BALANCE { available }</code>, <code>422 WALLET_MISSING</code>, <code>422 DAILY_LIMIT_EXCEEDED</code>, <code>428 STEP_UP_REQUIRED</code>, <code>410 FEATURE_DISABLED</code> si l'opérateur du wallet n'a pas de rail sortant configuré.</p></div>
+        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/merchant/cash/transfers</span> <span class="badge badge--session">session</span>
+          <p>Transférer. Corps : <code>direction</code> (<code>wallet_to_bank</code> ou <code>bank_to_wallet</code>), <code>accountId</code> (compte bancaire vérifié du marchand, voir <code>/merchant/bank-accounts</code>), <code>amount</code>, <code>description</code>, <code>confirm</code>. <code>wallet_to_bank</code> : <code>201</code> avec <code>reference</code> <code>TRF-XXXXXX</code>, <code>status</code> <code>processing</code> (rail bancaire configuré) ou <code>pending_manual</code> (exécuté par les opérations C-Pay, J+1 ouvré), <code>fee</code>, <code>net</code>, <code>bankAccount { bankName, accountMasked }</code>. <code>bank_to_wallet</code> : crée un ordre d'approvisionnement, <code>201</code> avec <code>reference</code> <code>FND-XXXXXX</code>, <code>status: "awaiting_funds"</code> et <code>instructions { bankName, accountName, accountNumber, iban?, swift?, reference, expiresAt }</code> ; le marchand vire le montant en indiquant la référence, les opérations confirment la réception et le solde est crédité. Sans compte de collecte pour la devise : <code>409 FUNDING_UNAVAILABLE</code>. Statuts : <code>pending</code>, <code>processing</code>, <code>pending_manual</code>, <code>awaiting_funds</code>, <code>completed</code>, <code>failed</code>, <code>cancelled</code>, <code>rejected</code>. Compléments : <code>GET /merchant/cash/transfers?direction&amp;status&amp;limit&amp;offset</code>, <code>GET /merchant/cash/transfers/:id</code>, <code>POST /merchant/cash/transfers/:id/cancel</code> (uniquement <code>awaiting_funds</code> et <code>pending_manual</code>).</p></div>
+        <div class="endpoint"><span class="badge badge--get">GET</span><span class="path">/merchant/cash/history</span> <span class="badge badge--session">session</span>
+          <p>Journal unifié. Paramètres : <code>from</code>, <code>to</code>, <code>type</code> (<code>collect</code>, <code>withdraw</code>, <code>transfer_out</code>, <code>transfer_in</code>), <code>limit</code>, <code>offset</code>. Réponse : <code>data[]</code> (<code>id</code>, <code>type</code>, <code>reference</code>, <code>amount</code>, <code>fee</code>, <code>net</code>, <code>status</code>, <code>counterparty</code>, <code>method</code>, <code>createdAt</code>), <code>total</code>, <code>totals { in, out }</code>. Export : <code>GET /merchant/cash/history/export.csv?from&amp;to</code> (CSV UTF-8, séparateur <code>;</code>). Le solde et le résumé du jour sont donnés par <code>GET /merchant/cash/summary</code>.</p></div>
+
+        <h3>Confirmation forte : l'objet <code>confirm</code></h3>
+        <p>Les retraits, les transferts et l'enregistrement du wallet (<code>PUT /merchant/cash/wallet</code>) exigent un objet <code>confirm</code> dans le corps :</p>
+        <table class="confirm-table">
+          <caption class="visually-hidden">Contenu de l'objet confirm selon la configuration du compte</caption>
+          <thead><tr><th scope="col">Compte</th><th scope="col">Corps attendu</th></tr></thead>
+          <tbody>
+            <tr><td>Double authentification (TOTP) activée</td><td><code>"confirm": { "code": "123456" }</code> — code à 6 chiffres de l'application d'authentification</td></tr>
+            <tr><td>Sans double authentification</td><td><code>"confirm": { "password": "…" }</code> — mot de passe du compte</td></tr>
+          </tbody>
+        </table>
+        <p class="note mt-3">Objet absent ou invalide : <code>428 STEP_UP_REQUIRED { "methods": ["totp"] }</code> ou <code>["password"]</code>, qui indique la méthode à présenter. Cinq échecs en 15 minutes : <code>429</code>.</p>
+<pre><code># Retrait de 50 000 vers le wallet enregistré (session marchand, compte avec 2FA)
+curl -X POST https://api.c-pay.global/api/v1/merchant/cash/withdraw \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Idempotency-Key: 2c1f6a1e-5e0b-4f7c-9a3d-8b2e4c6d1f0a" \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 50000, "description": "Caisse du soir", "confirm": { "code": "123456" } }'
+
+# Ordre d'approvisionnement banque -> wallet (compte sans 2FA)
+curl -X POST https://api.c-pay.global/api/v1/merchant/cash/transfers \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Idempotency-Key: 9d7e5c3a-1b2f-4e6d-8a0c-3f5b7d9e1a2c" \
+  -H "Content-Type: application/json" \
+  -d '{ "direction": "bank_to_wallet", "accountId": "&lt;account_id&gt;", "amount": 200000, "confirm": { "password": "…" } }'</code></pre>
+      </div>
+    </section>
+
+    <section class="section section--alt" id="exemples">
       <div class="container doc">
         <h2>Exemples</h2>
         <div class="tabs" role="tablist" aria-label="Langage des exemples">
@@ -231,7 +276,7 @@ print(txn["status"], link["short_url"])</code></pre>
       </div>
     </section>
 
-    <section class="section section--alt" id="webhooks">
+    <section class="section" id="webhooks">
       <div class="container doc">
         <h2>Webhooks</h2>
         <p>Configurez une URL HTTPS dans le portail marchand (rubrique <strong>Webhooks</strong>). À chaque changement de statut, C-Pay envoie un <code>POST</code> JSON signé en HMAC-SHA256 avec le secret affiché lors de la configuration. Le nom de l'en-tête de signature et le secret sont indiqués dans le portail ; le secret n'est plus réaffiché ensuite. Les adresses privées ou non HTTPS sont refusées.</p>
@@ -256,7 +301,7 @@ function verify(rawBody, signatureHeader, secret) {
       </div>
     </section>
 
-    <section class="section" id="sdk">
+    <section class="section section--alt" id="sdk">
       <div class="container doc">
         <h2>SDK Android et extension WooCommerce</h2>
         <p class="note">Les archives ci-dessous sont celles de la version 2.7.0. Vérifiez l'empreinte SHA-256 après téléchargement (<code>sha256sum fichier.zip</code>).</p>
@@ -296,7 +341,7 @@ CPay.collect(activity, amount = 5000.0, customerPhone = "+237670123456", referen
       </div>
     </section>
 
-    <section class="section section--alt" id="support">
+    <section class="section" id="support">
       <div class="container">
         <h2>Support développeurs</h2>
         <div class="grid grid--3">

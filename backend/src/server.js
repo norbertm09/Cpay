@@ -95,7 +95,7 @@ app.get('/health', asyncHandler(async (_req, res) => {
   res.status(dbOk ? 200 : 503).json({
     status: dbOk ? 'ok' : 'degraded',
     db: dbOk ? 'connected' : 'unreachable',
-    version: '2.6.0',
+    version: require('../package.json').version,
     uptime: process.uptime(),
     env: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
@@ -104,6 +104,88 @@ app.get('/health', asyncHandler(async (_req, res) => {
 
 
 const publicPayLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
+
+// ─── WAVE-4 : paiement par carte sur la page hébergée (checkout redirigé, jamais de PAN ici) ───
+const loadPendingLink = async (shortId) => {
+  const { query } = require('./config/database');
+  const r = await query(
+    `SELECT pl.*, m.business_name, m.country, m.currency AS merchant_currency
+     FROM pay_links pl JOIN merchants m ON m.merchant_id = pl.merchant_id
+     WHERE pl.short_id=$1`, [shortId]);
+  return r.rows[0] || null;
+};
+app.post('/api/v1/pay/:shortId/card', publicPayLimiter, asyncHandler(async (req, res) => {
+  if (req.body?.cardNum || req.body?.pan || req.body?.cvv) {
+    return res.status(410).json({ error: 'Aucune donnée carte ne doit être envoyée à C-Pay', code: 'CARD_PAYMENT_DISABLED' });
+  }
+  const link = await loadPendingLink(req.params.shortId);
+  if (!link) return res.status(404).json({ error: 'Lien invalide', code: 'LINK_NOT_FOUND' });
+  if (link.status !== 'pending' || new Date(link.expires_at) < new Date()) {
+    return res.status(409).json({ error: 'Lien déjà payé ou expiré', code: 'LINK_NOT_PAYABLE', status: link.status });
+  }
+  const cardLink = require('./services/cash/card-link.service');
+  const r = await cardLink.createCardCheckout({ link, merchant: { country: link.country, currency: link.merchant_currency, business_name: link.business_name } });
+  if (!r.ok) return res.status(r.status).json(r.body);
+  res.json({ success: true, txnId: r.txnId, gateway: r.gateway, redirectUrl: r.redirectUrl });
+}));
+app.get('/api/v1/pay/:shortId/status', asyncHandler(async (req, res) => {
+  const link = await loadPendingLink(req.params.shortId);
+  if (!link) return res.status(404).json({ error: 'Lien invalide', code: 'LINK_NOT_FOUND' });
+  const st = await require('./services/cash/card-link.service').getLinkStatus(link);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ shortId: link.short_id, amount: Number(link.amount), currency: link.currency, ...st });
+}));
+const renderReturnPage = (res, { shortId, link, status }) => {
+  const labels = {
+    paid:      ['✅', 'Paiement accepté', 'Merci ! Votre paiement a été confirmé.', '#00c896'],
+    failed:    ['❌', 'Paiement refusé', 'La passerelle a refusé le paiement. Vous pouvez réessayer depuis le lien.', '#ff3b30'],
+    expired:   ['⌛', 'Lien expiré', 'Ce lien de paiement n’est plus valable.', '#ff9500'],
+    cancelled: ['🚫', 'Lien annulé', 'Ce lien de paiement a été annulé par le marchand.', '#ff9500'],
+    pending:   ['⏳', 'Confirmation en cours…', 'Nous attendons la confirmation de votre banque. Cette page se met à jour automatiquement.', '#1d4f92'],
+  };
+  const [icon, title, msg, color] = labels[status] || labels.pending;
+  const amt = link ? parseFloat(link.amount).toLocaleString('fr-FR') : '';
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(200).send(`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><title>${esc(title)}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <style>body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f0f4f8;}
+  .box{text-align:center;padding:40px;background:#fff;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.1);max-width:420px;}
+  .icon{font-size:48px;margin-bottom:12px;} h2{margin:0 0 8px;} p{color:#5a6677;} .amt{font-weight:700;color:#1e2d3d;} a{color:#1d4f92;}</style></head>
+  <body><div class="box"><div class="icon" id="icon">${esc(icon)}</div><h2 id="title" style="color:${esc(color)}">${esc(title)}</h2>
+  ${link ? `<p class="amt">${esc(amt)} ${esc(link.currency)} · ${esc(link.business_name)}</p>` : ''}
+  <p id="msg">${esc(msg)}</p>
+  ${status === 'pending' ? `<p style="color:#8a9ab0;font-size:12px">Réf. ${esc(shortId)}</p>
+  <script>
+    (function(){
+      var tries = 0;
+      var tick = setInterval(async function(){
+        tries++;
+        try {
+          var r = await fetch('/api/v1/pay/${esc(shortId)}/status', { cache: 'no-store' });
+          var d = await r.json();
+          if (d.status && d.status !== 'pending') { clearInterval(tick); window.location.reload(); return; }
+        } catch (e) {}
+        if (tries >= 30) { clearInterval(tick); document.getElementById('msg').textContent = 'Toujours en attente de confirmation — vous recevrez le reçu du marchand dès validation.'; }
+      }, 3000);
+    })();
+  </script>` : ''}
+  <p><a href="https://c-pay.global">c-pay.global</a></p></div></body></html>`);
+};
+const cardReturnHandler = async (req, res) => {
+  const { shortId } = req.params;
+  try {
+    const link = await loadPendingLink(shortId);
+    if (!link) return renderReturnPage(res, { shortId, link: null, status: 'expired' });
+    const r = await require('./services/cash/card-link.service').handleCardReturn({ link, queryParams: req.query || {} });
+    const fresh = (await loadPendingLink(shortId)) || link;
+    renderReturnPage(res, { shortId, link: fresh, status: fresh.status === 'paid' ? 'paid' : r.status });
+  } catch (err) {
+    logger.error('card return page error', { shortId, err: err.message });
+    res.status(500).send('Erreur serveur');
+  }
+};
+app.get('/pay/:shortId/return', cardReturnHandler);
+app.get('/:shortId([A-Z0-9]{6,10})/return', cardReturnHandler);
 app.post('/api/v1/pay/:shortId', publicPayLimiter, asyncHandler(async (req, res) => {
   const { phone, method } = req.body || {};
   const { shortId } = req.params;
@@ -221,6 +303,9 @@ app.post('/api/v1/consent/accept', verifyToken, asyncHandler(async (req, res) =>
   res.json({ success: true });
 }));
 
+// WAVE-4 : caisse marchande (docs/CAISSE-API.md) — montée AVANT les routeurs admin / marchand
+app.use('/api/v1/admin/cash',    wrapRouterAsync(require('./routes/cash-admin.routes')));
+app.use('/api/v1/merchant/cash', wrapRouterAsync(require('./routes/cash.routes')));
 app.use('/api/v1/admin', wrapRouterAsync(adminRoutes));
 app.use('/api/v1/merchant', wrapRouterAsync(merchantRoutes));
 app.use('/api/v1/cardholder', wrapRouterAsync(cardholderRoutes));
@@ -427,7 +512,7 @@ app.post('/internal/settlement/run', asyncHandler(async (req, res) => {
 }));
 
 app.get('/live', (_req, res) => {
-  res.json({ status: 'alive', version: '2.6.0', uptime: process.uptime() });
+  res.json({ status: 'alive', version: require('../package.json').version, uptime: process.uptime() });
 });
 
 app.get('/ready', asyncHandler(async (_req, res) => {
@@ -506,16 +591,9 @@ app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
               💳 ${link.psp === 'migs' ? 'Mastercard Gateway' : 'CyberSource'}
             </span>
           </div>
-          <input id="cardNum" class="inp" type="text" placeholder="Numéro de carte" maxlength="19"
-            oninput="this.value=this.value.replace(/[^0-9]/g,'').replace(/(.{4})/g,'$1 ').trim().substr(0,19)" />
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <input id="expiry" class="inp" type="text" placeholder="MM/AA" maxlength="5"
-              oninput="var v=this.value.replace(/[^0-9]/g,'');if(v.length>2)v=v.substr(0,2)+'/'+v.substr(2);this.value=v" />
-            <input id="cvv" class="inp" type="password" placeholder="CVV" maxlength="4" />
-          </div>
-          <input id="cardName" class="inp" type="text" placeholder="Nom sur la carte" />
+          <p style="color:#5a6677;font-size:13px;text-align:center">Vous serez redirigé vers la page de paiement sécurisée de la banque. Aucune donnée de carte n’est saisie sur C-Pay.</p>
           <div id="errMsg" class="error-msg" style="display:none"></div>
-          <button class="btn" onclick="payCard()">💳 Payer ${esc(amt)} ${esc(link.currency)}</button>
+          <button class="btn" id="cardBtn" onclick="payCard()">💳 Payer par carte ${esc(amt)} ${esc(link.currency)}</button>
           ` : `
           <div class="methods">
             <div class="method active" id="mtn" onclick="selectMethod('mtn')">
@@ -545,6 +623,21 @@ app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
 
       <script>
         let method = 'mtn';
+        async function payCard() {
+          const btn = document.getElementById('cardBtn');
+          const err = document.getElementById('errMsg');
+          err.style.display = 'none';
+          btn.disabled = true; btn.textContent = 'Redirection vers la banque…';
+          try {
+            const r = await fetch('/api/v1/pay/${esc(shortId)}/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            const d = await r.json();
+            if (d.success && d.redirectUrl) { window.location.href = d.redirectUrl; return; }
+            err.textContent = d.error || 'Paiement par carte indisponible'; err.style.display = 'block';
+          } catch(e) {
+            err.textContent = 'Erreur réseau'; err.style.display = 'block';
+          }
+          btn.disabled = false; btn.textContent = 'Payer par carte ${esc(amt)} ${esc(link.currency)}';
+        }
         function selectMethod(m) {
           method = m;
           document.querySelectorAll('.method').forEach(el => el.classList.remove('active'));
@@ -680,15 +773,8 @@ app.get('/:shortId', async (req, res) => {
           💳 ${link.psp === 'migs' ? 'Mastercard Gateway' : 'CyberSource'}
         </span>
       </div>
-      <input id="cardNum" type="text" placeholder="Numéro de carte" maxlength="19"
-        oninput="this.value=this.value.replace(/[^0-9]/g,'').replace(/(.{4})/g,'$1 ').trim()" />
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <input id="expiry" type="text" placeholder="MM/AA" maxlength="5"
-          oninput="if(this.value.length==2&&!this.value.includes('/'))this.value+='/'" />
-        <input id="cvv" type="password" placeholder="CVV" maxlength="4" />
-      </div>
-      <input id="cardName" type="text" placeholder="Nom sur la carte" />
-      <button class="btn" onclick="payCard()">💳 Payer ${esc(amount)} ${esc(link.currency)}</button>
+      <p style="color:#5a6677;font-size:13px;text-align:center">Redirection vers la page de paiement sécurisée de la banque — aucune donnée de carte saisie sur C-Pay.</p>
+      <button class="btn" onclick="payCard()">💳 Payer par carte ${esc(amount)} ${esc(link.currency)}</button>
     </div>`}
 
     <div id="result" style="display:none" class="result">
@@ -739,23 +825,14 @@ app.get('/:shortId', async (req, res) => {
     }
 
     async function payCard() {
-      const cardNum = document.getElementById('cardNum').value.replace(/\s/g,'');
-      const expiry  = document.getElementById('expiry').value;
-      const cvv     = document.getElementById('cvv').value;
-      const name    = document.getElementById('cardName').value;
-      if (!cardNum || !expiry || !cvv) return alert('Remplissez tous les champs');
-      showResult('⏳', 'Autorisation en cours…', 'Vérification de votre carte…');
+      showResult('⏳', 'Redirection vers la banque…', 'Vous allez être redirigé vers la page de paiement sécurisée.');
       try {
-        const r = await fetch('/api/v1/pay/' + shortId, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'card', cardNum, expiry, cvv, name })
-        });
+        const r = await fetch('/api/v1/pay/' + shortId + '/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         const d = await r.json();
-        if (d.success) {
-          showResult('✅', 'Paiement accepté !', 'Auth: ' + (d.authCode||'') + ' — Merci !', '#00c896');
+        if (d.success && d.redirectUrl) {
+          window.location.href = d.redirectUrl;
         } else {
-          showResult('❌', 'Paiement refusé', d.error || 'Veuillez réessayer.', '#ff3b30');
+          showResult('❌', 'Carte indisponible', d.error || 'Veuillez réessayer.', '#ff3b30');
         }
       } catch(e) {
         showResult('❌', 'Erreur', 'Veuillez réessayer.', '#ff3b30');
@@ -791,7 +868,7 @@ const start = async () => {
     logger.error('Database unreachable - starting anyway', { err: err.message });
   }
 
-  server = app.listen(PORT, () => logger.info(`CPlus 2.6.0 API started on :${PORT}`));
+  server = app.listen(PORT, () => logger.info(`C-Pay ${require('../package.json').version} API started on :${PORT}`));
 
   // Reconciliation automatique des transactions pending (toutes les 2 min)
   try {

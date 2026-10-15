@@ -145,7 +145,7 @@ const sendWelcome = ({ to, firstName, userType }) => {
     </p>
     ${btn('Ouvrir C-Pay', isM ? 'https://merchant.c-pay.global' : 'https://app.c-pay.global')}
     <p style="color:#5a6677;font-size:13px;">
-      📱 Application mobile : <a href="https://c-pay.global/downloads/cplus-v2.6.0-debug.apk" style="color:#12b6c7;">télécharger l'APK Android</a>
+      📱 Application mobile : <a href="https://merchant.c-pay.global/download/" style="color:#12b6c7;">télécharger l'application Android</a>
     </p>
   `);
   return send({ to, subject: 'Bienvenue sur C-Pay 🎉', html });

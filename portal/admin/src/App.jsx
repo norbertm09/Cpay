@@ -1,11 +1,11 @@
 // C-Pay 2.7.0 — Admin Portal Enrichi
-// Modules: Dashboard, Monitoring, Alerts, Fraud, Merchants, Transactions, Users, APIs, Audit
+// Modules: Dashboard, Monitoring, Alerts, Fraud, Merchants, Transactions, Users, APIs, Audit, CRM, Caisse (vague 4)
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import api, { authApi, apiConfigsApi, merchantsApi, monitorApi, terminalsApi, auditApi, getToken, setToken, clearToken, onTokenChange, decodeJwt, refreshAccessToken, logoutLocal } from './services/api';
+import api, { authApi, apiConfigsApi, merchantsApi, monitorApi, terminalsApi, auditApi, cashAdminApi, getToken, setToken, clearToken, onTokenChange, decodeJwt, refreshAccessToken, logoutLocal } from './services/api';
 
 
 // ─── i18n Admin ───────────────────────────────────────────────────
@@ -97,6 +97,7 @@ const crmApi = {
   conversation:  id      => api.get(`/crm/conversations/${id}`),
 };
 const CRM_ROLES = ['super_admin', 'ops_admin', 'support_agent'];
+const CASH_ROLES = ['super_admin', 'ops_admin']; // Caisse (vague 4), docs/CAISSE-API.md §8
 const hasRole = (admin, roles) => !roles || roles.includes(admin?.role);
 
 const fraudApi  = { events: p => api.get('/fraud/events', { params: p }), rules: () => api.get('/fraud/rules'), updateRule: (id, d) => api.put(`/fraud/rules/${id}`, d), createRule: d => api.post('/fraud/rules', d), review: (id, d) => api.patch(`/fraud/events/${id}/review`, d) };
@@ -414,12 +415,13 @@ const Layout = ({ children }) => {
     { group: LANG==='fr'?'GESTION':'MANAGEMENT', items: [{ p: '/merchants', l: '🏪 '+t('merchants') }, { p: '/cardholders', l: '🪪 Porteurs de carte' }, { p: '/transactions', l: '💳 '+t('transactions') }, { p: '/users', l: '👥 '+t('users') }, { p: '/terminals', l: '📱 '+t('terminals') }] },
     { group: LANG==='fr'?'PARTENAIRES':'PARTNERS', items: [{ p: '/banks', l: '🏦 Banques' }, { p: '/tenants', l: '🌐 Tenants' }, { p: '/partners-agencies', l: '🏢 Agences' }, { p: '/partners-agents', l: '👤 Agents' }], roles: ['super_admin','ops_admin'] },
     { group: LANG==='fr'?'CONFIG':'CONFIG', items: [{ p: '/api-configs', l: '🔌 '+t('apiConfigs') }, { p: '/audit', l: '📋 '+t('audit') }], roles: ['super_admin','ops_admin'] },
+    { group: 'CAISSE', items: [{ p: '/cash', l: '💵 Tableau caisse' }, { p: '/cash/transfers', l: '🔁 Transferts' }, { p: '/cash/platform-accounts', l: '🏦 Comptes de collecte' }], roles: CASH_ROLES, gated: true },
     { group: 'SUPPORT', items: [{ p: '/tickets', l: '🎫 Incidents' }], roles: ['super_admin','ops_admin','support_agent'] },
     { group: 'CRM', items: [{ p: '/crm/leads', l: '🎯 Leads' }, { p: '/crm/complaints', l: '📣 Réclamations' }, { p: '/crm/conversations', l: '💬 Conversations' }], roles: CRM_ROLES, gated: true },
     { group: 'FINANCE', items: [{ p: '/finance', l: '💰 Règlements' }], roles: ['super_admin','finance_admin'] },
     { group: 'ADMIN', items: [{ p: '/admin-users', l: '👥 Utilisateurs Admin' }], roles: ['super_admin'] },
   ];
-  const isActive = p => p === '/' ? pathname === '/' : pathname.startsWith(p);
+  const isActive = p => (p === '/' || p === '/cash') ? pathname === p : pathname.startsWith(p);
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: C.bg, fontFamily: 'Arial, sans-serif', color: C.text }}>
@@ -592,6 +594,7 @@ const Dashboard = () => {
         <Stat label="Total marchands" value={stats.merchants?.total || 0} />
         <Stat label="Gateways actifs" value={stats.gateways?.length || 0} color={C.blue} />
       </div>
+      <CashStatsBlock />
       <CrmStatsBlock />
     </div>
   );
@@ -1189,6 +1192,7 @@ const MerchantDetail = () => {
     { v: 'fees', label: '💰 Frais & Commissions' },
     { v: 'velocity', label: '⚡ Vélocité' },
     { v: 'kyb',  label: '🔐 KYB & Plafonds' },
+    { v: 'cash', label: '💵 Caisse' },
   ];
 
   return (
@@ -1352,6 +1356,11 @@ const MerchantDetail = () => {
       {/* Tab KYB */}
       {activeTab === 'kyb' && (
         <KybTab merchantId={id} merchant={merchant} kybLevel={kybLevel} setKybLevel={setKybLevel} updateKyb={updateKyb} />
+      )}
+
+      {/* Tab Caisse (vague 4) : wallet, comptes bancaires, derniers transferts */}
+      {activeTab === 'cash' && (
+        <MerchantCashCard merchant={merchant} merchantId={id} />
       )}
     </div>
   );
@@ -3316,6 +3325,583 @@ const CrmConversations = () => {
 };
 
 // ─── AUDIT LOGS ───────────────────────────────────────────────────
+// ─── CAISSE (vague 4) ─────────────────────────────────────────────
+// Contrat : docs/CAISSE-API.md §8 — /api/v1/admin/cash/* (roles super_admin, ops_admin).
+// Les reponses sont lues avec tolerance : camelCase du contrat ou snake_case
+// des lignes SQL, champs optionnels absents affiches « — ».
+const CashGuard = ({ children }) => {
+  const { admin } = useAuth();
+  if (!hasRole(admin, CASH_ROLES)) return <Card><div style={{ color:C.muted, padding:20, textAlign:'center' }}>⛔ Accès réservé aux rôles super_admin et ops_admin.</div></Card>;
+  return children;
+};
+const pick = (o, ...keys) => { for (const k of keys) { const v = o?.[k]; if (v !== undefined && v !== null && v !== '') return v; } return undefined; };
+const TRANSFER_STATUSES = [['awaiting_funds','Fonds attendus'],['pending_manual','À exécuter'],['pending','En attente'],['processing','En cours'],['completed','Terminé'],['failed','Échoué'],['cancelled','Annulé'],['rejected','Rejeté']];
+const transferStatusAlias = st => st === 'pending_settlement' ? 'pending_manual' : st; // legacy /transfer/payout, file manuelle
+const transferStatusLabel = st => (TRANSFER_STATUSES.find(([v]) => v === transferStatusAlias(st)) || [st, st || '—'])[1];
+const transferColor = st => ({ awaiting_funds:C.warning, pending_manual:C.warning, pending:C.muted, processing:C.blue, completed:C.success, failed:C.danger, cancelled:C.muted, rejected:C.danger }[transferStatusAlias(st)] || C.muted);
+const TRANSFER_DIRECTIONS = [['wallet_to_bank','Wallet → banque'],['bank_to_wallet','Banque → wallet'],['withdraw','Retrait wallet']];
+// Nature d'un mouvement : direction du contrat (wallet_to_bank / bank_to_wallet), direction SQL
+// (payout / funding) ou prefixe de la reference (PAY- retrait, TRF- virement sortant, FND- approvisionnement).
+const transferKind = t => {
+  const d = pick(t, 'direction', 'type'); const ref = String(pick(t, 'reference') || '');
+  if (d === 'bank_to_wallet' || d === 'funding' || d === 'transfer_in' || ref.startsWith('FND-')) return { k:'funding', l:'Banque → wallet', c:C.blue };
+  if (d === 'wallet_to_bank' || d === 'transfer_out' || ref.startsWith('TRF-')) return { k:'bank', l:'Wallet → banque', c:C.primary };
+  if (d === 'withdraw' || ref.startsWith('PAY-') || (pick(t, 'wallet') && !pick(t, 'bankAccount', 'bank_account'))) return { k:'withdraw', l:'Retrait wallet', c:C.success };
+  if (d === 'payout') return { k:'bank', l:'Wallet → banque', c:C.primary };
+  return { k:'other', l: d || '—', c:C.muted };
+};
+const money = (v, cur) => (v === undefined || v === null || v === '') ? '—' : `${fmt(v)} ${cur || ''}`.trim();
+const tId = t => pick(t, 'transferId', 'transfer_id', 'id');
+const tMerchantName = t => (typeof t?.merchant === 'string' ? t.merchant : null) || pick(t, 'merchantName', 'merchant_name', 'business_name') || pick(typeof t?.merchant === 'object' ? t.merchant : {}, 'business_name', 'businessName', 'name');
+const tMerchantId = t => pick(t, 'merchantId', 'merchant_id') || pick(typeof t?.merchant === 'object' ? t.merchant : {}, 'merchant_id', 'merchantId', 'id');
+const tCurrency = t => pick(t, 'currency') || pick(t?.merchant || {}, 'currency');
+const cashErr = (err, fallback) => err.response?.data?.error || err.response?.data?.code || fallback;
+
+const VOL_LABELS = {
+  collected:'Encaissé', collectedCount:'Encaissements', collected_count:'Encaissements', count:'Mouvements',
+  withdrawn:'Retiré (wallet)', withdrawals:'Retraits', withdrawCount:'Retraits', withdraw_count:'Retraits',
+  transfersOut:'Transferts wallet → banque', transfers_out:'Transferts wallet → banque', payouts:'Transferts wallet → banque', payout:'Transferts wallet → banque',
+  transfersIn:'Approvisionnements reçus', transfers_in:'Approvisionnements reçus', funding:'Approvisionnements reçus', fundings:'Approvisionnements reçus',
+  completed:'Terminés', completedCount:'Terminés', volume:'Volume', total:'Total', amount:'Montant', net:'Net', fee:'Frais', fees:'Frais',
+};
+const isNum = v => typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && !isNaN(v));
+// Valeur d'une entree de stats : nombre brut ou objet { count, amount } (forme de GET /admin/cash/stats)
+const amt = v => (v && typeof v === 'object') ? pick(v, 'amount', 'volume', 'sum', 'total') : v;
+const cnt = v => (v && typeof v === 'object') ? pick(v, 'count', 'n') : undefined;
+const volumeRows = obj => Object.entries(obj || {}).filter(([, v]) => isNum(v) || (v && typeof v === 'object' && (isNum(v.amount) || isNum(v.count)))).map(([k, v]) => [VOL_LABELS[k] || k, amt(v), cnt(v)]);
+const camel = s => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+const queueInfo = (stats, key) => {
+  const q = pick(stats?.queues || {}, key, camel(key)) ?? pick(stats || {}, key, camel(key), `${camel(key)}Count`);
+  if (q && typeof q === 'object') return { count: pick(q, 'count', 'total', 'n') ?? 0, amount: pick(q, 'amount', 'volume', 'sum') };
+  return { count: isNum(q) ? Number(q) : 0, amount: undefined };
+};
+const VolumeCard = ({ title, obj, cur }) => {
+  const rows = volumeRows(obj);
+  return (
+    <Card>
+      <div style={{ fontSize:14, fontWeight:600, marginBottom:10 }}>{title}</div>
+      {!rows.length ? <div style={{ color:C.muted, fontSize:13 }}>Aucune donnée</div> : rows.map(([l, v, n]) => (
+        <div key={l} style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'7px 0', borderBottom:`1px solid ${C.border}`, fontSize:13 }}>
+          <span style={{ color:C.muted }}>{l}{n !== undefined ? <span style={{ fontSize:11 }}> · {fmt(n)} op.</span> : null}</span><strong>{v === undefined ? fmt(n) : /count|encaissements|retraits|terminés|mouvements/i.test(l) && n === undefined ? fmt(v) : money(v, cur)}</strong>
+        </div>
+      ))}
+    </Card>
+  );
+};
+
+// /cash — tableau de bord des operations de caisse
+const CashDashboard = () => {
+  const [stats, setStats] = useState(null); const [err, setErr] = useState(null);
+  const load = useCallback(() => {
+    setErr(null);
+    cashAdminApi.stats().then(r => setStats(r.data || {})).catch(e => { if (e.response?.status !== 403) setErr(cashErr(e, 'Statistiques de caisse indisponibles')); });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const today = pick(stats || {}, 'today', 'day') || {};
+  const week = pick(stats || {}, 'last7Days', 'last7d', 'last7days', 'week', 'sevenDays', 'last_7d') || {};
+  const cur = pick(stats || {}, 'currency');
+  const pm = queueInfo(stats, 'pending_manual'), af = queueInfo(stats, 'awaiting_funds'), pr = queueInfo(stats, 'processing');
+  return (
+    <CashGuard>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8 }}>
+        <div>
+          <h1 style={{ margin:0, fontSize:22, fontWeight:700 }}>💵 Caisse</h1>
+          <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>Encaisser, retirer, transférer — files d&apos;attente à traiter par les opérations C-Pay.</div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <Link to="/cash/transfers"><Btn small variant="blue">Transferts</Btn></Link>
+          <Link to="/cash/platform-accounts"><Btn small variant="secondary">Comptes de collecte</Btn></Link>
+          <Btn small variant="secondary" onClick={load}>↻</Btn>
+        </div>
+      </div>
+      {err ? <Card><div style={{ color:C.danger, fontSize:13 }}>{err}</div></Card> : !stats ? <Spin /> : (<>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:14, marginBottom:16 }}>
+          <Link to="/cash/transfers?status=pending_manual" style={{ textDecoration:'none', color:'inherit' }}>
+            <Stat label="Virements wallet → banque à exécuter (manuel)" value={fmt(pm.count)} color={pm.count ? C.warning : C.text} sub={pm.amount !== undefined ? `${money(pm.amount, cur)} · ouvrir la file →` : 'ouvrir la file →'} />
+          </Link>
+          <Link to="/cash/transfers?status=awaiting_funds" style={{ textDecoration:'none', color:'inherit' }}>
+            <Stat label="Ordres d'approvisionnement en attente de fonds" value={fmt(af.count)} color={af.count ? C.warning : C.text} sub={af.amount !== undefined ? `${money(af.amount, cur)} · ouvrir la file →` : 'ouvrir la file →'} />
+          </Link>
+          <Link to="/cash/transfers?status=processing" style={{ textDecoration:'none', color:'inherit' }}>
+            <Stat label="En cours sur rail bancaire / opérateur" value={fmt(pr.count)} color={C.blue} sub="suivi automatique · voir →" />
+          </Link>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:14 }}>
+          <VolumeCard title="Aujourd'hui" obj={today} cur={cur} />
+          <VolumeCard title="7 derniers jours" obj={week} cur={cur} />
+        </div>
+        <div style={{ fontSize:11, color:C.muted, marginTop:12 }}>Chaque action (confirmation de réception, exécution, rejet) écrit un audit log et un événement sur le transfert.</div>
+      </>)}
+    </CashGuard>
+  );
+};
+
+// Journal des evenements d'un transfert (events JSONB)
+const TransferEvents = ({ events }) => {
+  const list = Array.isArray(events) ? events : [];
+  if (!list.length) return <div style={{ color:C.muted, fontSize:13 }}>Aucun événement enregistré.</div>;
+  return (
+    <div>
+      {list.map((e, i) => {
+        // Evenement { at, type, ...extra } : les cles supplementaires sont affichees telles quelles
+        const HIDDEN = ['at', 'createdAt', 'created_at', 'timestamp', 'date', 'type', 'event', 'action', 'by', 'actor', 'adminEmail', 'admin_email', 'executedBy', 'executed_by'];
+        const extras = Object.entries(e || {}).filter(([k, v]) => !HIDDEN.includes(k) && v !== null && v !== undefined && v !== '');
+        const details = extras.length ? extras.map(([k, v]) => `${k} : ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ') : null;
+        return (
+          <div key={i} style={{ display:'flex', gap:10, padding:'8px 0', borderBottom:`1px solid ${C.border}`, fontSize:12 }}>
+            <div style={{ width:8, height:8, borderRadius:'50%', background:transferColor(pick(e, 'status', 'to')) , marginTop:5, flexShrink:0 }} />
+            <div style={{ flex:1, minWidth:0 }}>
+              <div><strong>{pick(e, 'type', 'event', 'action', 'status') || 'événement'}</strong>{pick(e, 'by', 'actor', 'adminEmail', 'admin_email', 'executedBy', 'executed_by') ? <span style={{ color:C.muted }}> · {pick(e, 'by', 'actor', 'adminEmail', 'admin_email', 'executedBy', 'executed_by')}</span> : null}</div>
+              {details ? <div style={{ color:C.muted, wordBreak:'break-word' }}>{details}</div> : null}
+              <div style={{ color:C.muted, fontSize:11 }}>{fmtDate(pick(e, 'at', 'createdAt', 'created_at', 'timestamp', 'date'))}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// Tiroir de detail + actions §8 (confirm-funds, mark-executed, reject)
+const CashTransferDrawer = ({ id, initial, onClose, onChanged }) => {
+  const [t, setT] = useState(initial || null);
+  const [loading, setLoading] = useState(true);
+  const [action, setAction] = useState(null); // 'confirm' | 'execute' | 'reject'
+  const [form, setForm] = useState({ amountReceived:'', bankReference:'', reason:'' });
+  const [saving, setSaving] = useState(false);
+  const navigate = useNavigate();
+
+  const load = useCallback(() => {
+    setLoading(true);
+    cashAdminApi.transfer(id).then(r => setT(r.data?.transfer || r.data?.data || r.data))
+      .catch(e => { if (e.response?.status !== 403) toast.error(cashErr(e, 'Transfert introuvable')); })
+      .finally(() => setLoading(false));
+  }, [id]);
+  useEffect(() => { load(); }, [load]);
+
+  if (!t && loading) return <Drawer title="Transfert" onClose={onClose}><Spin /></Drawer>;
+  if (!t) return <Drawer title="Transfert" onClose={onClose}><div style={{ color:C.muted }}>Détail indisponible.</div></Drawer>;
+
+  const status = pick(t, 'status'); const kind = transferKind(t); const cur = tCurrency(t);
+  const bank = pick(t, 'bankAccount', 'bank_account') || (pick(t, 'bank_name', 'bankName') ? { bankName: pick(t, 'bank_name', 'bankName'), accountMasked: pick(t, 'accountMasked', 'account_masked', 'account_number'), accountName: pick(t, 'accountName', 'account_name') } : null);
+  const wallet = pick(t, 'wallet') || (pick(t, 'wallet_phone', 'walletPhone') ? { operator: pick(t, 'wallet_operator', 'walletOperator'), phone: pick(t, 'wallet_phone', 'walletPhone') } : null);
+  const instr = pick(t, 'instructions');
+  const events = pick(t, 'events', 'history', 'timeline', 'auditLog') || [];
+  const mId = tMerchantId(t);
+
+  const openAction = a => { setForm({ amountReceived: String(pick(t, 'amount') ?? ''), bankReference: '', reason: '' }); setAction(a); };
+  const run = async () => {
+    setSaving(true);
+    try {
+      if (action === 'confirm') {
+        const amt = Number(form.amountReceived);
+        if (!(amt > 0)) { toast.error('Montant reçu invalide'); setSaving(false); return; }
+        if (!form.bankReference.trim()) { toast.error('Référence bancaire requise'); setSaving(false); return; }
+        await cashAdminApi.confirmFunds(id, { amountReceived: amt, bankReference: form.bankReference.trim() });
+        toast.success('Réception confirmée — solde crédité');
+      } else if (action === 'execute') {
+        if (!form.bankReference.trim()) { toast.error('Référence bancaire requise'); setSaving(false); return; }
+        await cashAdminApi.markExecuted(id, { bankReference: form.bankReference.trim() });
+        toast.success('Transfert marqué exécuté');
+      } else if (action === 'reject') {
+        if (form.reason.trim().length < 3) { toast.error('Indiquez un motif'); setSaving(false); return; }
+        await cashAdminApi.reject(id, { reason: form.reason.trim() });
+        toast.success('Transfert rejeté — fonds libérés');
+      }
+      setAction(null); load(); onChanged?.();
+    } catch (err) { toast.error(cashErr(err, 'Action refusée')); }
+    finally { setSaving(false); }
+  };
+
+  const TITLES = { confirm:'Confirmer la réception des fonds', execute:'Marquer le virement exécuté', reject:'Rejeter le transfert' };
+  return (
+    <Drawer title={`${kind.l} — ${pick(t, 'reference') || String(id).slice(0, 8)}`} onClose={onClose} width={560}>
+      <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:14 }}>
+        <Badge label={transferStatusLabel(status)} color={transferColor(status)} />
+        <Badge label={kind.l} color={kind.c} />
+        {loading && <span style={{ fontSize:11, color:C.muted }}>actualisation…</span>}
+      </div>
+      {(status === 'awaiting_funds' || transferStatusAlias(status) === 'pending_manual') && (
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16 }}>
+          {status === 'awaiting_funds' && <Btn small variant="success" onClick={() => openAction('confirm')}>✔ Confirmer la réception</Btn>}
+          {transferStatusAlias(status) === 'pending_manual' && <Btn small variant="blue" onClick={() => openAction('execute')}>✔ Marquer exécuté</Btn>}
+          <Btn small variant="danger" onClick={() => openAction('reject')}>✖ Rejeter</Btn>
+        </div>
+      )}
+      <KV l="Marchand" v={mId ? <Link to={`/merchants/${mId}`} style={{ color:C.primary }} onClick={onClose}>{tMerchantName(t) || String(mId).slice(0, 8)}</Link> : tMerchantName(t)} />
+      <KV l="Montant" v={money(pick(t, 'amount'), cur)} />
+      <KV l="Frais" v={money(pick(t, 'fee'), cur)} />
+      <KV l="Net" v={money(pick(t, 'net'), cur)} />
+      <KV l="Description" v={pick(t, 'description')} />
+      <KV l="Créé le" v={fmtDate(pick(t, 'createdAt', 'created_at'))} />
+      <KV l="Terminé le" v={fmtDate(pick(t, 'completedAt', 'completed_at'))} />
+      <KV l="Référence bancaire" v={pick(t, 'bankReference', 'bank_reference')} />
+      <KV l="Exécuté par" v={pick(t, 'executedBy', 'executed_by', 'executedByEmail')} />
+      {pick(t, 'amountRequested', 'amount_requested') !== undefined && <KV l="Montant demandé" v={money(pick(t, 'amountRequested', 'amount_requested'), cur)} />}
+      {pick(t, 'expiresAt', 'expires_at') && <KV l="Expire le" v={fmtDate(pick(t, 'expiresAt', 'expires_at'))} />}
+      {pick(t, 'cancelledAt', 'cancelled_at') && <KV l="Annulé le" v={fmtDate(pick(t, 'cancelledAt', 'cancelled_at'))} />}
+      {pick(t, 'gatewayReference', 'gateway_reference') && <KV l="Référence opérateur" v={pick(t, 'gatewayReference', 'gateway_reference')} />}
+      {pick(t, 'merchantEmail', 'merchant_email') && <KV l="E-mail marchand" v={pick(t, 'merchantEmail', 'merchant_email')} />}
+      {pick(t, 'errorMessage', 'error_message', 'failureReason', 'failure_reason', 'rejectReason', 'reason') && <KV l="Motif / erreur" v={<span style={{ color:C.danger }}>{pick(t, 'errorMessage', 'error_message', 'failureReason', 'failure_reason', 'rejectReason', 'reason')}</span>} />}
+      {pick(t, 'adminNote', 'admin_note') && <KV l="Note admin" v={pick(t, 'adminNote', 'admin_note')} />}
+      {bank && (<>
+        <div style={{ marginTop:16, fontSize:13, fontWeight:700, marginBottom:4 }}>🏦 Compte bancaire du marchand</div>
+        <KV l="Banque" v={pick(bank, 'bankName', 'bank_name', 'inst_name')} />
+        <KV l="Intitulé" v={pick(bank, 'accountName', 'account_name', 'holder_name')} />
+        <KV l="Compte" v={pick(bank, 'accountMasked', 'account_masked', 'accountNumber', 'account_number', 'iban')} />
+      </>)}
+      {wallet && (<>
+        <div style={{ marginTop:16, fontSize:13, fontWeight:700, marginBottom:4 }}>📱 Wallet du marchand</div>
+        <KV l="Opérateur" v={pick(wallet, 'operator', 'operatorLabel')} />
+        <KV l="Numéro" v={pick(wallet, 'phone')} />
+      </>)}
+      {instr && (<>
+        <div style={{ marginTop:16, fontSize:13, fontWeight:700, marginBottom:4 }}>📄 Instructions de virement (ordre d&apos;approvisionnement)</div>
+        <div style={{ background:C.bg, borderRadius:8, padding:'4px 12px' }}>
+          <KV l="Banque" v={pick(instr, 'bankName', 'bank_name')} />
+          <KV l="Intitulé" v={pick(instr, 'accountName', 'account_name')} />
+          <KV l="Numéro de compte" v={pick(instr, 'accountNumber', 'account_number')} />
+          <KV l="IBAN" v={pick(instr, 'iban')} />
+          <KV l="SWIFT" v={pick(instr, 'swift')} />
+          <KV l="Référence à indiquer" v={<strong>{pick(instr, 'reference') || pick(t, 'reference')}</strong>} />
+          <KV l="Expire le" v={fmtDate(pick(instr, 'expiresAt', 'expires_at'))} />
+        </div>
+      </>)}
+      <div style={{ marginTop:18, fontSize:13, fontWeight:700, marginBottom:6 }}>🕑 Journal des changements</div>
+      <TransferEvents events={events} />
+      {mId && <div style={{ marginTop:14 }}><Btn small variant="secondary" onClick={() => { onClose(); navigate(`/merchants/${mId}`); }}>Fiche marchand →</Btn></div>}
+
+      {action && (
+        <Modal title={TITLES[action]} onClose={() => !saving && setAction(null)} width={440}>
+          <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>
+            {pick(t, 'reference')} · {money(pick(t, 'amount'), cur)} · {tMerchantName(t) || ''}
+          </div>
+          {action === 'confirm' && (<>
+            <Inp label={`Montant reçu (${cur || 'devise du marchand'})`} type="number" inputMode="numeric" value={form.amountReceived} onChange={v => setForm(f => ({ ...f, amountReceived: v }))} />
+            <Inp label="Référence du virement reçu" value={form.bankReference} onChange={v => setForm(f => ({ ...f, bankReference: v }))} placeholder="Libellé / référence bancaire" />
+            <div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>Le solde du marchand est crédité immédiatement du montant reçu.</div>
+          </>)}
+          {action === 'execute' && (<>
+            <Inp label="Référence du virement émis" value={form.bankReference} onChange={v => setForm(f => ({ ...f, bankReference: v }))} placeholder="Référence bancaire" />
+            <div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>À utiliser une fois le virement réellement émis par la banque de C-Pay.</div>
+          </>)}
+          {action === 'reject' && (<>
+            <div style={{ background:`${C.danger}12`, color:C.danger, borderRadius:8, padding:'10px 12px', fontSize:13, marginBottom:12 }}>
+              ⚠️ Action irréversible : le transfert passe en « Rejeté » et les fonds réservés sont libérés sur le solde du marchand.
+            </div>
+            <Inp label="Motif (visible par le marchand)" value={form.reason} onChange={v => setForm(f => ({ ...f, reason: v }))} placeholder="ex. virement non reçu après expiration" />
+          </>)}
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:8 }}>
+            <Btn variant="secondary" onClick={() => setAction(null)} disabled={saving}>Annuler</Btn>
+            <Btn variant={action === 'reject' ? 'danger' : 'success'} onClick={run} disabled={saving}>{saving ? 'Traitement…' : action === 'reject' ? 'Confirmer le rejet' : 'Confirmer'}</Btn>
+          </div>
+        </Modal>
+      )}
+    </Drawer>
+  );
+};
+
+// /cash/transfers — liste filtrable (status, direction, marchand, recherche) + pagination limit/offset
+const CashTransfers = () => {
+  const LIMIT = 25;
+  const location = useLocation(); const navigate = useNavigate();
+  const qs = new URLSearchParams(location.search);
+  const [status, setStatus] = useState(qs.get('status') || '');
+  const [direction, setDirection] = useState(qs.get('direction') || '');
+  const [merchantId, setMerchantId] = useState(qs.get('merchantId') || '');
+  const [search, setSearch] = useState(qs.get('q') || ''); const [q, setQ] = useState(qs.get('q') || '');
+  const [page, setPage] = useState(1);
+  const [items, setItems] = useState([]); const [total, setTotal] = useState(0); const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+
+  // Liens du tableau de bord (?status=…) alors que la page est deja montee
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    setStatus(p.get('status') || ''); setDirection(p.get('direction') || ''); setMerchantId(p.get('merchantId') || '');
+    if (p.has('q')) { setSearch(p.get('q') || ''); setQ(p.get('q') || ''); }
+  }, [location.search]);
+  const setFilter = (key, v) => {
+    const p = new URLSearchParams(location.search);
+    if (v) p.set(key, v); else p.delete(key);
+    setPage(1); navigate({ pathname: location.pathname, search: p.toString() ? `?${p}` : '' }, { replace: true });
+  };
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const params = { limit: LIMIT, offset: (page - 1) * LIMIT };
+    if (status) params.status = status; if (direction) params.direction = direction; if (merchantId) params.merchantId = merchantId; if (q) params.q = q;
+    cashAdminApi.transfers(params).then(r => { setItems(r.data?.data || r.data?.transfers || (Array.isArray(r.data) ? r.data : [])); setTotal(r.data?.total ?? 0); })
+      .catch(e => { if (e.response?.status !== 403) toast.error(cashErr(e, 'Erreur chargement transferts')); })
+      .finally(() => setLoading(false));
+  }, [page, status, direction, merchantId, q]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const h = setTimeout(() => { if (search.trim() !== q) { setQ(search.trim()); setPage(1); } }, 350); return () => clearTimeout(h); }, [search, q]);
+
+  const selStyle = { background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 12px', fontSize:13, color:C.text };
+  return (
+    <CashGuard>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8 }}>
+        <h1 style={{ margin:0, fontSize:22, fontWeight:700 }}>🔁 Transferts de caisse <span style={{ fontSize:14, color:C.muted }}>({fmt(total)})</span></h1>
+        <div style={{ display:'flex', gap:8 }}>
+          <Link to="/cash"><Btn small variant="secondary">← Tableau caisse</Btn></Link>
+          <Btn small variant="secondary" onClick={load}>↻</Btn>
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Référence (TRF-, FND-, PAY-), marchand…" style={{ ...selStyle, flex:1, minWidth:220 }} />
+        <select value={status} onChange={e => setFilter('status', e.target.value)} style={selStyle}>
+          <option value="">Tous statuts</option>
+          {TRANSFER_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <select value={direction} onChange={e => setFilter('direction', e.target.value)} style={selStyle}>
+          <option value="">Toutes directions</option>
+          {TRANSFER_DIRECTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        {merchantId && <Btn small variant="secondary" onClick={() => setFilter('merchantId', '')}>Marchand : {String(merchantId).slice(0, 8)}… ✕</Btn>}
+      </div>
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:12 }}>
+        {[['pending_manual','À exécuter'],['awaiting_funds','Fonds attendus'],['processing','En cours'],['completed','Terminés']].map(([v, l]) => (
+          <Btn key={v} small variant={status === v ? 'blue' : 'secondary'} onClick={() => setFilter('status', status === v ? '' : v)}>{l}</Btn>
+        ))}
+      </div>
+      {loading && !items.length ? <Spin /> : (
+        <Card>
+          <Tbl heads={['Date', 'Référence', 'Nature', 'Marchand', 'Montant', 'Frais', 'Net', 'Destination', 'Statut']}
+            rows={items.map(t => { const kind = transferKind(t); const cur = tCurrency(t); const bank = pick(t, 'bankAccount', 'bank_account'); const w = pick(t, 'wallet'); const id = tId(t); return (
+              <tr key={id || pick(t, 'reference')} style={{ cursor:'pointer' }} onClick={() => setSelected(t)}>
+                <TD style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap' }}>{fmtDate(pick(t, 'createdAt', 'created_at'))}</TD>
+                <TD style={{ fontWeight:600, fontFamily:'monospace' }}>{pick(t, 'reference') || (id ? String(id).slice(0, 8) : '—')}</TD>
+                <TD><Badge label={kind.l} color={kind.c} /></TD>
+                <TD style={{ fontSize:12 }}>{tMerchantName(t) || (tMerchantId(t) ? String(tMerchantId(t)).slice(0, 8) + '…' : '—')}</TD>
+                <TD style={{ fontWeight:600, whiteSpace:'nowrap' }}>{money(pick(t, 'amount'), cur)}</TD>
+                <TD style={{ fontSize:12, color:C.muted, whiteSpace:'nowrap' }}>{money(pick(t, 'fee'), cur)}</TD>
+                <TD style={{ fontSize:12, whiteSpace:'nowrap' }}>{money(pick(t, 'net'), cur)}</TD>
+                <TD style={{ fontSize:12, color:C.muted }}>{bank ? `${pick(bank, 'bankName', 'bank_name') || ''} ${pick(bank, 'accountMasked', 'account_masked') || ''}`.trim() || '—' : w ? `${pick(w, 'operator') || ''} ${pick(w, 'phone') || ''}`.trim() : kind.k === 'funding' ? 'Compte de collecte C-Pay' : pick(t, 'bank_name', 'bankName') || '—'}</TD>
+                <TD><Badge label={transferStatusLabel(pick(t, 'status'))} color={transferColor(pick(t, 'status'))} /></TD>
+              </tr>
+            ); })} empty="Aucun transfert" />
+          <Pagination page={page} setPage={setPage} count={items.length} limit={LIMIT} />
+        </Card>
+      )}
+      {selected && <CashTransferDrawer id={tId(selected)} initial={selected} onClose={() => setSelected(null)} onChanged={load} />}
+    </CashGuard>
+  );
+};
+
+// /cash/platform-accounts — comptes de collecte C-Pay par devise (creation / edition : super_admin)
+const EMPTY_PA = { currency:'XAF', bankName:'', accountName:'', accountNumber:'', iban:'', swift:'', notes:'', active:true };
+const paId = a => pick(a, 'id', 'accountId', 'account_id', 'platformAccountId', 'platform_account_id');
+const CashPlatformAccounts = () => {
+  const { admin, isSuperAdmin } = useAuth();
+  const [items, setItems] = useState([]); const [loading, setLoading] = useState(true);
+  const [edit, setEdit] = useState(null); // { id?, form }
+  const [saving, setSaving] = useState(false);
+  const allowed = hasRole(admin, CASH_ROLES);
+  const load = useCallback(() => {
+    setLoading(true);
+    cashAdminApi.platformAccounts().then(r => setItems(r.data?.data || r.data?.accounts || (Array.isArray(r.data) ? r.data : [])))
+      .catch(e => { if (e.response?.status !== 403) toast.error(cashErr(e, 'Erreur chargement comptes de collecte')); })
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { if (allowed) load(); }, [allowed, load]);
+
+  const openCreate = () => setEdit({ id: null, form: { ...EMPTY_PA } });
+  const openEdit = a => setEdit({ id: paId(a), form: {
+    currency: pick(a, 'currency') || 'XAF', bankName: pick(a, 'bankName', 'bank_name') || '', accountName: pick(a, 'accountName', 'account_name') || '',
+    accountNumber: pick(a, 'accountNumber', 'account_number') || '', iban: pick(a, 'iban') || '', swift: pick(a, 'swift') || '', notes: pick(a, 'notes') || '',
+    active: pick(a, 'active', 'is_active') !== false,
+  } });
+  const setF = (k, v) => setEdit(e => ({ ...e, form: { ...e.form, [k]: v } }));
+  const save = async () => {
+    const f = edit.form;
+    if (!/^[A-Z]{3}$/.test(f.currency)) return toast.error('Devise sur 3 lettres (XOF, XAF, CDF…)');
+    if (!f.bankName.trim() || !f.accountName.trim() || !f.accountNumber.trim()) return toast.error('Banque, intitulé et numéro de compte sont requis');
+    const body = { currency: f.currency, bankName: f.bankName.trim(), accountName: f.accountName.trim(), accountNumber: f.accountNumber.trim(), iban: f.iban.trim() || null, swift: f.swift.trim() || null, notes: (f.notes || '').trim() || null, active: !!f.active };
+    setSaving(true);
+    try {
+      if (edit.id) await cashAdminApi.updatePlatformAccount(edit.id, body); else await cashAdminApi.createPlatformAccount(body);
+      toast.success(edit.id ? 'Compte de collecte mis à jour' : 'Compte de collecte créé'); setEdit(null); load();
+    } catch (err) { toast.error(cashErr(err, 'Enregistrement refusé')); }
+    finally { setSaving(false); }
+  };
+  const toggleActive = async a => {
+    const id = paId(a); if (!id) return;
+    const active = pick(a, 'active', 'is_active') !== false;
+    try { await cashAdminApi.updatePlatformAccount(id, { active: !active }); toast.success(active ? 'Compte désactivé' : 'Compte activé'); load(); }
+    catch (err) { toast.error(cashErr(err, 'Mise à jour refusée')); }
+  };
+
+  return (
+    <CashGuard>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8 }}>
+        <div>
+          <h1 style={{ margin:0, fontSize:22, fontWeight:700 }}>🏦 Comptes de collecte C-Pay</h1>
+          <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>Un compte actif par devise : il figure dans les instructions des ordres d&apos;approvisionnement (banque → wallet). Sans compte pour la devise, le marchand reçoit <code>409 FUNDING_UNAVAILABLE</code>.</div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn small variant="secondary" onClick={load}>↻</Btn>
+          {isSuperAdmin && <Btn small onClick={openCreate}>+ Nouveau compte</Btn>}
+        </div>
+      </div>
+      {!isSuperAdmin && <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>Lecture seule : la création et la modification sont réservées au rôle super_admin.</div>}
+      {loading ? <Spin /> : (
+        <Card>
+          <Tbl heads={['Devise', 'Banque', 'Intitulé', 'Numéro de compte', 'IBAN', 'SWIFT', 'Notes', 'Statut', 'Actions']}
+            rows={items.map((a, i) => { const active = pick(a, 'active', 'is_active') !== false; return (
+              <tr key={paId(a) || i}>
+                <TD style={{ fontWeight:700 }}>{pick(a, 'currency') || '—'}</TD>
+                <TD>{pick(a, 'bankName', 'bank_name') || '—'}</TD>
+                <TD>{pick(a, 'accountName', 'account_name') || '—'}</TD>
+                <TD style={{ fontFamily:'monospace' }}>{pick(a, 'accountNumber', 'account_number') || '—'}</TD>
+                <TD style={{ fontFamily:'monospace', fontSize:12 }}>{pick(a, 'iban') || '—'}</TD>
+                <TD style={{ fontFamily:'monospace', fontSize:12 }}>{pick(a, 'swift') || '—'}</TD>
+                <TD style={{ fontSize:12, color:C.muted, maxWidth:220 }}>{pick(a, 'notes') || '—'}</TD>
+                <TD><Badge label={active ? 'Actif' : 'Inactif'} color={active ? C.success : C.muted} /></TD>
+                <TD>{isSuperAdmin ? (
+                  <div style={{ display:'flex', gap:6 }}>
+                    <Btn small variant="secondary" onClick={() => openEdit(a)}>Modifier</Btn>
+                    <Btn small variant={active ? 'warning' : 'success'} onClick={() => toggleActive(a)}>{active ? 'Désactiver' : 'Activer'}</Btn>
+                  </div>
+                ) : <span style={{ color:C.muted, fontSize:12 }}>—</span>}</TD>
+              </tr>
+            ); })} empty="Aucun compte de collecte configuré" />
+        </Card>
+      )}
+      {edit && (
+        <Modal title={edit.id ? 'Modifier le compte de collecte' : 'Nouveau compte de collecte'} onClose={() => !saving && setEdit(null)} width={480}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 12px' }}>
+            <Inp label="Devise (ISO 4217)" value={edit.form.currency} onChange={v => setF('currency', String(v).toUpperCase().slice(0, 3))} placeholder="XAF" />
+            <Inp label="Banque" value={edit.form.bankName} onChange={v => setF('bankName', v)} placeholder="ex. Afriland First Bank" />
+          </div>
+          <Inp label="Intitulé du compte" value={edit.form.accountName} onChange={v => setF('accountName', v)} placeholder="Calculus Plus SAS — collecte C-Pay" />
+          <Inp label="Numéro de compte" value={edit.form.accountNumber} onChange={v => setF('accountNumber', v)} />
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 12px' }}>
+            <Inp label="IBAN (optionnel)" value={edit.form.iban} onChange={v => setF('iban', v)} />
+            <Inp label="SWIFT / BIC (optionnel)" value={edit.form.swift} onChange={v => setF('swift', v)} />
+          </div>
+          <Inp label="Notes internes (optionnel)" value={edit.form.notes} onChange={v => setF('notes', v)} placeholder="ex. compte principal XAF, agence Douala" />
+          <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, marginBottom:14, cursor:'pointer' }}>
+            <input type="checkbox" checked={!!edit.form.active} onChange={e => setF('active', e.target.checked)} /> Compte actif (proposé dans les ordres d&apos;approvisionnement)
+          </label>
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+            <Btn variant="secondary" onClick={() => setEdit(null)} disabled={saving}>Annuler</Btn>
+            <Btn onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</Btn>
+          </div>
+        </Modal>
+      )}
+    </CashGuard>
+  );
+};
+
+// Carte « Caisse » de la fiche marchand : wallet et comptes bancaires si le detail
+// marchand les renvoie, derniers transferts via GET /admin/cash/transfers?merchantId=
+const MerchantCashCard = ({ merchant, merchantId }) => {
+  const { admin } = useAuth();
+  const [transfers, setTransfers] = useState(null); const [err, setErr] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const canCash = hasRole(admin, CASH_ROLES);
+  const load = useCallback(() => {
+    if (!canCash) return;
+    cashAdminApi.transfers({ merchantId, limit: 10, offset: 0 }).then(r => setTransfers(r.data?.data || r.data?.transfers || [])).catch(() => setErr(true));
+  }, [merchantId, canCash]);
+  useEffect(() => { load(); }, [load]);
+
+  const wallet = pick(merchant, 'wallet', 'cashWallet', 'cash_wallet') || (pick(merchant, 'cash_wallet_phone', 'cashWalletPhone') ? {
+    operator: pick(merchant, 'cash_wallet_operator', 'cashWalletOperator'), phone: pick(merchant, 'cash_wallet_phone', 'cashWalletPhone'), verifiedAt: pick(merchant, 'cash_wallet_verified_at', 'cashWalletVerifiedAt'),
+  } : null);
+  const banks = pick(merchant, 'bankAccounts', 'bank_accounts');
+  const cur = merchant.currency;
+  return (
+    <div>
+      <Card style={{ marginBottom:16 }}>
+        <h3 style={{ margin:'0 0 12px', fontSize:15 }}>💵 Caisse — destinations enregistrées</h3>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:16 }}>
+          <div>
+            <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>WALLET MOBILE MONEY (RETRAITS)</div>
+            {wallet ? (<>
+              <KV l="Opérateur" v={pick(wallet, 'operatorLabel', 'operator')} />
+              <KV l="Numéro" v={pick(wallet, 'phone')} />
+              <KV l="Vérifié" v={pick(wallet, 'verifiedAt', 'verified_at') ? <Badge label={`le ${fmtDate(pick(wallet, 'verifiedAt', 'verified_at'))}`} color={C.success} /> : <Badge label="Non vérifié (aucun retrait terminé)" color={C.warning} />} />
+            </>) : <div style={{ fontSize:13, color:C.muted }}>Aucun wallet enregistré par le marchand.</div>}
+          </div>
+          <div>
+            <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>COMPTES BANCAIRES (TRANSFERTS)</div>
+            {Array.isArray(banks) ? (!banks.length ? <div style={{ fontSize:13, color:C.muted }}>Aucun compte bancaire.</div> : banks.map((b, i) => (
+              <div key={pick(b, 'account_id', 'accountId', 'id') || i} style={{ display:'flex', justifyContent:'space-between', gap:8, padding:'7px 0', borderBottom:`1px solid ${C.border}`, fontSize:13 }}>
+                <span>{pick(b, 'bankName', 'bank_name', 'inst_name') || 'Banque'} · <span style={{ fontFamily:'monospace' }}>{pick(b, 'accountMasked', 'account_masked', 'account_number', 'accountNumber', 'iban') || '—'}</span></span>
+                <Badge label={pick(b, 'status') === 'verified' || pick(b, 'verified') === true ? 'Vérifié' : pick(b, 'status') || 'En attente'} color={pick(b, 'status') === 'verified' || pick(b, 'verified') === true ? C.success : C.warning} />
+              </div>
+            ))) : <div style={{ fontSize:13, color:C.muted }}>Non renvoyés par la fiche marchand — voir les transferts ci-dessous.</div>}
+          </div>
+        </div>
+      </Card>
+      <Card>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
+          <h3 style={{ margin:0, fontSize:15 }}>Derniers transferts de caisse</h3>
+          {canCash && <Link to={`/cash/transfers?merchantId=${encodeURIComponent(merchantId)}`} style={{ fontSize:12, color:C.primary, textDecoration:'none' }}>Voir tous →</Link>}
+        </div>
+        {!canCash ? <div style={{ fontSize:13, color:C.muted }}>Réservé aux rôles super_admin et ops_admin.</div>
+          : err ? <div style={{ fontSize:13, color:C.muted }}>Transferts de caisse indisponibles.</div>
+          : transfers === null ? <Spin />
+          : <Tbl heads={['Date', 'Référence', 'Nature', 'Montant', 'Net', 'Statut']}
+              rows={transfers.map(t => { const kind = transferKind(t); const c = tCurrency(t) || cur; return (
+                <tr key={tId(t) || pick(t, 'reference')} style={{ cursor:'pointer' }} onClick={() => setSelected(t)}>
+                  <TD style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap' }}>{fmtDate(pick(t, 'createdAt', 'created_at'))}</TD>
+                  <TD style={{ fontFamily:'monospace', fontWeight:600 }}>{pick(t, 'reference') || '—'}</TD>
+                  <TD><Badge label={kind.l} color={kind.c} /></TD>
+                  <TD style={{ whiteSpace:'nowrap' }}>{money(pick(t, 'amount'), c)}</TD>
+                  <TD style={{ whiteSpace:'nowrap', fontSize:12 }}>{money(pick(t, 'net'), c)}</TD>
+                  <TD><Badge label={transferStatusLabel(pick(t, 'status'))} color={transferColor(pick(t, 'status'))} /></TD>
+                </tr>
+              ); })} empty="Aucun transfert de caisse" />}
+      </Card>
+      {selected && <CashTransferDrawer id={tId(selected)} initial={selected} onClose={() => setSelected(null)} onChanged={load} />}
+    </div>
+  );
+};
+
+// Bloc Caisse du tableau de bord : GET /admin/cash/stats (masque sur erreur ou autre role)
+const CashStatsBlock = () => {
+  const { admin } = useAuth();
+  const [stats, setStats] = useState(null); const [err, setErr] = useState(false);
+  const allowed = hasRole(admin, CASH_ROLES);
+  useEffect(() => { if (allowed) cashAdminApi.stats().then(r => setStats(r.data || {})).catch(() => setErr(true)); }, [allowed]);
+  if (!allowed || err) return null;
+  const today = pick(stats || {}, 'today', 'day') || {}; const cur = pick(stats || {}, 'currency');
+  const pm = queueInfo(stats, 'pending_manual'), af = queueInfo(stats, 'awaiting_funds');
+  const collected = amt(pick(today, 'collected', 'volume', 'total')); const withdrawn = amt(pick(today, 'withdrawn', 'withdrawals')); const out = amt(pick(today, 'transfersOut', 'transfers_out', 'payouts')); const inn = amt(pick(today, 'transfersIn', 'transfers_in', 'funding'));
+  return (
+    <Card style={{ marginTop:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
+        <div style={{ fontSize:14, fontWeight:600 }}>💵 Caisse — encaisser, retirer, transférer</div>
+        <div style={{ display:'flex', gap:12 }}>
+          <Link to="/cash" style={{ fontSize:12, color:C.primary, textDecoration:'none' }}>Tableau caisse →</Link>
+          <Link to="/cash/transfers?status=pending_manual" style={{ fontSize:12, color:C.primary, textDecoration:'none' }}>À exécuter →</Link>
+          <Link to="/cash/transfers?status=awaiting_funds" style={{ fontSize:12, color:C.primary, textDecoration:'none' }}>Fonds attendus →</Link>
+        </div>
+      </div>
+      {!stats ? <Spin /> : (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
+          {[
+            ['Encaissé aujourd\'hui',   money(collected, cur), C.primary, null],
+            ['Retiré (wallet)',          money(withdrawn, cur), C.success, null],
+            ['Wallet → banque',          money(out, cur),       C.blue,    null],
+            ['Banque → wallet',          money(inn, cur),       C.text,    null],
+            ['Virements à exécuter',     fmt(pm.count),         pm.count ? C.warning : C.text, 'pending_manual'],
+            ['Ordres en attente',        fmt(af.count),         af.count ? C.warning : C.text, 'awaiting_funds'],
+          ].map(([l, v, col, sub]) => (
+            <div key={l} style={{ background:C.bg, borderRadius:10, padding:'12px 14px' }}>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>{l}</div>
+              <div style={{ fontSize:20, fontWeight:700, color:col }}>{v}</div>
+              {sub && <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>{sub}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+};
+
 const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3940,6 +4526,9 @@ export default function App() {
           <Route path="/crm/leads"         element={<CrmLeads />} />
           <Route path="/crm/complaints"    element={<CrmComplaints />} />
           <Route path="/crm/conversations" element={<CrmConversations />} />
+          <Route path="/cash"                element={<CashDashboard />} />
+          <Route path="/cash/transfers"      element={<CashTransfers />} />
+          <Route path="/cash/platform-accounts" element={<CashPlatformAccounts />} />
           <Route path="/finance"       element={<Finance />} />
           <Route path="/admin-users"   element={<AdminUsers />} />
           <Route path="/audit"         element={<AuditLogs />} />

@@ -33,6 +33,22 @@ Les devises XOF, XAF et CDF n'ont pas de décimales. Aucune conversion de change
 - Pas de frais d'abonnement annoncés publiquement. Les plafonds journaliers dépendent du niveau KYB :
   500 000 (compte créé), 5 000 000 (KYB validé), sans plafond (contrat), en devise locale.
 
+## Caisse (encaisser, retirer, transférer — portail marchand et apps)
+- Encaisser : par Mobile Money, le marchand saisit le montant et le numéro du client ; l'opérateur est détecté
+  automatiquement (Wave et Express Union se choisissent explicitement) ; la devise du numéro doit être celle du
+  marchand. Par carte, C-Pay crée un lien de paiement hébergé (pay.c-pay.global) lorsqu'une passerelle carte est
+  configurée pour le pays du marchand ; sinon la fonction est indiquée « en cours d'intégration ».
+- Retirer : paiement du solde disponible vers le wallet Mobile Money du marchand (enregistré dans le portail,
+  marqué vérifié après le premier retrait abouti), dans la limite journalière du niveau KYB
+  (100 000 / 500 000 / 2 000 000 en devise locale pour les niveaux 0 / 1 / 2) ; frais plateforme indicatifs 1 %.
+- Transférer wallet → banque : vers un compte bancaire vérifié du marchand ; exécuté par les opérations C-Pay
+  à J+1 ouvré (le marchand voit le statut « en attente d'exécution » puis « exécuté » avec la référence du virement).
+- Transférer banque → wallet (approvisionnement) : C-Pay remet un ordre avec une référence FND-XXXXXX et les
+  coordonnées du compte de collecte de la devise ; le marchand effectue le virement (valable 7 jours) et le solde
+  est crédité à la confirmation de réception par les opérations.
+- Retraits, transferts sortants et changement de wallet exigent une confirmation forte : code 2FA si activé,
+  sinon mot de passe du compte. Un journal unique regroupe encaissements, retraits et transferts (export CSV).
+
 ## Règlement (reversement au marchand)
 - Les encaissements validés sont reversés à J+1 par lot, sur le compte Mobile Money ou bancaire renseigné dans le portail.
 - Le virement bancaire est traité manuellement par l'équipe finance ; le Mobile Money est automatique.

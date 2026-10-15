@@ -145,4 +145,25 @@ export const pilotApi = {
   evaluate: (data) => api.post('/pilot/evaluate', data),
 };
 
+// ─── Caisse (vague 4) ─────────────────────────────────────────────
+// Contrat : docs/CAISSE-API.md §8 — /api/v1/admin/cash/* (super_admin, ops_admin).
+//   GET  /cash/stats                                   volumes du jour / 7 j, files pending_manual et awaiting_funds
+//   GET  /cash/transfers?status&direction&merchantId&q&limit&offset -> { data, total }
+//   GET  /cash/transfers/:id                           detail + journal des evenements
+//   POST /cash/transfers/:id/confirm-funds { amountReceived, bankReference }   awaiting_funds -> completed
+//   POST /cash/transfers/:id/mark-executed { bankReference }                   pending_manual -> completed
+//   POST /cash/transfers/:id/reject { reason }                                 -> rejected
+//   GET/POST /cash/platform-accounts, PATCH /cash/platform-accounts/:id        comptes de collecte par devise
+export const cashAdminApi = {
+  stats:                 ()           => api.get('/cash/stats'),
+  transfers:             (params)     => api.get('/cash/transfers', { params }),
+  transfer:              (id)         => api.get(`/cash/transfers/${id}`),
+  confirmFunds:          (id, data)   => api.post(`/cash/transfers/${id}/confirm-funds`, data),
+  markExecuted:          (id, data)   => api.post(`/cash/transfers/${id}/mark-executed`, data),
+  reject:                (id, data)   => api.post(`/cash/transfers/${id}/reject`, data),
+  platformAccounts:      (params)     => api.get('/cash/platform-accounts', { params }),
+  createPlatformAccount: (data)       => api.post('/cash/platform-accounts', data),
+  updatePlatformAccount: (id, data)   => api.patch(`/cash/platform-accounts/${id}`, data),
+};
+
 export default api;

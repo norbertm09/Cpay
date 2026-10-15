@@ -1,0 +1,259 @@
+# CI C-Pay — voir docs/CI-CD.md
+# Declenchee sur chaque pull request et sur les push vers main et wave-*.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'wave-*']
+
+# Un run par branche/PR : un nouveau push annule le precedent
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  backend:
+    name: Backend (syntaxe, jest, audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: node --check src/**/*.js
+        run: sh ../scripts/check-js-syntax.sh src
+      - name: Tests (jest)
+        run: npm test
+        env:
+          CI: 'true'
+          NODE_ENV: test
+      - name: npm audit (dependances de production, niveau critical) — informatif
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=critical
+
+  # ────────────────────────────────────────────────────────────────
+  portals:
+    name: Portail ${{ matrix.portal }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        portal: [admin, merchant, cardholder, partners, bank, agency, agent]
+    defaults:
+      run:
+        working-directory: portal/${{ matrix.portal }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # meme Node que docker/Dockerfile.portal (CRA 5)
+          node-version: 20
+          cache: npm
+          cache-dependency-path: portal/${{ matrix.portal }}/package*.json
+      - name: Dependances (npm ci si lockfile, sinon npm install)
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            echo "::notice::portal/${{ matrix.portal }} : pas de package-lock.json, npm install (non reproductible)"
+            npm install --no-audit --no-fund
+          fi
+      - name: Build (react-scripts)
+        run: npm run build
+        env:
+          CI: 'false'
+          INLINE_RUNTIME_CHUNK: 'false'
+          REACT_APP_API_BASE_URL: https://api.c-pay.global
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portal-${{ matrix.portal }}
+          path: portal/${{ matrix.portal }}/build
+          retention-days: 7
+          if-no-files-found: error
+
+  # ────────────────────────────────────────────────────────────────
+  landing:
+    name: Vitrine (HTML, liens, JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 -I scripts/check-landing.py portal/landing
+
+  # ────────────────────────────────────────────────────────────────
+  php:
+    name: PHP ${{ matrix.php }} (php -l)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.3']   # 7.4 = minimum annonce par le plugin WooCommerce
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: none
+      - name: php -l sur sdk/php et plugins/
+        run: |
+          find sdk/php plugins -type f -name '*.php' -not -path '*/vendor/*' -print0 \
+            | xargs -0 -n1 php -l
+
+  # ────────────────────────────────────────────────────────────────
+  sdk-js:
+    name: SDK JavaScript (node --check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sh scripts/check-js-syntax.sh sdk/javascript
+      - run: node -e "const p=require('./sdk/javascript/package.json'); console.log('@c-pay/sdk', p.version)"
+
+  expo:
+    name: App Expo (transformation Babel)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile/cpay-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/cpay-mobile/package.json
+      - run: npm install --no-audit --no-fund
+      - name: Babel (babel-preset-expo) sur App.js
+        run: |
+          node -e "
+            const babel = require('@babel/core');
+            const out = babel.transformFileSync('App.js', { presets: ['babel-preset-expo'], filename: 'App.js', babelrc: false, configFile: false });
+            console.log('App.js : ' + out.code.length + ' octets transformes');
+          "
+
+  # ────────────────────────────────────────────────────────────────
+  android:
+    name: Android (assembleDebug)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: SDK du runner (android/local.properties pointe sur /opt/android-sdk du poste de dev)
+        run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+      - name: gradlew :app:assembleDebug
+        working-directory: android
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleDebug --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+            # Erreurs Kotlin/Gradle remontées en annotations (les logs bruts ne sont pas toujours accessibles)
+            grep -E "^e: |What went wrong|Could not|error:|FAILURE" "$RUNNER_TEMP/gradle.log" | head -40 | sed 's/^/::error::/'
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: error
+
+  # ────────────────────────────────────────────────────────────────
+  docker:
+    name: Images Docker + nginx -t
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Image API (docker/Dockerfile.api)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: false
+          tags: cplus-api:ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+      - name: Image portail marchand (docker/Dockerfile.portal, APP_DIR=portal/merchant)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.portal
+          build-args: |
+            APP_DIR=portal/merchant
+            REACT_APP_API_BASE_URL=https://api.c-pay.global
+          push: false
+          tags: cplus-merchant:ci
+          cache-from: type=gha,scope=merchant
+          cache-to: type=gha,scope=merchant,mode=max
+      - name: nginx -t — vitrine (nginx-landing.conf) et portails (nginx-spa.conf)
+        run: |
+          docker run --rm \
+            -v "$PWD/docker/nginx-landing.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "$PWD/portal/landing:/usr/share/nginx/html:ro" \
+            nginx:1.27-alpine nginx -t
+          docker run --rm \
+            -v "$PWD/docker/nginx-spa.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.25-alpine nginx -t
+      - name: nginx -t — reverse proxy hote (nginx.conf, certificats factices)
+        run: |
+          mkdir -p "$RUNNER_TEMP/le/live/c-pay.global"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=c-pay.global' \
+            -keyout "$RUNNER_TEMP/le/live/c-pay.global/privkey.pem" \
+            -out "$RUNNER_TEMP/le/live/c-pay.global/fullchain.pem" 2>/dev/null
+          cp "$RUNNER_TEMP/le/live/c-pay.global/fullchain.pem" "$RUNNER_TEMP/le/live/c-pay.global/chain.pem"
+          openssl dhparam -dsaparam -out "$RUNNER_TEMP/dhparam.pem" 2048 2>/dev/null
+          # les upstreams sont des noms de services compose : resolus vers localhost pour le test
+          docker run --rm \
+            --add-host api:127.0.0.1 --add-host admin-portal:127.0.0.1 --add-host merchant-portal:127.0.0.1 \
+            --add-host landing:127.0.0.1 --add-host cardholder-portal:127.0.0.1 --add-host partners-portal:127.0.0.1 \
+            -v "$PWD/docker/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$RUNNER_TEMP/le:/etc/letsencrypt:ro" \
+            -v "$RUNNER_TEMP/dhparam.pem:/etc/nginx/dhparam.pem:ro" \
+            nginx:1.25-alpine nginx -t 2>&1 | tee "$RUNNER_TEMP/nginx-t.log"
+          if grep -qE "emerg|error" "$RUNNER_TEMP/nginx-t.log"; then
+            grep -E "emerg|error" "$RUNNER_TEMP/nginx-t.log" | head -10 | sed 's/^/::error::nginx: /'; exit 1
+          fi
+
+  # ────────────────────────────────────────────────────────────────
+  version-check:
+    name: Versions et scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Toutes les versions = VERSION
+        run: bash scripts/check-version.sh
+      - name: Syntaxe des scripts shell
+        run: |
+          for f in scripts/*.sh docker/api-entrypoint.sh; do
+            case "$(head -1 "$f")" in
+              *bash*) bash -n "$f" ;;
+              *)      sh -n "$f" ;;
+            esac && echo "ok $f"
+          done

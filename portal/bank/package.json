@@ -1,6 +1,6 @@
 {
-  "name": "cplus-2-6-merchant-portal",
-  "version": "2.6.0",
+  "name": "cpay-bank-portal",
+  "version": "2.7.0",
   "private": true,
   "dependencies": {
     "react": "^18.2.0", "react-dom": "^18.2.0",

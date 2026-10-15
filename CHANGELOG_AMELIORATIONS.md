@@ -1,5 +1,13 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0 (2026-10-15) — vague 4 : CI/CD GitHub, caisse marchande
+Voir `docs/WAVE-4.md` : GitHub Actions (tests, builds portails/vitrine/PHP/Expo/Android, release sur tag,
+deploiement OVH par SSH avec approbation), gestion des versions (2.7.0 partout, bump-version/check-version),
+caisse marchande (encaisser par carte via lien heberge MIGS/MPGS et Mobile Money par detection, retrait vers le
+wallet du marchand avec confirmation forte, transferts wallet→banque et banque→wallet par ordre reference,
+journal, administration des files d'attente), vitrine recentree, apps Android/Expo avec ecrans de caisse,
+migration 009 (tables manquantes creees), 526 tests.
+
 ## 2.7.0-wave-3 (2026-10-15) — apps mobiles, reliquats, logo HD
 Voir `docs/WAVE-3.md` : apps Android et Expo alignees sur l'authentification unifiee (refresh 15 min, 2FA,
 mot de passe force, fonctions desactivees explicites, marque C-Pay 2.7.0), reset de mot de passe admin,

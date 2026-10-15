@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -39,6 +40,9 @@ const DEFAULT_EXPIRES_IN = 900;
 // Suivi d'un encaissement en attente : toutes les 3 s pendant 90 s maximum.
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_MS = 90 * 1000;
+
+// Confirmation forte (caisse) : nombre de saisies avant abandon.
+const STEP_UP_ATTEMPTS = 3;
 
 const C = {
   bg: '#f6f8fb',
@@ -292,7 +296,7 @@ export default function App() {
   const isAdmin = session.mode === 'admin';
   const tabs = isAdmin
     ? [['home', 'Accueil'], ['apis', 'APIs'], ['merchants', 'Marchands'], ['monitoring', 'Monitoring'], ['rails', 'Rails'], ['pilot', 'Pilot']]
-    : [['home', 'Accueil'], ['collect', 'Encaisser'], ['links', 'QR/Lien'], ['history', 'Historique'], ['tokens', 'Tokens'], ['integrations', 'CRM/Compta'], ['pilot', 'Pilot'], ['support', 'Support']];
+    : [['home', 'Caisse'], ['collect', 'Encaisser'], ['withdraw', 'Retirer'], ['transfers', 'Transférer'], ['journal', 'Journal'], ['links', 'QR/Lien'], ['history', 'Historique'], ['tokens', 'Tokens'], ['integrations', 'CRM/Compta'], ['pilot', 'Pilot'], ['support', 'Support']];
 
   return (
     <SafeAreaView style={s.safe}>
@@ -312,7 +316,8 @@ export default function App() {
           </Pressable>
         ))}
       </ScrollView>
-      {isAdmin ? <AdminApp tab={tab} session={session} /> : <MerchantApp tab={tab} session={session} />}
+      {isAdmin ? <AdminApp tab={tab} session={session} /> : <MerchantApp tab={tab} session={session} onNavigate={setTab} />}
+      <StepUpHost />
     </SafeAreaView>
   );
 }
@@ -471,130 +476,464 @@ function ChangePasswordScreen({ session }) {
 }
 
 // ─── Marchand ────────────────────────────────────────────────────
-function MerchantApp({ tab, session }) {
-  if (tab === 'collect') return <PaymentScreen session={session} />;
+function MerchantApp({ tab, session, onNavigate }) {
+  if (tab === 'collect') return <CollectScreen session={session} />;
+  if (tab === 'withdraw') return <WithdrawScreen session={session} />;
+  if (tab === 'transfers') return <TransfersScreen session={session} />;
+  if (tab === 'journal') return <JournalScreen session={session} />;
   if (tab === 'links') return <LinkScreen session={session} />;
   if (tab === 'history') return <HistoryScreen session={session} />;
   if (tab === 'tokens') return <TokensScreen session={session} />;
   if (tab === 'integrations') return <IntegrationsScreen session={session} />;
   if (tab === 'pilot') return <PilotScreen session={session} />;
   if (tab === 'support') return <SupportScreen session={session} />;
-  return <MerchantHome session={session} />;
+  return <CaisseHome session={session} onNavigate={onNavigate} />;
 }
 
-function MerchantHome({ session }) {
-  const [account, setAccount] = useState(null);
-  const [loading, setLoading] = useState(true);
+// ─── Caisse marchande (vague 4, docs/CAISSE-API.md) ──────────────
+// Vocation : encaisser (Mobile Money, carte), retirer vers son wallet, transférer
+// wallet ↔ banque, journal unique. Toute création de mouvement porte Idempotency-Key.
+const CASH_TYPES = [['', 'Tous'], ['collect', 'Encaissements'], ['withdraw', 'Retraits'], ['transfer_out', 'Vers banque'], ['transfer_in', 'Approvisionnements']];
+const OPERATORS = [['mtn_momo', 'MTN MoMo'], ['orange_money', 'Orange Money'], ['airtel_money', 'Airtel Money'], ['moov_money', 'Moov Money'], ['wave', 'Wave'], ['express_union', 'Express Union'], ['mpesa', 'M-Pesa'], ['free_money', 'Free Money']];
+const QUICK_AMOUNTS = [1000, 2000, 5000, 10000, 25000];
 
-  useEffect(() => {
-    apiFetch('/merchant/account')
-      .then(setAccount)
-      .catch((e) => { if (!(e instanceof AuthError)) Alert.alert('Compte', userMessage(e)); })
-      .finally(() => setLoading(false));
-  }, []);
+const operatorLabel = (code) => {
+  if (!code) return 'Mobile Money';
+  const key = String(code).toLowerCase();
+  const hit = OPERATORS.find(([k]) => k === key) || OPERATORS.find(([k]) => k.startsWith(`${key}_`));
+  return hit ? hit[1] : String(code).replace(/_/g, ' ');
+};
+// Opérateur du wallet déduit d'une détection /detect/phone (codes MTN, ORANGE, WAVE…).
+const operatorCodeFor = (d) => {
+  const op = String(d?.operator || '').toLowerCase();
+  const brand = String(d?.brand || '§').toLowerCase();
+  const hit = OPERATORS.find(([k, l]) => k === op || k.startsWith(`${op}_`) || l.toLowerCase().includes(brand));
+  return hit ? hit[0] : null;
+};
+const transferStatusLabel = (st) => ({
+  pending: 'En attente', processing: 'En cours', pending_manual: 'Traitement J+1', awaiting_funds: 'Virement attendu',
+  completed: 'Effectué', failed: 'Échoué', cancelled: 'Annulé', rejected: 'Rejeté', authorized: 'Autorisé', expired: 'Expiré',
+}[st] || st || '—');
+const fmtDate = (iso) => (iso ? String(iso).slice(0, 16).replace('T', ' ') : '');
+const parseAmount = (v) => Number(String(v || '').replace(/\s/g, '').replace(',', '.'));
 
+// Messages dédiés aux codes de la caisse (INSUFFICIENT_BALANCE, DAILY_LIMIT_EXCEEDED, WALLET_MISSING…).
+const cashMessage = (err, currency = 'XAF') => {
+  if (!err) return 'Erreur';
+  if (isFeatureUnavailable(err)) return FEATURE_PENDING;
+  switch (err.code) {
+    case 'INSUFFICIENT_BALANCE': return `Solde insuffisant${err.data?.available != null ? ` — disponible : ${money(err.data.available, currency)}` : ''}`;
+    case 'DAILY_LIMIT_EXCEEDED': return 'Plafond journalier de retrait atteint (selon votre niveau KYB)';
+    case 'WALLET_MISSING': return 'Aucun wallet Mobile Money enregistré : ajoutez-le avant de retirer';
+    case 'STEP_UP_REQUIRED': return 'Confirmation requise (code 2FA ou mot de passe)';
+    case 'CURRENCY_MISMATCH': return 'La devise du numéro client ne correspond pas à celle de votre compte';
+    case 'FUNDING_UNAVAILABLE': return 'Aucun compte de collecte C-Pay pour votre devise — contactez le support';
+    case 'MERCHANT_INACTIVE': return 'Compte marchand inactif — contactez le support';
+    default:
+      if (err.status === 429) return 'Trop de tentatives — réessayez dans quelques minutes';
+      return err.message || 'Erreur';
+  }
+};
+
+// ─── Confirmation forte (step-up, §6) ────────────────────────────
+// { code } (TOTP) si le 2FA du compte est actif (session.user.mfaEnabled via /auth/me),
+// sinon { password }. Sur 428 STEP_UP_REQUIRED { methods } on relit la méthode annoncée
+// et on redemande, 3 essais au plus. Le modal est hébergé une seule fois (StepUpHost).
+const stepUpStore = {
+  request: null,
+  listeners: new Set(),
+  set(r) { this.request = r; this.listeners.forEach((fn) => fn(r)); },
+  subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+};
+const requestStepUp = (method, title) => new Promise((resolve) => stepUpStore.set({ method, title, resolve }));
+
+async function withStepUp(session, title, fn) {
+  let method = session?.user?.mfaEnabled ? 'totp' : 'password';
+  for (let attempt = 0; attempt < STEP_UP_ATTEMPTS; attempt += 1) {
+    const confirm = await requestStepUp(method, title);
+    if (!confirm) return null; // annulé par l'utilisateur
+    try {
+      return await fn(confirm);
+    } catch (e) {
+      if (e.status === 428 || e.code === 'STEP_UP_REQUIRED') {
+        method = e.data?.methods?.[0] || method;
+        if (attempt < STEP_UP_ATTEMPTS - 1) continue;
+      }
+      throw e;
+    }
+  }
+  return null;
+}
+
+function StepUpHost() {
+  const [req, setReq] = useState(stepUpStore.request);
+  const [value, setValue] = useState('');
+  useEffect(() => stepUpStore.subscribe((r) => { setReq(r); setValue(''); }), []);
+  if (!req) return null;
+  const totp = req.method === 'totp';
+  const done = (confirm) => { const r = req; stepUpStore.set(null); r.resolve(confirm); };
+  const valid = totp ? /^\d{6}$/.test(value) : value.length > 0;
   return (
-    <Screen>
-      <Text style={s.h1}>Tableau de bord</Text>
-      {loading ? <ActivityIndicator color={C.cyan} /> : (
-        <>
-          <InfoGrid items={[
-            ['Business', account?.business_name || session.user?.businessName],
-            ['Pays', account?.country || session.user?.country],
-            ['Devise', account?.currency || session.user?.currency],
-            ['KYB', `Niveau ${account?.kyb_level ?? session.user?.kybLevel ?? 0}`],
-          ]} />
-          <Text style={s.section}>Fonctions disponibles</Text>
-          <Tile title="Encaisser" text="Mobile Money (MTN MoMo, Airtel Money), QR et lien de paiement." />
-          <Tile title="Retrait" text={FEATURE_PENDING} badge={FEATURE_PENDING} />
-          <Tile title="Historique" text="Transactions et règlements." />
-        </>
-      )}
-    </Screen>
+    <Modal transparent animationType="fade" visible onRequestClose={() => done(null)}>
+      <View style={s.modalBg}>
+        <View style={s.modalCard}>
+          <Text style={s.cardTitle}>{req.title || 'Confirmation requise'}</Text>
+          <Text style={s.muted}>{totp ? 'Saisissez le code à 6 chiffres de votre application d’authentification.' : 'Saisissez votre mot de passe pour confirmer l’opération.'}</Text>
+          <Field
+            label={totp ? 'Code 2FA' : 'Mot de passe'}
+            value={value}
+            onChange={(v) => setValue(totp ? v.replace(/[^0-9]/g, '').slice(0, 6) : v)}
+            keyboardType={totp ? 'number-pad' : 'default'}
+            secureTextEntry={!totp}
+            maxLength={totp ? 6 : undefined}
+            autoFocus
+          />
+          <Button label="Confirmer" onPress={() => valid && done(totp ? { code: value } : { password: value })} disabled={!valid} />
+          <MiniButton label="Annuler" onPress={() => done(null)} full />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
-// Suivi d'un encaissement en attente : GET /merchant/collect/:id/status toutes
-// les 3 s, 90 s maximum, puis « En attente de confirmation ».
-function usePendingCollect(result, setResult) {
+// ─── Hooks caisse ────────────────────────────────────────────────
+function useCashSummary() {
+  const [summary, setSummary] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try { setSummary(await apiFetch('/merchant/cash/summary')); } catch (e) { if (!(e instanceof AuthError)) setError(e); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+  return { summary, error, loading, reload: load };
+}
+
+// Détection live de l'opérateur : POST /detect/phone (public), debounce 450 ms.
+function usePhoneDetection(phone) {
+  const [detection, setDetection] = useState(null);
+  const [detecting, setDetecting] = useState(false);
+  useEffect(() => {
+    const clean = String(phone || '').trim();
+    if (clean.replace(/\D/g, '').length < 8) { setDetection(null); setDetecting(false); return undefined; }
+    let cancelled = false;
+    setDetecting(true);
+    const timer = setTimeout(async () => {
+      try {
+        const d = await apiFetch('/detect/phone', { auth: false, method: 'POST', body: { phone: clean } });
+        if (!cancelled) setDetection(d);
+      } catch (e) {
+        if (!cancelled) setDetection(e.data?.code ? e.data : { success: false, error: 'Détection indisponible (réseau)', code: 'NETWORK' });
+      } finally {
+        if (!cancelled) setDetecting(false);
+      }
+    }, 450);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [phone]);
+  return { detection, detecting };
+}
+
+// Suivi d'un encaissement : GET /merchant/cash/collect/:txnId toutes les 3 s, 90 s max,
+// puis « En attente de confirmation ».
+function useCashCollectPolling(result, setResult) {
   const [polling, setPolling] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
-
   useEffect(() => {
-    const txnId = result?.txnId || result?.transactionId;
-    const isPending = !!result && (result.pending === true || result.status === 'pending');
-    if (!txnId || !isPending) { setPolling(false); return undefined; }
-
+    const txnId = result?.txnId;
+    const pending = !!result && (!result.status || result.status === 'pending');
+    if (!txnId || !pending) { setPolling(false); return undefined; }
     let cancelled = false;
     let timer = null;
     const startedAt = Date.now();
     setPolling(true);
     setTimedOut(false);
-
     const tick = async () => {
       if (cancelled) return;
       try {
-        const status = await apiFetch(`/merchant/collect/${encodeURIComponent(txnId)}/status`);
+        const st = await apiFetch(`/merchant/cash/collect/${encodeURIComponent(txnId)}`);
         if (cancelled) return;
-        if (status.status && status.status !== 'pending') {
-          setResult({ ...result, ...status, success: status.status === 'authorized' || status.status === 'completed', pending: false });
-          setPolling(false);
-          return;
-        }
+        if (st.status && st.status !== 'pending') { setResult({ ...result, ...st }); setPolling(false); return; }
       } catch (e) {
         if (cancelled) return;
         if (e instanceof AuthError) { setPolling(false); return; }
-        if (isFeatureUnavailable(e)) { setPolling(false); setTimedOut(true); return; }
-        // erreur passagere : on continue jusqu'au delai maximum
+        // erreur passagère : on continue jusqu'au délai maximum
       }
-      if (Date.now() - startedAt >= POLL_MAX_MS) {
-        setPolling(false);
-        setTimedOut(true);
-        return;
-      }
+      if (Date.now() - startedAt >= POLL_MAX_MS) { setPolling(false); setTimedOut(true); return; }
       timer = setTimeout(tick, POLL_INTERVAL_MS);
     };
-
     timer = setTimeout(tick, POLL_INTERVAL_MS);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [result?.txnId, result?.transactionId, result?.status, result?.pending]);
-
+  }, [result?.txnId, result?.status]);
   return { polling, timedOut };
 }
 
-function PaymentScreen() {
-  const [type, setType] = useState('collect');
-  const [method, setMethod] = useState('mtn_momo');
+// ─── Caisse : accueil ────────────────────────────────────────────
+function CaisseHome({ session, onNavigate }) {
+  const { summary, error, loading, reload } = useCashSummary();
+  const cur = summary?.currency || session.user?.currency || 'XAF';
+  const bal = summary?.balance || {};
+  const today = summary?.today || {};
+  const p = summary?.profile;
+  const walletMissing = !!p && !p.wallet?.phone;
+  const noBank = !!p && !(p.bankAccounts > 0);
+  const tiles = [
+    ['collect', '📥', 'Encaisser', 'Mobile Money · Carte'],
+    ['withdraw', '📤', 'Retirer', 'Vers mon wallet'],
+    ['transfers', '🏦', 'Transférer', 'Wallet ↔ banque'],
+    ['journal', '📒', 'Journal', 'Tous les mouvements'],
+  ];
+  return (
+    <Screen>
+      <View style={s.rowBetween}>
+        <View><Text style={s.h1}>Caisse</Text><Text style={s.muted}>{session.user?.businessName || 'Marchand'}</Text></View>
+        <Pressable style={s.ghostBtn} onPress={reload}><Text style={s.ghostText}>↻ Actualiser</Text></Pressable>
+      </View>
+      {loading && !summary ? <ActivityIndicator color={C.cyan} /> : null}
+      {error ? <Notice title="Caisse" text={isFeatureUnavailable(error) ? 'Caisse en cours d’activation sur votre compte' : cashMessage(error, cur)} /> : null}
+      <View style={s.balanceCard}>
+        <Text style={s.balanceLabel}>Solde disponible</Text>
+        <Text style={s.balanceValue}>{money(bal.available, cur)}</Text>
+        <Text style={s.balanceSub}>En attente : {money(bal.pending, cur)}{bal.reserved ? ` · Réservé : ${money(bal.reserved, cur)}` : ''}</Text>
+      </View>
+      <View style={s.card}>
+        <View style={s.rowBetween}><Text style={s.cardTitle}>Aujourd’hui</Text><Text style={s.muted}>{today.collectedCount || 0} encaissement(s)</Text></View>
+        <Text style={s.amount}>{money(today.collected, cur)}</Text>
+        <InfoGrid items={[
+          ['📱 Mobile Money', money(today.byMethod?.mobile_money, cur)],
+          ['💳 Carte', money(today.byMethod?.card, cur)],
+          ['📤 Retiré', money((today.withdrawn || 0) + (today.transfersOut || 0), cur)],
+          ['💰 Approvisionné', money(today.transfersIn, cur)],
+        ]} />
+      </View>
+      {walletMissing ? <Pressable onPress={() => onNavigate('withdraw')}><Notice title="Wallet manquant" text="Enregistrez votre wallet Mobile Money pour pouvoir retirer vos fonds →" /></Pressable> : null}
+      {noBank ? <Pressable onPress={() => onNavigate('transfers')}><Notice title="Compte bancaire" text="Ajoutez un compte bancaire vérifié (portail marchand) pour transférer vers votre banque →" /></Pressable> : null}
+      {p?.cardAcceptance === 'unavailable' ? <Text style={s.muted}>ℹ️ L’acceptation carte n’est pas encore disponible dans votre pays.</Text> : null}
+      {p?.cardAcceptance === 'tap_to_phone_pending' ? <Text style={s.muted}>ℹ️ Tap-to-Phone en cours de certification — utilisez le lien de paiement carte.</Text> : null}
+      <View style={s.tiles}>
+        {tiles.map(([key, icon, title, sub]) => {
+          const primary = key === 'collect';
+          return (
+            <Pressable key={key} style={[s.tile, primary && s.tileOn]} onPress={() => onNavigate(key)}>
+              <Text style={s.tileIcon}>{icon}</Text>
+              <Text style={[s.tileTitle, primary && { color: C.card }]}>{title}</Text>
+              <Text style={[s.tileSub, primary && { color: '#d9ffffff' }]}>{sub}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={s.section}>Autres</Text>
+      <View style={s.row}>
+        <MiniButton label="QR / Lien" onPress={() => onNavigate('links')} />
+        <MiniButton label="Historique" onPress={() => onNavigate('history')} />
+        <MiniButton label="Support" onPress={() => onNavigate('support')} />
+      </View>
+    </Screen>
+  );
+}
+
+// ─── Encaisser ───────────────────────────────────────────────────
+function CollectScreen({ session }) {
+  const [mode, setMode] = useState('mobile_money');
   const [amount, setAmount] = useState('');
   const [phone, setPhone] = useState('');
   const [description, setDescription] = useState('');
+  const [operator, setOperator] = useState(null); // service forcé (Wave, Express Union…)
   const [result, setResult] = useState(null);
+  const [card, setCard] = useState(null);         // { shortUrl, expiresAt } | { unavailable: true }
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
-  // Une cle d'idempotence par tentative : conservee tant que la demande n'a pas abouti,
-  // pour qu'un rejeu (reseau) ne cree pas un second encaissement.
   const idemKey = useRef(newIdempotencyKey());
-  const { polling, timedOut } = usePendingCollect(result, setResult);
+  const { detection, detecting } = usePhoneDetection(mode === 'mobile_money' ? phone : '');
+  const { polling, timedOut } = useCashCollectPolling(result, setResult);
+  const cur = session.user?.currency || 'XAF';
 
-  useEffect(() => { idemKey.current = newIdempotencyKey(); }, [amount, phone, description, method]);
+  useEffect(() => { idemKey.current = newIdempotencyKey(); }, [amount, phone, description, operator, mode]);
+  useEffect(() => { setOperator(null); }, [detection?.phone, detection?.operator]);
+
+  const alternatives = (detection?.alternatives || []).filter((a) => a.operator && a.operator !== detection?.operator);
 
   const submit = async () => {
-    if (!amount || Number(amount) <= 0) return Alert.alert('Encaissement', 'Montant invalide.');
-    if (!phone) return Alert.alert('Encaissement', 'Téléphone client requis.');
+    const amt = parseAmount(amount);
+    if (!amt || amt <= 0) return Alert.alert('Encaissement', 'Montant invalide.');
+    if (mode === 'mobile_money') {
+      if (!phone.trim()) return Alert.alert('Encaissement', 'Numéro du client requis.');
+      if (detection && !detection.success && !operator) {
+        return Alert.alert('Encaissement', alternatives.length ? 'Choisissez un service de paiement.' : (detection.error || 'Numéro non pris en charge.'));
+      }
+    }
     setLoading(true);
     setResult(null);
+    setCard(null);
     try {
-      const data = await apiFetch('/merchant/collect', {
-        method: 'POST',
-        idempotencyKey: idemKey.current,
-        body: { amount: Number(amount), customerPhone: phone.trim(), method, description: description || undefined },
-      });
+      const body = mode === 'card'
+        ? { amount: amt, method: 'card', description: description || undefined }
+        : { amount: amt, method: 'mobile_money', customerPhone: detection?.phone || phone.trim(), operator: operator || undefined, description: description || undefined };
+      const data = await apiFetch('/merchant/cash/collect', { method: 'POST', idempotencyKey: idemKey.current, body });
       idemKey.current = newIdempotencyKey();
-      setResult(data);
+      if (mode === 'card') setCard(data.payLink || { unavailable: true }); else setResult({ ...data, customerPhone: body.customerPhone });
+    } catch (e) {
+      if (e instanceof AuthError) return;
+      if (isFeatureUnavailable(e)) { if (mode === 'card') setCard({ unavailable: true }); else setUnavailable(true); } else Alert.alert('Encaissement', cashMessage(e, cur));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reset = () => { setResult(null); setCard(null); setAmount(''); setPhone(''); setDescription(''); setOperator(null); };
+
+  return (
+    <Screen>
+      <Text style={s.h1}>Encaisser</Text>
+      <Segment value={mode} onChange={(v) => { setMode(v); setResult(null); setCard(null); }} items={[['mobile_money', 'Mobile Money'], ['card', 'Carte'], ['nfc', 'NFC']]} />
+      {mode === 'nfc' ? <Notice title="Sans contact (Tap-to-Phone)" text={FEATURE_PENDING} /> : null}
+      {mode === 'mobile_money' && unavailable ? <Notice title="Encaissement" text={FEATURE_PENDING} /> : null}
+      {mode !== 'nfc' && !(mode === 'mobile_money' && unavailable) && !result && (
+        <>
+          <Field label={`Montant (${cur})`} value={amount} onChange={setAmount} keyboardType="decimal-pad" placeholder="5 000" />
+          <Chips value={null} onChange={(v) => setAmount(String(v))} items={QUICK_AMOUNTS.map((a) => [a, money(a)])} />
+          {mode === 'mobile_money' && (
+            <>
+              <Field label="Numéro du client" value={phone} onChange={setPhone} keyboardType="phone-pad" placeholder="+237 6 70 00 00 00" />
+              {(detecting || detection) ? (
+                <View style={s.detect}>
+                  {detecting && !detection ? <Text style={s.muted}>Détection de l’opérateur…</Text> : null}
+                  {detection ? (
+                    <>
+                      <Text style={s.detectMain}>{detection.success ? `📱 ${detection.brand || operatorLabel(detection.operator)}` : `⚠️ ${detection.error || 'Opérateur non reconnu'}`}</Text>
+                      <Text style={s.muted}>{[detection.countryName || detection.country, detection.currency].filter(Boolean).join(' · ')}{detection.currency && detection.currency !== cur ? ` — ⚠️ devise différente de votre compte (${cur})` : ''}</Text>
+                      {alternatives.length ? (
+                        <>
+                          <Text style={s.label}>Ou payer via :</Text>
+                          <Chips value={operator || '__detected'} onChange={(v) => setOperator(v === '__detected' ? null : v)} items={[...(detection.success ? [['__detected', `Détecté : ${detection.brand || operatorLabel(detection.operator)}`]] : []), ...alternatives.map((a) => [a.operator, a.brand || operatorLabel(a.operator)])]} />
+                        </>
+                      ) : null}
+                    </>
+                  ) : null}
+                </View>
+              ) : null}
+            </>
+          )}
+          {mode === 'card' ? <Text style={s.muted}>Le client paie par carte sur la page sécurisée pay.c-pay.global (lien + QR).</Text> : null}
+          <Field label="Description (optionnel)" value={description} onChange={setDescription} />
+          <Button label={loading ? 'Traitement...' : mode === 'card' ? 'Créer le lien de paiement carte' : 'Encaisser maintenant'} onPress={submit} disabled={loading || polling} />
+        </>
+      )}
+      {result ? <CashCollectResult result={result} polling={polling} timedOut={timedOut} currency={result.currency || cur} onNew={reset} /> : null}
+      {card ? <CardLinkCard card={card} amount={parseAmount(amount)} currency={cur} onNew={reset} /> : null}
+    </Screen>
+  );
+}
+
+function CashCollectResult({ result, polling, timedOut, currency, onNew }) {
+  const pending = !result.status || result.status === 'pending';
+  const ok = result.status === 'authorized';
+  const title = pending ? (timedOut ? PENDING_CONFIRMATION : 'Demande envoyée au client') : ok ? 'Paiement reçu' : result.status === 'expired' ? 'Délai dépassé' : 'Paiement refusé';
+  const text = pending
+    ? (timedOut ? 'Le client n’a pas encore confirmé sur son téléphone. Le statut sera mis à jour dans le Journal.' : 'Le client doit saisir son code PIN Mobile Money sur son téléphone.')
+    : ok ? `Net ${money(result.net ?? result.amount, currency)}${result.fee ? ` · frais ${money(result.fee, currency)}` : ''}` : (result.error || result.message || '');
+  const share = () => Share.share({ message: compact(`C-Pay — Encaissement ${money(result.amount, currency)} · Réf ${result.reference || result.txnId || '-'} · ${title}`) });
+  return (
+    <View style={s.card}>
+      <View style={s.rowBetween}><Text style={s.cardTitle}>{title}</Text>{polling ? <ActivityIndicator color={C.cyan} /> : null}</View>
+      <Text style={s.amount}>{money(result.amount, currency)}</Text>
+      <Text style={s.muted}>{text}</Text>
+      <Text style={s.muted}>{result.operatorLabel || operatorLabel(result.operator)}{result.customerPhone ? ` · ${result.customerPhone}` : ''}</Text>
+      <Text style={s.muted}>Réf : {result.reference || result.txnId || '-'}</Text>
+      <Badge label={pending ? (timedOut ? PENDING_CONFIRMATION : 'pending') : result.status} />
+      <View style={s.row}>
+        {ok ? <MiniButton label="Partager le reçu" onPress={share} /> : null}
+        {result.receiptUrl ? <MiniButton label="Reçu" onPress={() => Linking.openURL(result.receiptUrl)} /> : null}
+        {!polling ? <MiniButton label="Nouvel encaissement" onPress={onNew} /> : null}
+      </View>
+    </View>
+  );
+}
+
+// Carte : lien de paiement hébergé + QR (rendu local via react-native-qrcode-svg).
+function CardLinkCard({ card, amount, currency, onNew }) {
+  if (card.unavailable) return <Notice title="Paiement carte" text={FEATURE_PENDING} />;
+  const link = card.shortUrl;
+  const shareText = compact(`Payer ${money(amount, currency)} par carte via ${APP_NAME} : ${link}`);
+  const copy = async () => { await Clipboard.setStringAsync(link || ''); Alert.alert('Copie', 'Lien copié'); };
+  return (
+    <View style={s.card}>
+      <Text style={s.cardTitle}>Lien de paiement carte</Text>
+      <Text style={s.amount}>{money(amount, currency)}</Text>
+      {link ? <View style={s.qr}><QRCode value={link} size={220} /></View> : <Text style={s.muted}>Lien indisponible</Text>}
+      {link ? <Text style={s.link}>{link}</Text> : null}
+      {card.expiresAt ? <Text style={s.muted}>Expire le {fmtDate(card.expiresAt)}</Text> : null}
+      <View style={s.row}>
+        <MiniButton label="Copier" onPress={copy} />
+        <MiniButton label="Partager" onPress={() => link && Share.share({ message: shareText, url: link })} />
+        <MiniButton label="Ouvrir" onPress={() => link && Linking.openURL(link)} />
+      </View>
+      <MiniButton label="Nouvel encaissement" onPress={onNew} full />
+    </View>
+  );
+}
+
+// ─── Retirer ─────────────────────────────────────────────────────
+function WithdrawScreen({ session }) {
+  const { summary, error, reload } = useCashSummary();
+  const [wallet, setWallet] = useState(undefined); // undefined = chargement, null = aucun
+  const [editing, setEditing] = useState(false);
+  const [op, setOp] = useState('mtn_momo');
+  const [wphone, setWphone] = useState('');
+  const { detection } = usePhoneDetection(editing ? wphone : '');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const [last, setLast] = useState(null);
+  const idemKey = useRef(newIdempotencyKey());
+  const cur = summary?.currency || session.user?.currency || 'XAF';
+  const available = summary?.balance?.available || 0;
+  const limits = summary?.limits || {};
+
+  const loadWallet = () => apiFetch('/merchant/cash/wallet')
+    .then((w) => setWallet(w?.phone ? w : null))
+    .catch((e) => { if (isFeatureUnavailable(e)) setUnavailable(true); setWallet(null); });
+  useEffect(() => { loadWallet(); }, []);
+  useEffect(() => { if (error && isFeatureUnavailable(error)) setUnavailable(true); }, [error]);
+  useEffect(() => { if (detection?.success) { const code = operatorCodeFor(detection); if (code) setOp(code); } }, [detection]);
+  useEffect(() => { idemKey.current = newIdempotencyKey(); }, [amount, description]);
+
+  const openForm = () => { setOp(wallet?.operator || 'mtn_momo'); setWphone(wallet?.phone || ''); setEditing(true); };
+
+  const saveWallet = async () => {
+    if (!wphone.trim()) return Alert.alert('Wallet', 'Numéro requis.');
+    try {
+      const w = await withStepUp(session, 'Enregistrer le wallet', (confirm) => apiFetch('/merchant/cash/wallet', { method: 'PUT', body: { operator: op, phone: detection?.phone || wphone.trim(), confirm } }));
+      if (!w) return;
+      setWallet(w?.phone ? w : { operator: op, phone: detection?.phone || wphone.trim(), verifiedAt: null });
+      setEditing(false);
+    } catch (e) {
+      if (e instanceof AuthError) return;
+      if (isFeatureUnavailable(e)) setUnavailable(true); else Alert.alert('Wallet', cashMessage(e, cur));
+    }
+  };
+
+  const submit = async () => {
+    const amt = parseAmount(amount);
+    if (!amt || amt <= 0) return Alert.alert('Retrait', 'Montant invalide.');
+    if (!wallet) { openForm(); return Alert.alert('Retrait', cashMessage({ code: 'WALLET_MISSING' }, cur)); }
+    if (summary && amt > available) return Alert.alert('Retrait', `Solde insuffisant — disponible : ${money(available, cur)}`);
+    if (limits.withdrawDailyRemaining != null && amt > limits.withdrawDailyRemaining) return Alert.alert('Retrait', `Plafond journalier : il vous reste ${money(limits.withdrawDailyRemaining, cur)} aujourd’hui`);
+    setLoading(true);
+    try {
+      const data = await withStepUp(session, `Retrait de ${money(amt, cur)}`, (confirm) => apiFetch('/merchant/cash/withdraw', { method: 'POST', idempotencyKey: idemKey.current, body: { amount: amt, description: description || undefined, confirm } }));
+      if (!data) return;
+      idemKey.current = newIdempotencyKey();
+      setLast(data);
+      setAmount('');
+      setDescription('');
+      reload();
+      loadWallet();
     } catch (e) {
       if (e instanceof AuthError) return;
       if (isFeatureUnavailable(e)) setUnavailable(true);
-      else Alert.alert('Encaissement', userMessage(e));
+      else { if (e.code === 'WALLET_MISSING') setWallet(null); Alert.alert('Retrait', cashMessage(e, cur)); }
     } finally {
       setLoading(false);
     }
@@ -602,20 +941,240 @@ function PaymentScreen() {
 
   return (
     <Screen>
-      <Text style={s.h1}>Encaissement & retrait</Text>
-      <Segment value={type} onChange={(v) => { setType(v); setResult(null); }} items={[['collect', 'Encaisser'], ['payout', 'Retrait']]} />
-      {type === 'payout' || unavailable ? (
-        <Notice title={type === 'payout' ? 'Retrait' : 'Encaissement'} text={FEATURE_PENDING} />
-      ) : (
-        <>
-          <Segment value={method} onChange={setMethod} items={[['mtn_momo', 'MTN MoMo'], ['airtel_money', 'Airtel Money']]} />
-          <Field label="Montant (XAF)" value={amount} onChange={setAmount} keyboardType="decimal-pad" />
-          <Field label="Téléphone client" value={phone} onChange={setPhone} keyboardType="phone-pad" placeholder="+242..." />
-          <Field label="Description" value={description} onChange={setDescription} />
-          <Button label={loading ? 'Traitement...' : 'Encaisser'} onPress={submit} disabled={loading || polling} />
-          {result && <ResultCard result={result} polling={polling} timedOut={timedOut} />}
-        </>
+      <Text style={s.h1}>Retirer</Text>
+      <Text style={s.muted}>Du solde disponible vers votre wallet Mobile Money.</Text>
+      <View style={s.balanceCard}>
+        <Text style={s.balanceLabel}>Disponible</Text>
+        <Text style={s.balanceValue}>{money(available, cur)}</Text>
+        {limits.withdrawDailyRemaining != null ? <Text style={s.balanceSub}>Reste aujourd’hui : {money(limits.withdrawDailyRemaining, cur)}{limits.withdrawDailyMax != null ? ` / ${money(limits.withdrawDailyMax, cur)}` : ''}</Text> : null}
+      </View>
+      {unavailable ? <Notice title="Retrait" text={FEATURE_PENDING} /> : null}
+      <Text style={s.section}>Wallet de destination</Text>
+      {wallet === undefined ? <ActivityIndicator color={C.cyan} /> : (
+        <View style={s.card}>
+          <Text style={s.cardTitle}>{wallet ? `📱 ${operatorLabel(wallet.operator)}` : 'Aucun wallet enregistré'}</Text>
+          <Text style={s.muted}>{wallet ? wallet.phone : 'Nécessaire pour recevoir vos retraits.'}</Text>
+          {wallet ? <Badge label={wallet.verifiedAt ? 'Vérifié' : 'Vérifié après le premier retrait'} /> : null}
+          {!editing ? <MiniButton label={wallet ? 'Modifier' : 'Enregistrer mon wallet'} onPress={openForm} full /> : null}
+          {editing && (
+            <>
+              <Text style={s.label}>Opérateur</Text>
+              <Chips value={op} onChange={setOp} items={OPERATORS} />
+              <Field label="Numéro du wallet" value={wphone} onChange={setWphone} keyboardType="phone-pad" placeholder="+237 6 70 00 00 00" />
+              {detection ? <Text style={s.muted}>{detection.success ? `📱 ${detection.brand || operatorLabel(detection.operator)} · ${detection.countryName || detection.country || ''}` : `⚠️ ${detection.error || 'Opérateur non reconnu'} — choisissez-le manuellement`}</Text> : null}
+              <View style={s.row}><MiniButton label="Annuler" onPress={() => setEditing(false)} /><MiniButton label="Enregistrer" onPress={saveWallet} /></View>
+            </>
+          )}
+        </View>
       )}
+      <Text style={s.section}>Montant</Text>
+      <Field label={`Montant à retirer (${cur})`} value={amount} onChange={setAmount} keyboardType="decimal-pad" placeholder="50 000" />
+      <Field label="Libellé (optionnel)" value={description} onChange={setDescription} placeholder="Caisse du soir" />
+      <Button label={loading ? 'Traitement...' : 'Retirer'} onPress={submit} disabled={loading || unavailable} />
+      {last ? (
+        <View style={s.card}>
+          <Text style={s.cardTitle}>Retrait demandé</Text>
+          <Text style={s.amount}>{money(last.net ?? last.amount, cur)}</Text>
+          <Text style={s.muted}>Réf : {last.reference || last.transferId || '-'}{last.fee ? ` · frais ${money(last.fee, cur)}` : ''}</Text>
+          {last.wallet ? <Text style={s.muted}>Vers {operatorLabel(last.wallet.operator)} {last.wallet.phone}</Text> : null}
+          <Badge label={transferStatusLabel(last.status)} />
+        </View>
+      ) : null}
+    </Screen>
+  );
+}
+
+// ─── Transférer ──────────────────────────────────────────────────
+function TransfersScreen({ session }) {
+  const { summary, reload } = useCashSummary();
+  const [direction, setDirection] = useState('wallet_to_bank');
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState(null);
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [items, setItems] = useState([]);
+  const [instructions, setInstructions] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const idemKey = useRef(newIdempotencyKey());
+  const cur = summary?.currency || session.user?.currency || 'XAF';
+  const available = summary?.balance?.available || 0;
+  const minTransfer = summary?.limits?.transferMin || 1000;
+
+  const loadAccounts = () => apiFetch('/merchant/bank-accounts')
+    .then((d) => {
+      const list = (d.data || []).filter((a) => a.status === 'verified' || a.status === 'active');
+      setAccounts(list);
+      setAccountId((current) => current || list.find((a) => a.isDefault)?.accountId || list[0]?.accountId || null);
+    })
+    .catch(() => {});
+  const loadList = () => apiFetch('/merchant/cash/transfers?limit=20')
+    .then((d) => setItems(d.data || []))
+    .catch((e) => { if (isFeatureUnavailable(e)) setUnavailable(true); });
+  useEffect(() => { loadAccounts(); loadList(); }, []);
+  useEffect(() => { idemKey.current = newIdempotencyKey(); }, [amount, description, direction, accountId]);
+
+  const submit = async () => {
+    const toBank = direction === 'wallet_to_bank';
+    const amt = parseAmount(amount);
+    if (!amt || amt < minTransfer) return Alert.alert('Transfert', `Montant minimum : ${money(minTransfer, cur)}`);
+    if (toBank && !accountId) return Alert.alert('Transfert', 'Aucun compte bancaire vérifié. Ajoutez-en un depuis le portail marchand.');
+    if (toBank && summary && amt > available) return Alert.alert('Transfert', `Solde insuffisant — disponible : ${money(available, cur)}`);
+    setLoading(true);
+    try {
+      const title = toBank ? `Transfert de ${money(amt, cur)} vers la banque` : `Approvisionnement de ${money(amt, cur)}`;
+      const data = await withStepUp(session, title, (confirm) => apiFetch('/merchant/cash/transfers', {
+        method: 'POST',
+        idempotencyKey: idemKey.current,
+        body: { direction, accountId: toBank ? accountId : undefined, amount: amt, description: description || undefined, confirm },
+      }));
+      if (!data) return;
+      idemKey.current = newIdempotencyKey();
+      setAmount('');
+      setDescription('');
+      if (data.instructions || data.direction === 'bank_to_wallet') setInstructions(data);
+      else Alert.alert('Transfert demandé', `Réf ${data.reference || data.transferId}\nStatut : ${transferStatusLabel(data.status)}${data.status === 'pending_manual' ? '\nExécuté par les opérations C-Pay (J+1 ouvré).' : ''}${data.fee ? `\nFrais : ${money(data.fee, cur)}` : ''}`);
+      reload();
+      loadList();
+    } catch (e) {
+      if (e instanceof AuthError) return;
+      if (isFeatureUnavailable(e)) setUnavailable(true); else Alert.alert('Transfert', cashMessage(e, cur));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancel = (t) => Alert.alert('Annuler ce transfert ?', `${t.reference || t.transferId} — ${money(t.amount, cur)}`, [
+    { text: 'Non', style: 'cancel' },
+    { text: 'Oui, annuler', style: 'destructive', onPress: async () => {
+      try { await apiFetch(`/merchant/cash/transfers/${encodeURIComponent(t.transferId)}/cancel`, { method: 'POST' }); loadList(); reload(); } catch (e) { if (!(e instanceof AuthError)) Alert.alert('Annulation', cashMessage(e, cur)); }
+    } },
+  ]);
+
+  const toBank = direction === 'wallet_to_bank';
+  return (
+    <Screen>
+      <Text style={s.h1}>Transférer</Text>
+      <View style={s.balanceCard}><Text style={s.balanceLabel}>Disponible</Text><Text style={s.balanceValue}>{money(available, cur)}</Text></View>
+      {unavailable ? <Notice title="Transferts" text={FEATURE_PENDING} /> : null}
+      <Segment value={direction} onChange={(v) => { setDirection(v); setInstructions(null); }} items={[['wallet_to_bank', 'Wallet → Banque'], ['bank_to_wallet', 'Banque → Wallet']]} />
+      {instructions ? <FundingInstructions transfer={instructions} currency={cur} onClose={() => setInstructions(null)} /> : null}
+      {toBank ? (
+        <>
+          <Text style={s.label}>Compte bancaire vérifié</Text>
+          {accounts.length ? (
+            <Chips value={accountId} onChange={setAccountId} items={accounts.map((a) => [a.accountId, `🏦 ${a.bankName || a.institution?.name || 'Banque'} ${a.accountMasked || (a.accountNumber ? `…${String(a.accountNumber).slice(-4)}` : '')}`])} />
+          ) : <Notice title="Compte bancaire" text="Aucun compte bancaire vérifié. Ajoutez-en un depuis le portail marchand (merchant.c-pay.global)." />}
+        </>
+      ) : <Text style={s.muted}>Vous recevrez les coordonnées du compte de collecte C-Pay et une référence à indiquer sur votre virement. Le solde est crédité à réception.</Text>}
+      <Field label={`Montant (${cur})`} value={amount} onChange={setAmount} keyboardType="decimal-pad" placeholder="200 000" />
+      <Field label="Libellé (optionnel)" value={description} onChange={setDescription} />
+      <Button label={loading ? 'Traitement...' : toBank ? 'Transférer vers la banque' : 'Créer l’ordre d’approvisionnement'} onPress={submit} disabled={loading || unavailable} />
+      <View style={s.rowBetween}><Text style={s.section}>Mes transferts</Text><MiniButton label="↻" onPress={loadList} /></View>
+      {!items.length ? <Text style={s.muted}>Aucun transfert pour le moment.</Text> : null}
+      {items.map((t) => {
+        const funding = t.direction === 'bank_to_wallet' || t.direction === 'funding';
+        const canCancel = t.status === 'awaiting_funds' || t.status === 'pending_manual';
+        return (
+          <View style={s.card} key={t.transferId}>
+            <Text style={s.cardTitle}>{funding ? '💰 Approvisionnement' : `🏦 Vers ${t.bankAccount?.bankName || 'la banque'} ${t.bankAccount?.accountMasked || ''}`}</Text>
+            <Text style={s.muted}>{t.reference || t.transferId} · {fmtDate(t.createdAt)}</Text>
+            <Text style={[s.amount, { color: funding ? C.green : C.amber }]}>{funding ? '+ ' : '- '}{money(t.amount, t.currency || cur)}</Text>
+            <Badge label={transferStatusLabel(t.status)} />
+            {(canCancel || (t.instructions && t.status === 'awaiting_funds')) ? (
+              <View style={s.row}>
+                {t.instructions && t.status === 'awaiting_funds' ? <MiniButton label="Instructions" onPress={() => setInstructions(t)} /> : null}
+                {canCancel ? <MiniButton label="Annuler" onPress={() => cancel(t)} /> : null}
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+    </Screen>
+  );
+}
+
+function FundingInstructions({ transfer, currency, onClose }) {
+  const i = transfer.instructions || {};
+  const rows = [
+    ['Banque', i.bankName], ['Titulaire', i.accountName], ['Numéro de compte', i.accountNumber],
+    ['IBAN', i.iban], ['SWIFT / BIC', i.swift], ['Référence à indiquer sur le virement', i.reference || transfer.reference],
+  ].filter(([, v]) => v);
+  const copy = async (v) => { await Clipboard.setStringAsync(String(v)); Alert.alert('Copie', 'Copié'); };
+  const all = [`Virement C-Pay ${money(transfer.amount, currency)}`, ...rows.map(([k, v]) => `${k} : ${v}`)].join('\n');
+  return (
+    <View style={[s.card, { borderColor: C.green }]}>
+      <Text style={[s.cardTitle, { color: C.green }]}>Instructions de virement</Text>
+      <Text style={s.amount}>{money(transfer.amount, currency)}</Text>
+      {rows.map(([k, v]) => (
+        <View style={s.rowBetween} key={k}>
+          <View style={{ flex: 1 }}><Text style={s.label}>{k}</Text><Text style={s.infoVal}>{v}</Text></View>
+          <Pressable style={s.copyBtn} onPress={() => copy(v)}><Text style={s.miniText}>Copier</Text></Pressable>
+        </View>
+      ))}
+      {i.expiresAt ? <Text style={s.muted}>À virer avant le {fmtDate(i.expiresAt)}</Text> : null}
+      <View style={s.row}><MiniButton label="Tout copier" onPress={() => copy(all)} /><MiniButton label="Fermer" onPress={onClose} /></View>
+    </View>
+  );
+}
+
+// ─── Journal ─────────────────────────────────────────────────────
+function JournalScreen({ session }) {
+  const PAGE = 30;
+  const [type, setType] = useState('');
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [totals, setTotals] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const cur = session.user?.currency || 'XAF';
+
+  const load = async (reset, offset = 0) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const d = await apiFetch(`/merchant/cash/history?limit=${PAGE}&offset=${offset}${type ? `&type=${encodeURIComponent(type)}` : ''}`);
+      setItems((prev) => (reset ? (d.data || []) : [...prev, ...(d.data || [])]));
+      setTotal(d.total || 0);
+      if (d.totals) setTotals(d.totals);
+    } catch (e) {
+      if (!(e instanceof AuthError)) setError(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(true, 0); }, [type]);
+  const hasMore = items.length < total;
+  const typeLabel = (t) => ({ collect: 'Encaissement', withdraw: 'Retrait', transfer_out: 'Transfert vers banque', transfer_in: 'Approvisionnement' }[t] || t || 'Mouvement');
+  const icon = (t) => ({ collect: '📥', withdraw: '📤', transfer_out: '🏦', transfer_in: '💰' }[t] || '💳');
+  const methodLabel = (m) => (m === 'mobile_money' ? '📱 Mobile Money' : m === 'card' ? '💳 Carte' : m === 'bank' ? '🏦 Banque' : m ? operatorLabel(m) : null);
+
+  return (
+    <Screen>
+      <View style={s.rowBetween}><Text style={s.h1}>Journal de caisse</Text><MiniButton label="↻" onPress={() => load(true, 0)} /></View>
+      <Chips value={type} onChange={setType} items={CASH_TYPES} />
+      <InfoGrid items={[['Entrées', `+ ${money(totals?.in, cur)}`], ['Sorties', `- ${money(totals?.out, cur)}`]]} />
+      <Text style={s.muted}>{items.length} / {total} mouvement(s)</Text>
+      {error ? <Notice title="Journal" text={isFeatureUnavailable(error) ? 'Caisse en cours d’activation sur votre compte' : cashMessage(error, cur)} /> : null}
+      {items.map((e, idx) => {
+        const incoming = e.type === 'collect' || e.type === 'transfer_in';
+        return (
+          <View style={s.card} key={e.id || idx}>
+            <View style={s.rowBetween}>
+              <Text style={s.cardTitle}>{icon(e.type)} {typeLabel(e.type)}</Text>
+              <Text style={[s.amount, { fontSize: 17, color: incoming ? C.green : C.amber }]}>{incoming ? '+ ' : '- '}{money(e.amount, cur)}</Text>
+            </View>
+            <Text style={s.muted}>{[e.reference, e.counterparty, methodLabel(e.method)].filter(Boolean).join(' · ')}</Text>
+            <View style={s.rowBetween}>
+              <Text style={s.muted}>{fmtDate(e.createdAt)}{e.fee ? ` · frais ${money(e.fee, cur)}` : ''}</Text>
+              <Badge label={transferStatusLabel(e.status)} />
+            </View>
+          </View>
+        );
+      })}
+      {loading ? <ActivityIndicator color={C.cyan} /> : null}
+      {!loading && !items.length && !error ? <Text style={s.muted}>Aucun mouvement.</Text> : null}
+      {hasMore && !loading ? <MiniButton label="Charger plus" onPress={() => load(false, items.length)} full /> : null}
     </Screen>
   );
 }
@@ -1129,6 +1688,19 @@ function Segment({ value, onChange, items }) {
   );
 }
 
+// Puces à sélection unique, sur plusieurs lignes (opérateurs, comptes, filtres).
+function Chips({ value, onChange, items }) {
+  return (
+    <View style={s.chips}>
+      {items.map(([key, label]) => (
+        <Pressable key={String(key)} onPress={() => onChange(key)} style={[s.chip, value === key && value !== null && s.chipOn]}>
+          <Text style={[s.chipText, value === key && value !== null && s.chipTextOn]}>{label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 function Field({ label, value, onChange, ...props }) {
   return (
     <View style={s.field}>
@@ -1191,23 +1763,6 @@ function InfoGrid({ items }) {
   );
 }
 
-function ResultCard({ result, polling, timedOut }) {
-  const pending = result.pending === true || result.status === 'pending';
-  const title = pending ? (timedOut ? PENDING_CONFIRMATION : 'Demande envoyée') : result.success ? 'Accepté' : 'Refusé';
-  return (
-    <View style={s.card}>
-      <View style={s.row}>
-        <Text style={s.cardTitle}>{title}</Text>
-        {polling ? <ActivityIndicator color={C.cyan} /> : null}
-      </View>
-      <Text style={s.muted}>{timedOut ? 'Le client n’a pas encore confirmé sur son téléphone. Le statut sera mis à jour dans l’historique.' : result.label || result.message || result.error || result.status}</Text>
-      <Text style={s.amount}>{money(result.amount, result.currency || 'XAF')}</Text>
-      <Text style={s.muted}>Réf : {result.reference || result.txnId || result.authCode || '-'}</Text>
-      <Badge label={pending ? (timedOut ? PENDING_CONFIRMATION : 'pending') : result.status || (result.success ? 'authorized' : 'failed')} />
-    </View>
-  );
-}
-
 function JsonBox({ data }) {
   const text = useMemo(() => JSON.stringify(data, null, 2), [data]);
   return <ScrollView horizontal style={s.json}><Text style={s.jsonText}>{text}</Text></ScrollView>;
@@ -1262,5 +1817,27 @@ const s = StyleSheet.create({
   info: { width: '48%', backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 12 },
   infoVal: { color: C.text, fontSize: 16, fontWeight: '900', marginTop: 4 },
   json: { backgroundColor: '#111827', borderRadius: 8, padding: 12, maxHeight: 260 },
+  // Caisse (vague 4)
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  balanceCard: { backgroundColor: C.darkBlue, borderRadius: 12, padding: 18, gap: 4 },
+  balanceLabel: { color: '#b3ffffff', fontSize: 12, fontWeight: '700' },
+  balanceValue: { color: C.card, fontSize: 30, fontWeight: '900' },
+  balanceSub: { color: '#d9ffffff', fontSize: 12 },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  tile: { width: '48%', backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 14, alignItems: 'center', gap: 2 },
+  tileOn: { backgroundColor: C.cyan, borderColor: C.cyan },
+  tileIcon: { fontSize: 26 },
+  tileTitle: { color: C.darkBlue, fontSize: 16, fontWeight: '900' },
+  tileSub: { color: C.muted, fontSize: 11 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: { borderWidth: 1, borderColor: C.cyan, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: C.card },
+  chipOn: { backgroundColor: C.cyan },
+  chipText: { color: C.cyan, fontWeight: '800', fontSize: 12 },
+  chipTextOn: { color: C.card },
+  detect: { backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 12, gap: 6 },
+  detectMain: { color: C.text, fontWeight: '900', fontSize: 14 },
+  copyBtn: { borderWidth: 1, borderColor: C.cyan, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 },
+  modalBg: { flex: 1, backgroundColor: '#00000066', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  modalCard: { width: '100%', maxWidth: 420, backgroundColor: C.card, borderRadius: 12, padding: 18, gap: 10 },
   jsonText: { color: '#e5e7eb', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12 },
 });

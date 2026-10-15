@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Identifiant de navigation utilisé par CardholderMainActivity sans entrée de menu (onglet Transactions accessible depuis le tableau de bord) -->
+    <item name="nav_transactions" type="id"/>
+</resources>

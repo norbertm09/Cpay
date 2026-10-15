@@ -6,7 +6,7 @@ const options = {
     openapi: '3.0.0',
     info: {
       title: 'CPlus API',
-      version: '2.6.0',
+      version: require('../package.json').version,
       description: `## API de Paiement CPlus — Congo Brazzaville
 
 CPlus est une plateforme de paiement permettant la **collection** et le **décaissement** via Mobile Money (MTN MoMo, Airtel Money) et carte bancaire (CyberSource, MIGS).

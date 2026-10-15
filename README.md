@@ -1,12 +1,19 @@
-# CPlus 2.6.0 Production OVH
+# C-Pay 2.7.0 — production OVH
 
-Version production OVH de CPlus 2.6.0.
+Version production OVH de C-Pay (ex-CPlus) ; la version courante est celle du fichier `VERSION`.
 
 Voir `OVH_DEPLOYMENT.md` pour le deploiement OVH et `PILOT_CONTROL_RUNBOOK.md` pour le pilotage production.
 
+**CI/CD et versions.** Le depot est verifie par GitHub Actions a chaque PR et push (`.github/workflows/ci.yml` :
+backend, 7 portails, vitrine, PHP, SDK, Expo, Android, Docker, coherence des versions). La mise en production suit
+`docs/CI-CD.md` : merge dans `main` → tag `vX.Y.Z` → `release.yml` (GitHub Release avec APK/AAB et archives SDK/plugin)
+→ `deploy.yml` (SSH vers OVH, `scripts/deploy.sh`, approbation de l'environnement `production`, rollback par
+`scripts/deploy.sh --rollback`). Les regles de numerotation (semver, branches `wave-N`, `versionCode` des stores) et la
+commande `scripts/bump-version.sh X.Y.Z` sont dans `docs/VERSIONING.md`.
+
 ## Production pilot control
 
-La plateforme inclut un module de pilotage production pour CPlus 2.6.0:
+La plateforme inclut un module de pilotage production:
 programmes pilotes, enrolement marchand, feature flags, overrides par marchand,
 journalisation des decisions et script `npm run check:pilot`.
 

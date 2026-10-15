@@ -241,37 +241,12 @@ const parseExpiresIn = (v, def = 24) => {
   return n;
 };
 
-// Solde disponible — formule UNIQUE partagee par GET /balance et POST /transfer/payout :
-//   + encaissements 'collect' autorises non encore regles (net_amount)
-//   − merchant_transfers 'payout' non echoues (pending, processing, pending_settlement, completed)
-//   − transactions type='payout' (disburse app + retraits legacy) autorisees ou en cours
-// `exec` est soit `query`, soit `client.query` dans une transaction avec verrou.
-async function computeAvailableBalance(exec, merchantId) {
-  const r = await exec(
-    `SELECT
-       COALESCE(SUM(net_amount) FILTER (WHERE status='authorized' AND settlement_batch_id IS NULL), 0) AS collected,
-       COALESCE(SUM(net_amount) FILTER (WHERE status='pending'), 0) AS pending,
-       COUNT(*) FILTER (WHERE status='authorized') AS nb
-     FROM transactions WHERE merchant_id=$1 AND type='collect'`, [merchantId]);
-  const t = await exec(
-    `SELECT COALESCE(SUM(amount),0) AS withdrawn
-     FROM merchant_transfers
-     WHERE merchant_id=$1 AND direction='payout'
-       AND status NOT IN ('failed','cancelled','rejected')`, [merchantId]);
-  const p = await exec(
-    `SELECT COALESCE(SUM(amount),0) AS disbursed
-     FROM transactions
-     WHERE merchant_id=$1 AND type='payout' AND status IN ('authorized','pending')`, [merchantId]);
-  const collected = parseFloat(r.rows[0].collected) || 0;
-  const withdrawn = (parseFloat(t.rows[0].withdrawn) || 0) + (parseFloat(p.rows[0].disbursed) || 0);
-  return {
-    available: Math.max(0, collected - withdrawn),
-    pending: parseFloat(r.rows[0].pending) || 0,
-    totalCollected: collected,
-    totalWithdrawn: withdrawn,
-    transactionCount: parseInt(r.rows[0].nb, 10) || 0,
-  };
-}
+// Solde disponible — formule UNIQUE partagee par GET /balance, POST /transfer/payout,
+// POST /disburse et la caisse (WAVE-4) : services/cash/cash.service.js
+// (+ encaissements autorises non regles, + approvisionnements completed,
+//  − merchant_transfers payout non echoues, − transactions payout).
+const cash = require('../services/cash/cash.service');
+const { computeAvailableBalance } = cash;
 
 // Cles API : seul le SHA-256 est stocke (audit §2.9)
 const hashApiKey = (key) => crypto.createHash('sha256').update(String(key)).digest('hex');
@@ -930,6 +905,9 @@ router.delete('/bank-accounts/:accountId', merchantAuth, async (req, res) => {
 // HOTFIX double depense (audit §2.7) : solde calcule DANS une transaction SQL,
 // sous verrou (FOR UPDATE sur la ligne marchand + advisory lock), ligne de
 // transfert inseree AVANT tout appel operateur, qui a lieu hors transaction.
+// WAVE-4 : implementation unique dans cash.service.createPayout (partagee avec
+// POST /merchant/cash/withdraw et POST /merchant/cash/transfers). La route
+// historique conserve son contrat (200, statut 'pending_settlement' pour une banque).
 router.post('/transfer/payout', merchantAuth, idempotency, async (req, res) => {
   const mid = req.merchant?.merchantId || req.user?.merchantId;
   const { destType, accountId, operator, phone, amount, description } = req.body;
@@ -946,143 +924,55 @@ router.post('/transfer/payout', merchantAuth, idempotency, async (req, res) => {
   if (destType === 'wallet' && walletPhone.length < 8)
     return res.status(422).json({ error: 'phone invalide' });
 
-  const fee = Math.round(amt * 0.01);
-  const net = amt - fee;
-  const ref = 'PAY-' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(2).toString('hex').toUpperCase();
-
-  let txnId = null;
-  let bankAcc = null;
-
   try {
-    // 1) Reservation atomique des fonds
-    const reservation = await withTransaction(async (client) => {
-      const exec = (text, params) => client.query(text, params);
-      await exec('SELECT pg_advisory_xact_lock(hashtext($1))', [String(mid)]);
-      const m = await exec('SELECT merchant_id, merchant_status FROM merchants WHERE merchant_id=$1 FOR UPDATE', [mid]);
-      if (!m.rows.length) return { status: 404, body: { error: 'Marchand introuvable' } };
-      if (m.rows[0].merchant_status && m.rows[0].merchant_status !== 'active')
-        return { status: 403, body: { error: 'Compte marchand inactif', code: 'MERCHANT_INACTIVE' } };
-
-      const bal = await computeAvailableBalance(exec, mid);
-      if (bal.available < amt) {
-        return { status: 422, body: {
-          error: 'Solde insuffisant',
-          code: 'INSUFFICIENT_BALANCE',
-          available: bal.available,
-          requested: amt,
-        } };
+    let wallet = null;
+    let rail = null;
+    if (destType === 'wallet') {
+      // Rail sortant verifie AVANT la reservation des fonds (MTN Congo : client rails ; autres : routeur MM)
+      const code = cash.normalizeOperatorCode(operator);
+      const m = await query('SELECT country FROM merchants WHERE merchant_id=$1', [mid]);
+      const country = m.rows[0]?.country || 'CG';
+      const d = cash.detectWallet(String(phone), { country, operator: code });
+      rail = await cash.payoutRail({ operator: code, gateway: d.success ? d.gateway : null, country: d.success ? d.country : country });
+      if (!rail.available) {
+        return res.status(503).json({ error: String(operator).toUpperCase() + ' non configure', code: 'OPERATOR_NOT_CONFIGURED' });
       }
+      wallet = { operator: code, phone: walletPhone, gateway: rail.gateway, country: d.success ? d.country : country };
+    }
 
-      if (destType === 'bank') {
-        const a = await exec(
-          `SELECT ba.*, fi.name AS inst_name FROM bank_accounts ba
-           LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
-           WHERE ba.account_id=$1 AND ba.owner_id=$2 AND ba.status='verified'`,
-          [accountId, mid]);
-        if (!a.rows[0]) return { status: 404, body: { error: 'Compte bancaire introuvable' } };
-        bankAcc = a.rows[0];
-      }
-
-      const t = await exec(
-        `INSERT INTO merchant_transfers (merchant_id, direction, dest_type, bank_account_id,
-          wallet_operator, wallet_phone, amount, fee, net_amount, status, reference, description)
-         VALUES ($1,'payout',$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10)
-         RETURNING transfer_id`,
-        [mid, destType, destType === 'bank' ? accountId : null,
-         destType === 'wallet' ? operator : null,
-         walletPhone,
-         amt, fee, net, ref, description || 'Retrait']);
-      return { transferId: t.rows[0].transfer_id };
+    const r = await cash.createPayout({
+      merchantId: mid, destType, accountId, wallet, rail, amount: amt, description,
+      refPrefix: 'PAY', bankQueueStatus: 'pending_settlement',
     });
+    if (r.error) return res.status(r.error.status).json(r.error.body);
+    const t = r.transfer;
 
-    if (reservation.status) return res.status(reservation.status).json(reservation.body);
-    txnId = reservation.transferId;
-
-    // 2) Appel operateur HORS transaction — la ligne 'pending' est deja comptee dans le solde
-    // Vers un wallet : MTN Disbursement
-    if (destType === 'wallet' && operator === 'mtn') {
-      const mtn = require('../services/rails/mtn-momo.client');
-      const d = await mtn.transfer({
-        amount: net,
-        phone: walletPhone,
-        description: description || 'Retrait C-Pay',
-        externalId: ref,
-      });
-
-      await query(
-        `UPDATE merchant_transfers SET gateway_reference=$1, status='processing'
-         WHERE transfer_id=$2`, [d.referenceId, txnId]);
-
+    if (destType === 'wallet') {
       return res.json({
         success: true,
-        transferId: txnId,
-        reference: ref,
-        amount: amt, fee, net,
-        status: 'processing',
+        transferId: t.transferId,
+        reference: t.reference,
+        amount: amt, fee: t.fee, net: t.net,
+        status: t.status,
         destination: { type: 'wallet', operator, phone },
       });
     }
 
-    if (destType === 'wallet') {
-      await query(
-        `UPDATE merchant_transfers SET status='failed',
-         error_message='Operateur non configure' WHERE transfer_id=$1`, [txnId]);
-      return res.status(503).json({
-        error: operator.toUpperCase() + ' non configure',
-        code: 'OPERATOR_NOT_CONFIGURED',
-      });
-    }
-
-    // Vers une banque : file d'attente settlement admin
-    await query(
-      `UPDATE merchant_transfers SET status='pending_settlement',
-       settlement_method='manual' WHERE transfer_id=$1`, [txnId]);
-
-    // Notifier l'equipe settlement
-    try {
-      const email = require('../services/notifications/email.service');
-      const m = await query(
-        `SELECT business_name, email FROM merchants WHERE merchant_id=$1`, [mid]);
-      const merch = m.rows[0] || {};
-      await email.send({
-        to: process.env.ADMIN_ALERT_EMAIL || 'support@c-pay.global',
-        subject: `Retrait a traiter — ${net} XAF — ${merch.business_name || 'Marchand'}`,
-        html: `<h2>Nouvelle demande de retrait</h2>
-          <table style="border-collapse:collapse">
-          <tr><td style="padding:6px 12px"><b>Marchand</b></td><td>${merch.business_name || mid}</td></tr>
-          <tr><td style="padding:6px 12px"><b>Reference</b></td><td>${ref}</td></tr>
-          <tr><td style="padding:6px 12px"><b>Montant brut</b></td><td>${amt} XAF</td></tr>
-          <tr><td style="padding:6px 12px"><b>Frais</b></td><td>${fee} XAF</td></tr>
-          <tr><td style="padding:6px 12px"><b>Net a virer</b></td><td><b>${net} XAF</b></td></tr>
-          <tr><td style="padding:6px 12px"><b>Banque</b></td><td>${bankAcc.inst_name}</td></tr>
-          <tr><td style="padding:6px 12px"><b>Compte</b></td><td>${bankAcc.account_number}</td></tr>
-          <tr><td style="padding:6px 12px"><b>Titulaire</b></td><td>${bankAcc.account_name}</td></tr>
-          </table>
-          <p>Traitez ce virement dans le back-office admin.</p>`,
-      });
-    } catch (e) { console.error('[settlement-email]', e.message); }
-
     res.json({
       success: true,
-      transferId: txnId,
-      reference: ref,
-      amount: amt, fee, net,
-      status: 'pending_settlement',
+      transferId: t.transferId,
+      reference: t.reference,
+      amount: amt, fee: t.fee, net: t.net,
+      status: t.status,
       message: 'Demande enregistree — virement sous 24-48h ouvrees',
       destination: {
         type: 'bank',
-        institution: bankAcc.inst_name,
-        accountNumber: bankAcc.account_number.replace(/.(?=.{4})/g, '*'),
+        institution: t.bankAcc?.inst_name,
+        accountNumber: cash.maskNumber(t.bankAcc?.account_number),
       },
     });
-
   } catch (err) {
     console.error('[payout]', err.message);
-    if (txnId) {
-      await query(
-        `UPDATE merchant_transfers SET status='failed', error_message=$1
-         WHERE transfer_id=$2`, [err.message.slice(0, 200), txnId]).catch(() => {});
-    }
     res.status(502).json({ error: err.message, code: 'GATEWAY_ERROR' });
   }
 });
@@ -1122,9 +1012,10 @@ router.get('/transfers', merchantAuth, async (req, res) => {
 router.get('/balance', merchantAuth, async (req, res) => {
   const mid = req.merchant?.merchantId || req.user?.merchantId;
   try {
-    // Meme formule que POST /transfer/payout (computeAvailableBalance)
+    // Meme formule que POST /transfer/payout et la caisse (cash.service.computeAvailableBalance)
     const bal = await computeAvailableBalance(query, mid);
-    res.json({ ...bal, currency: 'XAF' });
+    const m = await query('SELECT currency FROM merchants WHERE merchant_id=$1', [mid]);
+    res.json({ ...bal, currency: m.rows[0]?.currency || 'XAF' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

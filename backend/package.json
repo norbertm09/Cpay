@@ -1,7 +1,7 @@
 {
   "name": "cplus-2-6-backend",
-  "version": "2.6.0",
-  "description": "CPlus 2.6.0 - Payment Orchestration Hub production OVH",
+  "version": "2.7.0",
+  "description": "C-Pay - Payment Orchestration Hub (production OVH)",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
