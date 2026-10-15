@@ -1744,7 +1744,7 @@ const ApiConfigs = () => {
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:20 }}>
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}><span style={{ fontSize:28 }}>📱</span><div><div style={{ fontSize:15, fontWeight:700 }}>SMS — Protocole SMPP</div><div style={{ fontSize:11, color:C.muted }}>Envoi SMS via SMPP</div></div></div>
-            {[['smpp_host','Hôte SMPP *','smpp.operateur.com','text'],['smpp_port','Port','2775','text'],['smpp_user','Utilisateur *','smpp_user','text'],['smpp_pass','Mot de passe *','••••••','password'],['smpp_src','Nom expéditeur','C-Pay','text']].map(([k,l,ph,t])=>(
+            {[['smpp_host','Hôte SMPP *','smpp.operateur.com','text'],['smpp_port','Port','2775','text'],['smpp_user','Utilisateur *','smpp_user','text'],['smpp_pass','Mot de passe *','','password'],['smpp_src','Nom expéditeur','C-Pay','text']].map(([k,l,ph,t])=>(
               <div key={k} style={{ marginBottom:10 }}>
                 <label style={{ display:'block', fontSize:11, color:C.muted, marginBottom:4 }}>{l}</label>
                 <input type={t} value={notifConfig[k]||''} onChange={e=>setNotifConfig(p=>({...p,[k]:e.target.value}))} placeholder={NOTIF_SECRETS.includes(k) && notifMeta[k]?.configured ? 'Laisser vide pour conserver' : ph}

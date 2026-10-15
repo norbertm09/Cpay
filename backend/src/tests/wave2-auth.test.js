@@ -70,7 +70,8 @@ app.use('/api/v1/partners', partnersRouter);
 app.use('/api/v1', card2momoRouter);
 
 // ─── Fixtures ─────────────────────────────────────────────────────
-const PWD = 'Passw0rd!xyz';
+const PWD = 'Aa1!' + require('crypto').randomBytes(8).toString('hex');     // fixture générée à l'exécution
+const NEW_PWD = 'Bb2!' + require('crypto').randomBytes(8).toString('hex');
 const PWD_HASH = bcrypt.hashSync(PWD, 4);
 const SECRET = speakeasy.generateSecret({ length: 20 }).base32;
 const MERCHANT_ID = '11111111-1111-4111-8111-111111111111';
@@ -390,25 +391,25 @@ describe('3. Hygiene mots de passe', () => {
     expect(db.refresh).toHaveLength(2);
 
     const ch = await request(app).post('/api/v1/merchant/auth/change-password').set(bearer(login.body.access_token))
-      .send({ currentPassword: PWD, newPassword: 'N3wPassw0rd!!' });
+      .send({ currentPassword: PWD, newPassword: NEW_PWD });
     expect(ch.status).toBe(200);
     expect(ch.body.sessionsRevoked).toBe(true);
     expect(db.merchantUser.temp_password).toBe(false);
-    expect(bcrypt.compareSync('N3wPassw0rd!!', db.merchantUser.password_hash)).toBe(true);
+    expect(bcrypt.compareSync(NEW_PWD, db.merchantUser.password_hash)).toBe(true);
     expect(db.refresh.every(t => t.revoked_at)).toBe(true);
     expect(cookieOf(ch, 'cp_rt_merchant')).toMatch(/Expires=Thu, 01 Jan 1970/);
     expect((await request(app).post('/api/v1/merchant/auth/refresh').send({ refreshToken: other.body.refresh_token })).status).toBe(401);
     // mauvais mot de passe actuel -> 401, rien de revoque
     db = freshDb(); await request(app).post('/api/v1/merchant/auth/login').send({ emailOrPhone: 'm@test.io', password: PWD });
     const bad = await request(app).post('/api/v1/merchant/account/change-password').set(bearer(login.body.access_token))
-      .send({ currentPassword: 'wrong', newPassword: 'N3wPassw0rd!!' });
+      .send({ currentPassword: 'wrong', newPassword: NEW_PWD });
     expect(bad.status).toBe(401);
     expect(db.refresh.some(t => !t.revoked_at)).toBe(true);
   });
 
   test('reset mot de passe merchant (lien email) → revokeAll + temp_password=FALSE', async () => {
     await request(app).post('/api/v1/merchant/auth/login').send({ emailOrPhone: 'm@test.io', password: PWD });
-    const r = await request(app).post('/api/v1/merchant/auth/reset-password').send({ token: 'reset-raw', newPassword: 'N3wPassw0rd!!' });
+    const r = await request(app).post('/api/v1/merchant/auth/reset-password').send({ token: 'reset-raw', newPassword: NEW_PWD });
     expect(r.status).toBe(200);
     const upd = mockTxQuery.mock.calls.find(([sql]) => /UPDATE merchant_users SET password_hash/.test(sql));
     expect(upd[0]).toMatch(/temp_password=FALSE/);
@@ -425,7 +426,7 @@ describe('3. Hygiene mots de passe', () => {
     expect(me.body.mustChangePassword).toBe(true);
     expect(JSON.stringify(me.body)).not.toMatch(/password_hash|mfa_secret/);
     const ch = await request(app).post('/api/v1/admin/auth/change-password').set(bearer(login.body.access_token))
-      .send({ currentPassword: PWD, newPassword: 'N3wPassw0rd!!' });
+      .send({ currentPassword: PWD, newPassword: NEW_PWD });
     expect(ch.status).toBe(200);
     expect(db.admin.temp_password).toBe(false);
     expect(db.refresh.every(t => t.revoked_at)).toBe(true);

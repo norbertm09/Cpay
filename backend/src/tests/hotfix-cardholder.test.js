@@ -64,6 +64,8 @@ const tickets  = { 't-owner': { ticket_id: 't-owner', cardholder_id: OWNER, subj
 
 // WAVE-2 : les access tokens portent iss/aud (middleware/auth.js) — on signe via le module commun
 const { signToken } = require('../middleware/auth');
+// Mot de passe de fixture généré à l'exécution (rien de codé en dur)
+const TEST_PASSWORD = 'Aa1!' + require('crypto').randomBytes(8).toString('hex');
 const chToken = (sub = OWNER, cardId = CARD_OWNER, type = 'cardholder') =>
   'Bearer ' + signToken({ sub, cardId, type, email: 'o@c-pay.test' }, '1h');
 
@@ -219,7 +221,7 @@ describe('Endpoints désactivés (410 FEATURE_DISABLED)', () => {
 // 3. Inscription : réponse après COMMIT, carte rattachée au porteur
 // ================================================================
 describe('POST /auth/register', () => {
-  const body = { firstName: 'Ana', lastName: 'Doe', phone: '242060000001', email: 'ana@c-pay.test', password: 'Passw0rd!' };
+  const body = { firstName: 'Ana', lastName: 'Doe', phone: '242060000001', email: 'ana@c-pay.test', password: TEST_PASSWORD };
 
   test('répond 201 seulement après COMMIT et renseigne virtual_cards.cardholder_id', async () => {
     const events = [];
@@ -304,7 +306,7 @@ describe('IDOR cartes GTP (gtp-card.routes)', () => {
 // ================================================================
 describe('2FA partenaires (partners.routes)', () => {
   const SECRET = speakeasy.generateSecret({ length: 20 }).base32;
-  const PWD_HASH = bcrypt.hashSync('Passw0rd!', 4);
+  const PWD_HASH = bcrypt.hashSync(TEST_PASSWORD, 4);
   const bankUser = { user_id: 'u1', email: 'bank@c-pay.test', first_name: 'B', last_name: 'U', role: 'bank_admin', bank_id: 'b1',
                      agency_id: null, status: 'active', password_hash: PWD_HASH, bank_name: 'Bank', mfa_secret: SECRET, is_mfa_enabled: true };
   const partnerToken = 'Bearer ' + signToken({ sub: 'u1', role: 'bank_admin', type: 'bank_user', bankId: 'b1', agencyId: null, email: bankUser.email });
@@ -352,7 +354,7 @@ describe('2FA partenaires (partners.routes)', () => {
   });
 
   test('login avec 2FA active → { mfaRequired, mfaToken } sans session ; /auth/2fa/validate émet la session', async () => {
-    const login = await request(app).post('/api/v1/partners/auth/login').send({ email: bankUser.email, password: 'Passw0rd!' });
+    const login = await request(app).post('/api/v1/partners/auth/login').send({ email: bankUser.email, password: TEST_PASSWORD });
     expect(login.status).toBe(200);
     expect(login.body.mfaRequired).toBe(true);
     expect(login.body.access_token).toBeUndefined();

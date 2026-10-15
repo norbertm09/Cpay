@@ -33,6 +33,8 @@ const merchantRouter = require('../routes/merchant.routes');
 const adminRouter = require('../routes/admin.routes');
 const integrations = require('../services/integrations/integration.service');
 const smpp = require('../services/notifications/smpp.service');
+// Mot de passe de fixture généré à l'exécution (rien de codé en dur)
+const TEST_PASSWORD = 'Aa1!' + require('crypto').randomBytes(8).toString('hex');
 
 const app = express();
 app.use(express.json());
@@ -97,13 +99,13 @@ describe('2. Privileges admin (requireRole)', () => {
 
   test('ops_admin POST /admin/admin-users → 403 ; super_admin → 201 (bcryptjs)', async () => {
     let res = await request(app).post('/admin/admin-users').set(bearer(adminToken('ops_admin')))
-      .send({ email: 'x@y.z', password: 'Passw0rd!', role: 'support_agent' });
+      .send({ email: 'x@y.z', password: TEST_PASSWORD, role: 'support_agent' });
     expect(res.status).toBe(403);
 
     mockDbQuery.mockImplementation(async (sql) => sql.includes('INSERT INTO admin_users')
       ? rows([{ admin_id: 'new', email: 'x@y.z', role: 'support_agent' }]) : rows([]));
     res = await request(app).post('/admin/admin-users').set(bearer(adminToken('super_admin')))
-      .send({ email: 'x@y.z', password: 'Passw0rd!', role: 'support_agent' });
+      .send({ email: 'x@y.z', password: TEST_PASSWORD, role: 'support_agent' });
     expect(res.status).toBe(201);
     const insert = mockDbQuery.mock.calls.find(([sql]) => sql.includes('INSERT INTO admin_users'));
     expect(insert[1][1]).toMatch(/^\$2[aby]\$12\$/); // hash bcryptjs cout 12
