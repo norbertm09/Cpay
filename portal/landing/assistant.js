@@ -29,7 +29,7 @@
     message: function (id, stream) { return BASE + '/conversations/' + encodeURIComponent(id) + '/messages' + (stream ? '' : '?stream=0'); }
   };
   var STORAGE_KEY = 'cpay.assistant.conversationId';
-  var SUGGESTIONS = ['Quels sont vos tarifs ?', 'Quels pays couvrez-vous ?', 'Je veux ouvrir un compte', 'Déposer une réclamation'];
+  var SUGGESTIONS = ['Comment encaisser ?', 'Comment retirer mes recettes ?', 'Quels sont vos tarifs ?', 'Quels pays couvrez-vous ?', 'Je veux ouvrir un compte', 'Déposer une réclamation'];
 
   /* ── Utilitaires DOM ────────────────────────────────────── */
   function el(tag, cls, text) {

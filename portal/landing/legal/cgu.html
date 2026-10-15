@@ -44,7 +44,7 @@
     <section class="section">
       <div class="container doc">
         <h1>Conditions générales d'utilisation</h1>
-        <p class="legal-meta">Version 1.1 — Dernière mise à jour : 15 octobre 2026 — Calculus Plus SAS, plateforme C-Pay</p>
+        <p class="legal-meta">Version 1.2 — Dernière mise à jour : 15 octobre 2026 — Calculus Plus SAS, plateforme C-Pay</p>
 
         <div class="notice-todo" role="note">
           <strong>À COMPLÉTER avant publication.</strong> Les champs signalés <span class="placeholder">[ainsi]</span> doivent être validés par Calculus Plus SAS et le document relu par un conseil.
@@ -54,7 +54,7 @@
 
         <h2>Article 1 — Présentation de la société et de la plateforme</h2>
         <p><strong>Calculus Plus SAS</strong> (ci-après « la Société ») est une société par actions simplifiée éditant la plateforme de paiement <strong>C-Pay</strong>.</p>
-        <p>C-Pay est une solution technique permettant aux marchands d'encaisser des paiements par Mobile Money, QR code et lien de paiement, de suivre leurs transactions et de recevoir leurs règlements. L'acceptation de cartes (Tap-to-Phone) sera proposée ultérieurement, après certification du module.</p>
+        <p>C-Pay est une solution technique permettant aux marchands d'encaisser des paiements par Mobile Money, par carte (lien ou QR de paiement hébergé, lorsqu'une passerelle carte est disponible) et de gérer leur caisse : retraits vers leur portefeuille Mobile Money, transferts entre portefeuille et compte bancaire, journal unique. L'acceptation de cartes sans contact sur smartphone (Tap-to-Phone) sera proposée ultérieurement, après certification du module.</p>
         <p><strong>Zones d'opération :</strong> Sénégal, Côte d'Ivoire, Cameroun, République du Congo (Congo-Brazzaville) et République démocratique du Congo.</p>
         <p><strong>Contact légal :</strong> <a href="mailto:legal@c-pay.global">legal@c-pay.global</a></p>
 
@@ -65,6 +65,8 @@
           <li><strong>Marchand :</strong> entreprise ou personne utilisant C-Pay pour accepter des paiements.</li>
           <li><strong>Payeur :</strong> client d'un Marchand réglant un achat via la Plateforme.</li>
           <li><strong>Transaction :</strong> toute opération (encaissement, reversement, remboursement) effectuée via la Plateforme.</li>
+          <li><strong>Opération de caisse :</strong> retrait du solde disponible vers le portefeuille Mobile Money du Marchand, transfert du solde vers un compte bancaire du Marchand, ou ordre d'approvisionnement du solde depuis un compte bancaire du Marchand.</li>
+          <li><strong>Solde disponible :</strong> montant des encaissements confirmés non encore reversés, augmenté des approvisionnements reçus et diminué des retraits et transferts sortants en cours.</li>
           <li><strong>Mobile Money :</strong> services de paiement mobile des opérateurs présents dans les zones d'opération (par exemple Orange Money, MTN Mobile Money, Airtel Money, Moov Money, Free Money, Wave, Express Union, Vodacom M-Pesa, Africell Money).</li>
           <li><strong>KYC/KYB :</strong> procédures de vérification d'identité des personnes et des entreprises.</li>
         </ul>
@@ -92,6 +94,7 @@
           <li>Encaissement par Mobile Money avec détection automatique du pays, de la devise et de l'opérateur à partir du numéro du Payeur</li>
           <li>Génération de QR codes et de liens de paiement</li>
           <li>Reversement des fonds encaissés vers un compte bancaire ou un portefeuille Mobile Money</li>
+          <li>Opérations de caisse : retrait vers le portefeuille Mobile Money enregistré, transferts portefeuille ↔ banque, journal unifié avec export (article 7.5)</li>
           <li>Tableau de bord, historique des transactions et des règlements</li>
           <li>API REST, SDK et extension WooCommerce pour intégrations tierces</li>
         </ul>
@@ -122,6 +125,14 @@
         <p>La Société se réserve le droit de refuser, suspendre ou annuler toute Transaction en cas de suspicion de fraude, de non-conformité réglementaire ou de défaillance technique.</p>
         <h3>7.4 Réclamations</h3>
         <p>Toute réclamation relative à une Transaction peut être déposée via le <a href="/#reclamation">formulaire de réclamation</a> ou auprès de <a href="mailto:support@c-pay.global">support@c-pay.global</a>, en indiquant la référence de la Transaction. Un numéro de dossier est attribué à chaque réclamation.</p>
+        <h3>7.5 Opérations de caisse : retraits, transferts et approvisionnements</h3>
+        <ul>
+          <li><strong>Retraits.</strong> Un retrait est effectué uniquement depuis le solde disponible du Marchand vers le portefeuille Mobile Money qu'il a lui-même enregistré sur son compte. Aucun retrait vers un tiers n'est possible. Une limite journalière de retrait s'applique selon le niveau de vérification (KYB) du compte.</li>
+          <li><strong>Transferts vers un compte bancaire.</strong> Un transfert sortant n'est exécuté que vers un compte bancaire du Marchand préalablement déclaré et vérifié sur la Plateforme. Selon la banque, l'exécution peut être automatisée ou réalisée par les équipes de la Société ; le délai indicatif est d'un jour ouvré.</li>
+          <li><strong>Ordres d'approvisionnement.</strong> Pour alimenter son solde depuis un compte bancaire, le Marchand crée un ordre d'approvisionnement et vire le montant sur le compte de collecte indiqué par la Société, <strong>en mentionnant obligatoirement la référence de l'ordre</strong>. Le solde est crédité après confirmation de la réception des fonds par la Société. Un virement sans référence, d'un montant différent ou reçu après expiration de l'ordre peut être retardé, rejeté ou restitué, après instruction.</li>
+          <li><strong>Confirmation forte.</strong> Chaque Opération de caisse et tout changement de portefeuille de retrait exigent une confirmation forte (code à usage unique ou mot de passe). Le Marchand est responsable des opérations confirmées depuis son compte.</li>
+          <li><strong>Frais et délais.</strong> Les frais éventuels d'une Opération de caisse sont affichés avant confirmation ; les délais d'exécution sont indicatifs et dépendent des banques et des opérateurs Mobile Money. La Société peut refuser ou rejeter une Opération de caisse dans les cas prévus à l'article 7.3 ; les fonds correspondants sont alors restitués au solde disponible.</li>
+        </ul>
 
         <h2>Article 8 — Suspension et résiliation</h2>
         <p>La Société peut suspendre ou résilier un compte sans préavis en cas de :</p>
