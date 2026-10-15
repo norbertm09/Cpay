@@ -5,14 +5,15 @@ import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import global.cpay.app.cardholder.CardholderMainActivity
 import global.cpay.app.common.ApiClient
+import global.cpay.app.common.ApiErrors
+import global.cpay.app.common.AuthFlow
 import global.cpay.app.common.LoginRequest
 import global.cpay.app.common.SessionManager
+import global.cpay.app.common.TwoFAActivity
 import global.cpay.app.R
 import global.cpay.app.common.BiometricHelper
 import global.cpay.app.databinding.ActivityLoginBinding
-import global.cpay.app.merchant.MerchantMainActivity
 import kotlinx.coroutines.launch
 
 class LoginActivity : AppCompatActivity() {
@@ -33,7 +34,7 @@ class LoginActivity : AppCompatActivity() {
             binding.tvSubtitle.text = "Accédez à votre espace marchand"
         } else {
             binding.tvTitle.text = "💳 Connexion Porteur"
-            binding.tvSubtitle.text = "Accédez à votre espace cardholder"
+            binding.tvSubtitle.text = "Accédez à votre espace porteur"
         }
 
         // Show/hide password
@@ -59,24 +60,21 @@ class LoginActivity : AppCompatActivity() {
 
         binding.tvForgotPassword.setOnClickListener {
             val i = android.content.Intent(this, ForgotPasswordActivity::class.java)
-            i.putExtra("user_type", "cardholder")
+            i.putExtra("user_type", userType)
             startActivity(i)
         }
 
         binding.tvBack.setOnClickListener { finish() }
 
-        // Biométrie si token existant
-        if (SessionManager.isLoggedIn && BiometricHelper.isAvailable(this)) {
+        // Biométrie si une session (access + refresh) existe pour ce profil
+        if (SessionManager.isLoggedIn && SessionManager.userType == userType
+            && !SessionManager.refreshToken.isNullOrBlank() && BiometricHelper.isAvailable(this)) {
             binding.btnBiometric.visibility = android.view.View.VISIBLE
             binding.btnBiometric.setOnClickListener {
                 BiometricHelper.authenticate(this,
                     onSuccess = {
-                        val next = if (SessionManager.isMerchant)
-                            android.content.Intent(this, global.cpay.app.merchant.MerchantMainActivity::class.java)
-                        else
-                            android.content.Intent(this, global.cpay.app.cardholder.CardholderMainActivity::class.java)
-                        next.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
-                        startActivity(next)
+                        // L'access est rafraichi au besoin par ApiClient (refresh token).
+                        AuthFlow.enterApp(this, userType, mustChangePassword = false)
                     },
                     onError = { msg -> showError(msg) }
                 )
@@ -102,29 +100,37 @@ class LoginActivity : AppCompatActivity() {
                 } else {
                     ApiClient.api.cardholderLogin(LoginRequest(identifier, password))
                 }
+                android.util.Log.d("CPay", "Login response: ${response.code()}")
 
-                // Log pour debug
-                android.util.Log.d("CPlus", "Login response: ${response.code()} ${response.errorBody()?.string()}")
-
-                if (response.isSuccessful && response.body() != null) {
-                    val body = response.body()!!
-                    val user = body.effectiveUser
-                    if (user == null) { showError("Erreur de connexion — réessayez"); return@launch }
-                    SessionManager.saveSession(
-                        token    = body.accessToken,
-                        userId   = user.effectiveId,
-                        userName = user.displayName,
-                        email    = user.email ?: identifier,
-                        type     = userType
-                    )
-                    val next = if (userType == "merchant")
-                        Intent(this@LoginActivity, MerchantMainActivity::class.java)
-                    else
-                        Intent(this@LoginActivity, CardholderMainActivity::class.java)
-                    next.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                    startActivity(next)
+                val body = response.body()
+                if (response.isSuccessful && body != null) {
+                    when {
+                        // 2FA active : pas de session tant que le code TOTP n'est pas valide
+                        body.mfaRequired && !body.mfaToken.isNullOrBlank() -> {
+                            startActivity(Intent(this@LoginActivity, TwoFAActivity::class.java)
+                                .putExtra(TwoFAActivity.EXTRA_MODE, TwoFAActivity.MODE_LOGIN)
+                                .putExtra(TwoFAActivity.EXTRA_MFA_TOKEN, body.mfaToken)
+                                .putExtra(TwoFAActivity.EXTRA_IDENTIFIER, identifier)
+                                .putExtra(AuthFlow.EXTRA_USER_TYPE, userType))
+                        }
+                        // Session : { access_token, refresh_token, expires_in, user, mustChangePassword }
+                        body.hasSession -> {
+                            if (!AuthFlow.saveAndEnter(this@LoginActivity, body, userType, identifier)) {
+                                showError("Erreur de connexion — réessayez")
+                            }
+                        }
+                        else -> showError(body.error ?: "Erreur de connexion — réessayez")
+                    }
                 } else {
-                    showError("Identifiants incorrects")
+                    val err = ApiErrors.of(response)
+                    showError(when (response.code()) {
+                        401  -> if (err.attemptsLeft != null) "Identifiants incorrects (${err.attemptsLeft} essai(s) restant(s))"
+                                else "Identifiants incorrects"
+                        403  -> err.error ?: "Compte suspendu — contactez le support"
+                        423  -> "Compte temporairement verrouillé — réessayez dans 15 minutes"
+                        429  -> "Trop de tentatives — réessayez plus tard"
+                        else -> err.error ?: "Erreur de connexion (${response.code()})"
+                    })
                 }
             } catch (e: Exception) {
                 showError("Erreur réseau — ${e.message}")

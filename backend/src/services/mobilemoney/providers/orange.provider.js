@@ -22,7 +22,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       cancel_url:  process.env.PAY_LINK_BASE_URL + `/cancel/orange/${txnId}`,
       notif_url:   webhookUrl('orange'),
       lang:        'fr',
-      reference:   description || 'CPlus 2.6.0',
+      reference:   description || 'C-Pay',
     }
   );
 

@@ -23,7 +23,7 @@ const baseFundsPayload = ({ txnId, amount, currency, sender = {}, recipient = {}
   systemsTraceAuditNumber: Number(stan()),
   transactionCurrencyCode: currency,
   amount: Number(amount),
-  senderName: sender.name || process.env.VISA_SENDER_NAME || 'CPlus Merchant',
+  senderName: sender.name || process.env.VISA_SENDER_NAME || 'C-Pay Merchant',
   senderAddress: sender.address || process.env.VISA_SENDER_ADDRESS || 'CPlus',
   senderCountryCode: sender.countryCode || process.env.VISA_SENDER_COUNTRY_CODE || '180',
   senderAccountNumber: sender.accountNumber || process.env.VISA_SENDER_ACCOUNT_NUMBER,
@@ -102,7 +102,7 @@ const accountWalletPayout = async ({ txnId, amount, currency, payoutMethod = 'W'
     transactionDetail: {
       initiatingPartyId: Number(process.env.VISA_PAYOUT_INITIATING_PARTY_ID),
       businessApplicationId: process.env.VISA_PAYOUT_BUSINESS_APPLICATION_ID || 'FD',
-      statementNarrative: process.env.VISA_PAYOUT_NARRATIVE || 'CPlus payout',
+      statementNarrative: process.env.VISA_PAYOUT_NARRATIVE || 'C-Pay payout',
       transactionAmount: Number(amount),
       transactionCurrencyCode: currency,
       settlementCurrencyCode: process.env.VISA_PAYOUT_SETTLEMENT_CURRENCY || currency,

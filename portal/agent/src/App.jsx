@@ -1,5 +1,5 @@
 // ================================================================
-// C-Pay 2.6 — Portail Agent (agent.c-pay.global)
+// C-Pay 2.7 — Portail Agent (agent.c-pay.global)
 // ================================================================
 import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import axios from 'axios';
@@ -7,29 +7,70 @@ import { BrowserRouter, Routes, Route, Link, useNavigate, Navigate } from 'react
 import { Toaster, toast } from 'react-hot-toast';
 
 const BASE = process.env.REACT_APP_API_BASE_URL || '';
-const api  = axios.create({ baseURL: `${BASE}/api/v1/agent` });
-api.interceptors.request.use(cfg => { const t = localStorage.getItem('agt_token'); if (t) cfg.headers.Authorization = `Bearer ${t}`; return cfg; });
-api.interceptors.response.use(r => r, e => {
+// Jeton d'acces (15 min) dans localStorage sous agt_token ; le refresh opaque
+// est dans le cookie HttpOnly cp_rt_agent (path /api/v1/agent/auth) pose par
+// le backend, d'ou withCredentials sur l'instance. Pas de /auth/me sur les
+// portails distribution : le profil reste celui renvoye par /auth/login
+// (agt_user) et la validite de session est lue dans le jeton (base64url, exp).
+const TOKEN_KEY = 'agt_token', USER_KEY = 'agt_user';
+const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } };
+const setToken = (t) => { try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* navigation privee */ } };
+const readStoredUser = () => { try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch (e) { return null; } };
+const purgeSession = () => { try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); } catch (e) {} };
+
+const decodeJwt = (t) => {
+  try {
+    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
+    if (!payload.exp || payload.exp * 1000 <= Date.now()) return null;
+    return payload;
+  } catch { return null; }
+};
+// Session valide uniquement si le JWT n'est pas expire.
+const tokenValid = (t) => !!decodeJwt(t || '');
+
+const api  = axios.create({ baseURL: `${BASE}/api/v1/agent`, withCredentials: true });
+api.interceptors.request.use(cfg => { const t = getToken(); if (t) cfg.headers.Authorization = `Bearer ${t}`; return cfg; });
+
+// Refresh nu (hors instance api) et single-flight : les 401 concurrents
+// attendent la meme promesse, sinon la rotation revoquerait les suivants.
+const callRefresh = () => axios.post(`${BASE}/api/v1/agent/auth/refresh`, {}, { withCredentials: true });
+let refreshPromise = null;
+const refreshAccessToken = () => {
+  if (!refreshPromise) {
+    refreshPromise = callRefresh()
+      .then(({ data }) => {
+        if (!data.access_token) throw new Error('no access_token');
+        setToken(data.access_token);
+        return data.access_token;
+      })
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+};
+
+// Routes d'authentification non protegees : un 401 est une reponse metier.
+const NO_REFRESH_RE = /\/auth\/(login|refresh|forgot-password|reset-password)(\?|$)/;
+// Purge complete (token ET utilisateur) : sinon AuthProvider relit agt_user,
+// considere la session valide et renvoie sur '/' -> 401 -> boucle de redirection.
+const logoutLocal = () => { purgeSession(); if (window.location.pathname !== '/login') window.location = '/login'; };
+
+api.interceptors.response.use(r => r, async e => {
   const st = e.response?.status;
-  if (st === 401) {
-    // Purge complete (token ET utilisateur) : sinon AuthProvider relit agt_user,
-    // considere la session valide et renvoie sur '/' -> 401 -> boucle de redirection.
-    localStorage.removeItem('agt_token'); localStorage.removeItem('agt_user');
-    if (window.location.pathname !== '/login') window.location = '/login';
+  const original = e.config;
+  const isAuthRoute = NO_REFRESH_RE.test(original?.url || '');
+  if (st === 401 && original && !original._retry && !isAuthRoute) {
+    original._retry = true;
+    try {
+      const t = await refreshAccessToken();
+      original.headers.Authorization = `Bearer ${t}`;
+      return api(original);
+    } catch (err) { logoutLocal(); }
   } else if (st === 403) {
     toast.error('Accès refusé');
   }
   return Promise.reject(e);
 });
-
-// Session valide uniquement si le JWT n'est pas expire (base64url -> base64).
-const tokenValid = (t) => {
-  try {
-    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const payload = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
-    return !!payload.exp && payload.exp * 1000 > Date.now();
-  } catch { return false; }
-};
 
 const FONT = "Inter, 'Century Gothic', 'URW Gothic', Jost, system-ui, sans-serif";
 const FONT_TITRE = "Jost, 'Century Gothic', 'URW Gothic', Questrial, system-ui, sans-serif";
@@ -40,16 +81,24 @@ const fmtNum = n => parseFloat(n||0).toLocaleString('fr-FR');
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
 const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => {
-    try {
-      const t = localStorage.getItem('agt_token');
-      if (!t || !tokenValid(t)) { localStorage.removeItem('agt_token'); localStorage.removeItem('agt_user'); return null; }
-      return JSON.parse(localStorage.getItem('agt_user') || 'null');
-    } catch { return null; }
-  });
-  const login  = (token,u) => { localStorage.setItem('agt_token',token); localStorage.setItem('agt_user',JSON.stringify(u)); setUser(u); };
-  const logout = () => { localStorage.removeItem('agt_token'); localStorage.removeItem('agt_user'); setUser(null); };
-  return <AuthCtx.Provider value={{user,login,logout,isAuth:!!user}}>{children}</AuthCtx.Provider>;
+  // Profil stocke si le jeton est encore valide ; sinon refresh silencieux
+  // par cookie avant de renvoyer sur /login (le cookie survit au jeton 15 min).
+  const [user, setUser] = useState(() => (tokenValid(getToken()) ? readStoredUser() : null));
+  const [loading, setLoading] = useState(() => !tokenValid(getToken()) && !!readStoredUser());
+  useEffect(() => {
+    if (!loading) return undefined;
+    let cancelled = false;
+    refreshAccessToken()
+      .then(() => { if (!cancelled) setUser(readStoredUser()); })
+      .catch(() => purgeSession())
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+  const login  = (token, u) => { setToken(token); try { localStorage.setItem(USER_KEY, JSON.stringify(u)); } catch (e) {} setUser(u); };
+  // Deconnexion reelle : l'etat local est vide immediatement (la page /login ne
+  // renvoie pas sur '/'), puis le refresh est revoque cote serveur.
+  const logout = () => { setUser(null); api.post('/auth/logout').catch(() => {}).finally(() => purgeSession()); };
+  return <AuthCtx.Provider value={{ user, login, logout, loading, isAuth: !!user }}>{children}</AuthCtx.Provider>;
 };
 
 const Box  = ({children,style}) => <div style={{background:CARD,border:`1px solid ${BORDER}`,borderRadius:12,padding:20,marginBottom:16,...style}}>{children}</div>;
@@ -71,7 +120,7 @@ const Inp  = ({label,value,onChange,type='text',placeholder,required,id,name,aut
 };
 const Badge = ({label,color}) => <span style={{background:`${color}20`,color,borderRadius:20,padding:'3px 10px',fontSize:11,fontWeight:700}}>{label}</span>;
 const Spin  = () => <div style={{textAlign:'center',padding:40,color:MUTED,fontFamily:FONT}}>Chargement…</div>;
-const Guard = ({children}) => { const {isAuth}=useAuth(); return isAuth?children:<Navigate to="/login" replace />; };
+const Guard = ({ children }) => { const { isAuth, loading } = useAuth(); if (loading) return <Spin />; return isAuth ? children : <Navigate to="/login" replace />; };
 
 const Layout = ({children}) => {
   const {user,logout}=useAuth(); const navigate=useNavigate();
@@ -81,7 +130,7 @@ const Layout = ({children}) => {
     <div style={{display:'flex',minHeight:'100vh',background:BG,fontFamily:FONT}}>
       <aside style={{width:220,background:TEAL,color:'#fff',display:'flex',flexDirection:'column',position:'fixed',top:0,bottom:0,zIndex:10}}>
         <div style={{padding:'20px 16px',borderBottom:'1px solid rgba(255,255,255,0.1)'}}>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{height:36,marginBottom:8}} onError={e=>e.target.style.display='none'} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{height:36,marginBottom:8}} onError={e=>e.target.style.display='none'} />
           <div style={{fontSize:11,opacity:.7}}>Portail Agent</div>
           <div style={{fontSize:13,fontWeight:700}}>{user?.firstName} {user?.lastName}</div>
           <div style={{fontSize:11,opacity:.6,marginTop:2}}>{user?.agency?.agencyName}</div>
@@ -121,7 +170,7 @@ const Login = () => {
       <div style={{width:400}}>
         <Box style={{marginBottom:0}}>
           <div style={{textAlign:'center',marginBottom:24}}>
-            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{height:48,marginBottom:12}} onError={e=>e.target.style.display='none'} />
+            <img src="/logo-calculus.png" alt="Calculus Plus" style={{height:48,marginBottom:12}} onError={e=>e.target.style.display='none'} />
             <div style={{fontSize:20,fontWeight:700,color:TEXT,fontFamily:FONT}}>Portail Agent</div>
             <div style={{fontSize:13,color:MUTED}}>C-Pay Distribution Network</div>
           </div>

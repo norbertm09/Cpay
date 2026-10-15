@@ -20,7 +20,7 @@ class CPlusAPI(private val config: CPlusConfig) {
                 .addHeader("X-API-Key",    config.apiKey)
                 .addHeader("X-API-Secret", config.apiSecret)
                 .addHeader("Content-Type", "application/json")
-                .addHeader("User-Agent",   "CPlus-Android-SDK/2.6.0")
+                .addHeader("User-Agent",   "CPay-Android-SDK/2.7.0")
                 .build()
             chain.proceed(request)
         }

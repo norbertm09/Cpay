@@ -259,7 +259,7 @@
         </LinearLayout>
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="CPlus v2.6.0 — Calculus Plus SAS"
+            android:text="C-Pay v2.7.0 — Calculus Plus SAS"
             android:textColor="@color/text_secondary" android:textSize="11sp"
             android:layout_gravity="center" android:layout_marginTop="16dp"/>
     </LinearLayout>

@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────────
 //  Reconciliation — balaie les transactions 'pending' et interroge
-//  les operateurs (Airtel/MTN) pour finaliser leur statut.
+//  les operateurs (Airtel/MTN, et depuis la WAVE-3 Orange/Wave/Africell/
+//  Express Union/Free Money/Moov via getStatus()) pour finaliser leur statut.
 //  Independant du polling en memoire : rattrape les transactions
 //  bloquees apres un redemarrage. Declenche le settlement si authorized.
 //
@@ -33,6 +34,76 @@ const opKind = (detectedOperator) => {
   if (op.startsWith('mtn'))    return 'mtn';
   if (op.startsWith('airtel')) return 'airtel';
   return null;
+};
+
+// ─── WAVE-3 : providers de la vague 2 (Orange, Wave, Africell, Express Union,
+// Free Money, Moov) via mobilemoney.router.getProvider(key).getStatus(), finalisés
+// par la MEME machine d'état que les webhooks (services/mobilemoney/finalize.service).
+const WAVE2_PROVIDERS = ['orange', 'wave', 'africell', 'express_union', 'free_money', 'moov'];
+// detected_operator (orchestrateur ou legacy minuscule) → provider
+const OPERATOR_TO_PROVIDER = {
+  orange_money: 'orange', orange: 'orange',
+  wave: 'wave',
+  africell_money: 'africell', africell: 'africell',
+  express_union: 'express_union', express_union_mobile: 'express_union',
+  free_money: 'free_money', free: 'free_money',
+  moov_money: 'moov', moov: 'moov',
+};
+const WAVE2_OPERATOR_VALUES = Object.keys(OPERATOR_TO_PROVIDER);
+
+const providerKeys = () => {
+  const { PROVIDERS } = require('./mobilemoney/mobilemoney.router');
+  return Object.keys(PROVIDERS || {});
+};
+/** Clés de gateway (mtn_cm, orange_sn, …) rattachées à un provider de la vague 2. */
+const keysForProvider = (provider) => providerKeys().filter(k => k.startsWith(`${provider}_`) && /_[a-z]{2}$/.test(k));
+const wave2GatewayKeys = () => WAVE2_PROVIDERS.flatMap(keysForProvider);
+
+/** Provider vague 2 d'une transaction (gateway_name prioritaire, sinon detected_operator), ou null. */
+const wave2Provider = (t) => {
+  const gw = String(t.gateway_name || '').toLowerCase();
+  if (gw && providerKeys().includes(gw)) {
+    const p = gw.replace(/_[a-z]{2}$/, '');
+    if (WAVE2_PROVIDERS.includes(p)) return p;
+  }
+  return OPERATOR_TO_PROVIDER[String(t.detected_operator || '').toLowerCase()] || null;
+};
+
+/** Clé de gateway à utiliser pour charger la config / le module (même logique que les webhooks). */
+const gatewayKeyFor = (provider, t) => {
+  const gw = String(t.gateway_name || '').toLowerCase();
+  const keys = keysForProvider(provider);
+  if (gw && keys.includes(gw)) return gw;
+  const country = String(t.detected_country || '').toLowerCase();
+  if (country) { const byCountry = keys.find(k => k.endsWith(`_${country}`)); if (byCountry) return byCountry; }
+  return keys[0] || null;
+};
+
+/**
+ * Réconciliation d'un provider vague 2 : statut réel via getStatus() quand il existe,
+ * finalisation par finalize.service (claim atomique, règlement, pay_link). Toute
+ * indisponibilité (pas d'endpoint, statusPath absent, erreur réseau) laisse pending.
+ */
+const reconcileWave2 = async (t, provider) => {
+  const mmRouter = require('./mobilemoney/mobilemoney.router');
+  const key = gatewayKeyFor(provider, t);
+  const mod = key ? mmRouter.getProvider(key) : null;
+  if (!mod || typeof mod.getStatus !== 'function') return { txn: t.transaction_id, provider, skipped: 'no_status_endpoint' };
+  const config = await mmRouter.getConfig(key);
+  const product = t.type === 'payout' ? 'disbursement' : 'collection';
+  const s = await mod.getStatus({ txnId: t.transaction_id, gatewayRef: t.gateway_payment_id, config, product });
+  if (!s || s.available === false) return { txn: t.transaction_id, provider, skipped: 'status_unavailable' };
+  const st = String(s.status || '').toUpperCase();
+  if (st !== 'SUCCESSFUL' && st !== 'FAILED') return { txn: t.transaction_id, provider, still: 'pending', providerStatus: st || null };
+  if (st === 'SUCCESSFUL' && !amountMatches(t, s)) return { txn: t.transaction_id, provider, still: 'pending', mismatch: true };
+  const { finalizeTransaction } = require('./mobilemoney/finalize.service');
+  const outcome = st === 'SUCCESSFUL' ? 'authorized' : 'failed';
+  const fin = await finalizeTransaction({
+    txn: t, provider, outcome, authCode: s.gatewayRef || null, gatewayRef: s.gatewayRef || null,
+    reason: s.reason || null, source: 'reconcile', eventPayload: { providerStatus: st, gatewayKey: key },
+  });
+  if (!fin.applied) return { txn: t.transaction_id, provider, skipped: 'already_final' };
+  return { txn: t.transaction_id, provider, updated: outcome, ...(outcome === 'failed' ? { reason: s.reason || null } : {}) };
 };
 
 // Statut MTN reel : provider orchestrateur (config DB/env par pays) si configure,
@@ -84,6 +155,11 @@ async function reconcileOne(t) {
   const currency = t.currency || 'XAF';
 
   try {
+    // ---- Providers vague 2 (Orange, Wave, Africell, Express Union, Free Money, Moov) ----
+    if (!op) {
+      const provider = wave2Provider(t);
+      if (provider) return await reconcileWave2(t, provider);
+    }
     // ---- COLLECTE ----
     if (t.type === 'collect' || t.type === 'qr_payment' || t.type === 'pay_link') {
       if (op === 'mtn') {
@@ -166,28 +242,48 @@ async function markFailed(t, reason) {
   return { txn: t.transaction_id, updated: 'failed', reason };
 }
 
-// Balaye les transactions pending recentes (fenetre configurable, defaut 24h)
-async function reconcilePending({ maxAgeHours = 24, limit = 100 } = {}) {
+// Balaye les transactions pending recentes (fenetre configurable, defaut 24h).
+// WAVE-3 : couvre aussi les providers de la vague 2 (par gateway_name ou detected_operator) ;
+// minAgeMinutes (defaut 5) evite de concurrencer un push / webhook encore en vol.
+async function reconcilePending({ maxAgeHours = 24, limit = 100, minAgeMinutes = 5 } = {}) {
+  let minAge = parseInt(minAgeMinutes, 10);
+  if (!Number.isFinite(minAge) || minAge < 0) minAge = 5;
   const r = await query(
-    `SELECT transaction_id, type, amount, currency, detected_operator, detected_country, gateway_payment_id, status
+    `SELECT transaction_id, merchant_id, type, amount, currency, detected_operator, detected_country,
+            gateway_name, gateway_payment_id, pay_link_id, status
      FROM transactions
      WHERE status='pending' AND gateway_payment_id IS NOT NULL
-       AND (LOWER(detected_operator) LIKE 'mtn%' OR LOWER(detected_operator) LIKE 'airtel%')
+       AND (LOWER(detected_operator) LIKE 'mtn%' OR LOWER(detected_operator) LIKE 'airtel%'
+            OR LOWER(detected_operator) = ANY($3::text[]) OR LOWER(gateway_name) = ANY($4::text[]))
        AND initiated_at > NOW() - ($1 || ' hours')::interval
-     ORDER BY initiated_at DESC LIMIT $2`, [String(maxAgeHours), limit]);
+       AND initiated_at < NOW() - ($5 || ' minutes')::interval
+     ORDER BY initiated_at DESC LIMIT $2`,
+    [String(maxAgeHours), limit, WAVE2_OPERATOR_VALUES, wave2GatewayKeys(), String(minAge)]);
   const results = [];
   for (const t of r.rows) {
     results.push(await reconcileOne(t));
+  }
+  const byProvider = {};
+  for (const x of results) {
+    const p = x.provider || 'mtn_airtel';
+    byProvider[p] = byProvider[p] || { authorized: 0, failed: 0, still_pending: 0, skipped: 0, errors: 0 };
+    if (x.updated === 'authorized') byProvider[p].authorized++;
+    else if (x.updated === 'failed') byProvider[p].failed++;
+    else if (x.error) byProvider[p].errors++;
+    else if (x.still === 'pending') byProvider[p].still_pending++;
+    else if (x.skipped) byProvider[p].skipped++;
   }
   const summary = {
     scanned: r.rows.length,
     authorized: results.filter(x => x.updated === 'authorized').length,
     failed: results.filter(x => x.updated === 'failed').length,
     still_pending: results.filter(x => x.still === 'pending').length,
+    skipped: results.filter(x => x.skipped).length,
     errors: results.filter(x => x.error).length,
+    by_provider: byProvider,
   };
   logger.info('Reconcile termine', summary);
   return { summary, results };
 }
 
-module.exports = { reconcilePending, reconcileOne, opKind };
+module.exports = { reconcilePending, reconcileOne, opKind, wave2Provider, gatewayKeyFor, WAVE2_PROVIDERS };

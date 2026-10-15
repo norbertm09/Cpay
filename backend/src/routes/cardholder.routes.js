@@ -229,7 +229,7 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
         const emailSvc = require('../services/notifications/email.service');
         await emailSvc.send({
           to: email.toLowerCase(),
-          subject: 'Activez votre compte CPlus',
+          subject: 'Activez votre compte C-Pay',
           html: `<h2>Bienvenue ${firstName} !</h2>
             <p>Merci de votre inscription. Cliquez sur le bouton ci-dessous pour activer votre compte :</p>
             <p><a href="${verifyUrl}" style="display:inline-block;background:#1d4f92;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Activer mon compte</a></p>
@@ -282,7 +282,7 @@ router.post('/auth/resend-verification', cardAuth, async (req, res) => {
     const emailSvc = require('../services/notifications/email.service');
     await emailSvc.send({
       to: ch.rows[0].email,
-      subject: 'Activez votre compte CPlus',
+      subject: 'Activez votre compte C-Pay',
       html: `<h2>Bonjour ${ch.rows[0].first_name},</h2><p>Votre lien d'activation :</p><p><a href="${verifyUrl}" style="display:inline-block;background:#1d4f92;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Activer mon compte</a></p>`,
     });
     res.json({ success: true });
@@ -928,7 +928,7 @@ router.post('/payment/tokenized', cardAuth, async (req, res) => {
              VALUES ($1,$2,$3,'payment',$4,'XAF',$5,$6,'completed',$7,$8,$9,NOW(),NOW())
              RETURNING txn_id, amount, fee_amount, status, auth_code`,
             [uuidv4(), cardId, chId, amt, fee, amt, authCode,
-             description || 'Paiement CPlus', merchantId || null]
+             description || 'Paiement C-Pay', merchantId || null]
           );
 
           return {

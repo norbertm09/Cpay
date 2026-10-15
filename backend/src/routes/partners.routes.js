@@ -147,7 +147,7 @@ router.use(resolveTenant);
 // ─── ROUTE PUBLIQUE — Config tenant ──────────────────────────────
 router.get('/tenant/config', async (req, res) => {
   if (!req.tenant) return res.json({
-    display_name: 'CPlus Partners',
+    display_name: 'C-Pay Partners',
     primary_color: '#12b6c7',
     secondary_color: '#1d4f92',
     accent_color: '#00c896',
@@ -753,7 +753,7 @@ router.post('/users/:id/reset-link', partnerAuth, requireRole('bank_admin','agen
       if (emailSvc.send) {
         await emailSvc.send({
           to: u.email,
-          subject: 'Réinitialisation de votre mot de passe CPlus Partners',
+          subject: 'Réinitialisation de votre mot de passe C-Pay Partners',
           html: `<p>Bonjour ${u.first_name || ''},</p><p>Un administrateur a demandé la réinitialisation de votre mot de passe.</p>
             <p><a href="${resetUrl}">Réinitialiser mon mot de passe</a></p><p>Ce lien est valable 24h.</p>`,
         });

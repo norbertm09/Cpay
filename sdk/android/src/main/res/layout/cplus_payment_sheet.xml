@@ -10,7 +10,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="💳 Paiement CPlus"
+        android:text="💳 Paiement C-Pay"
         android:textSize="18sp"
         android:textStyle="bold"
         android:textColor="#1d4f92"

@@ -732,7 +732,7 @@ router.post('/integrations/merchant/:merchantId/test-event', requireRole('super_
   await integrations.deliverEvent({
     merchantId: req.params.merchantId,
     eventType: req.body.eventType || 'integration.test',
-    payload: req.body.payload || { message: 'CPlus 2.6.0 test event' },
+    payload: req.body.payload || { message: 'C-Pay test event' },
   });
   res.json({ success: true });
 });
@@ -963,11 +963,15 @@ router.post('/reconcile', requireRole('super_admin', 'ops_admin'), async (req, r
     const { reconcilePending } = require('../services/reconcile.service');
     let maxAgeHours = parseInt(req.body?.maxAgeHours, 10);
     if (!Number.isFinite(maxAgeHours) || maxAgeHours < 1 || maxAgeHours > 720) maxAgeHours = 24;
-    const r = await reconcilePending({ maxAgeHours, limit: 100 });
+    // WAVE-3 : minAgeMinutes (defaut 5) — ne pas concurrencer un push / webhook encore en vol ;
+    // couvre MTN/Airtel ET les providers de la vague 2 (getStatus + finalisation webhook).
+    let minAgeMinutes = parseInt(req.body?.minAgeMinutes, 10);
+    if (!Number.isFinite(minAgeMinutes) || minAgeMinutes < 0 || minAgeMinutes > 1440) minAgeMinutes = 5;
+    const r = await reconcilePending({ maxAgeHours, limit: 100, minAgeMinutes });
     await query(
       `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, new_values, ip_address)
        VALUES ('admin',$1,$2,'RECONCILE_RUN','system','reconcile',$3,$4)`,
-      [req.user.sub, req.user.email, JSON.stringify({ maxAgeHours, summary: r?.summary || null }), req.ip]
+      [req.user.sub, req.user.email, JSON.stringify({ maxAgeHours, minAgeMinutes, summary: r?.summary || null }), req.ip]
     ).catch(() => {});
     res.json(r.summary);
   } catch (err) {
@@ -1154,20 +1158,61 @@ router.patch('/users/:id/status', requireRole('super_admin', 'ops_admin'), async
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// WAVE-3 : réinitialisation de mot de passe par un admin.
+//   :id       = merchant_users.user_id (défaut, ?type=merchant) ou admin_users.admin_id (?type=admin)
+//   ops_admin = comptes marchands uniquement ; super_admin = marchands + admins (jamais son propre compte).
+//   Génère un mot de passe temporaire (generateTempPassword), bcrypt(12), temp_password=TRUE
+//   (=> mustChangePassword au prochain login), 2FA conservé, toutes les sessions révoquées (revokeAll),
+//   audit_logs. Le mot de passe en clair est renvoyé UNE SEULE FOIS à l'admin (aucun e-mail fiable) :
+//   il doit être remis à l'utilisateur par un canal sûr, voir docs/WAVE-3.md.
+const RESET_TARGETS = {
+  merchant: { table: 'merchant_users', pk: 'user_id',  actorType: 'merchant', entity: 'merchant_user', prefix: 'Tmp' },
+  admin:    { table: 'admin_users',    pk: 'admin_id', actorType: 'admin',    entity: 'admin_user',    prefix: 'Adm' },
+};
 router.post('/users/:id/reset-password', requireRole('super_admin', 'ops_admin'), async (req, res) => {
-  // En production: envoyer un email via WhatsApp/SMPP
-  const { query } = require('../config/database');
+  const type = String(req.query.type || req.body?.type || 'merchant').toLowerCase();
+  const target = RESET_TARGETS[type];
+  if (!target) return res.status(422).json({ error: 'type invalide (merchant | admin)', code: 'VALIDATION_ERROR' });
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(req.params.id))) {
+    return res.status(404).json({ error: 'Utilisateur introuvable' });
+  }
+  if (type === 'admin') {
+    if (req.user.role !== 'super_admin') return res.status(403).json({ error: 'Seul un super_admin peut réinitialiser un compte admin', code: 'FORBIDDEN' });
+    if (String(req.params.id) === String(req.user.sub)) return res.status(422).json({ error: 'Utilisez /auth/change-password pour votre propre compte', code: 'SELF_RESET' });
+  }
   try {
-    const r = await query(`SELECT email FROM merchant_users WHERE user_id=$1`, [req.params.id]);
+    const r = await query(`SELECT ${target.pk} AS id, email, role, is_active FROM ${target.table} WHERE ${target.pk}=$1`, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Utilisateur introuvable' });
-    // TODO: déclencher l'envoi d'email de réinitialisation
-    await query(
-      `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, ip_address)
-       VALUES ('admin',$1,$2,'USER_PASSWORD_RESET','merchant_user',$3,$4)`,
-      [req.user.sub, req.user.email, req.params.id, req.ip]
+    const user = r.rows[0];
+    if (type === 'admin' && user.role === 'super_admin' && req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Réinitialisation réservée aux super_admin', code: 'FORBIDDEN' });
+    }
+    const tempPassword = generateTempPassword(target.prefix);
+    const hash = await bcrypt.hash(tempPassword, 12);
+    const upd = await query(
+      `UPDATE ${target.table} SET password_hash=$1, temp_password=TRUE, updated_at=NOW() WHERE ${target.pk}=$2`,
+      [hash, req.params.id]
     );
-    res.json({ success: true, message: `Réinitialisation initiée pour ${r.rows[0].email}` });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    if (upd && upd.rowCount === 0) return res.status(404).json({ error: 'Utilisateur introuvable' });
+    await revokeAll(target.actorType, req.params.id);
+    await query(
+      `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, new_values, ip_address)
+       VALUES ('admin',$1,$2,'USER_PASSWORD_RESET',$3,$4,$5,$6)`,
+      [req.user.sub, req.user.email, target.entity, req.params.id,
+       JSON.stringify({ email: user.email, type, tempPassword: true, sessionsRevoked: true }), req.ip]
+    ).catch((e) => logger.warn('[reset-password] audit log failed', { err: e.message }));
+    res.json({
+      success: true,
+      type,
+      email: user.email,
+      tempPassword,
+      mustChangePassword: true,
+      message: 'Mot de passe temporaire affiché une seule fois : transmettez-le par un canal sûr. Les sessions de l\'utilisateur ont été révoquées ; il devra le changer à la prochaine connexion.',
+    });
+  } catch (err) {
+    logger.error('[reset-password]', { err: err.message });
+    res.status(500).json({ error: 'Erreur réinitialisation' });
+  }
 });
 
 // ─── ALERTS ──────────────────────────────────────────────────────
@@ -1596,7 +1641,7 @@ router.post('/support/tickets/:id/escalate', adminAuth, async (req, res) => {
 
     await query(
       `INSERT INTO ticket_messages (ticket_id, sender_type, sender_id, sender_name, message, attachments)
-       VALUES ($1,'admin',$2,'Système CPlus',$3,'[]')`,
+       VALUES ($1,'admin',$2,'Système C-Pay',$3,'[]')`,
       [req.params.id, req.user?.sub, systemMsg]
     );
 
@@ -1625,7 +1670,7 @@ router.patch('/cardholders/:id/kyc/documents/:docId', adminAuth, async (req, res
         const { first_name, last_name, email, phone, doc_label } = ch.rows[0];
         const name = first_name + ' ' + last_name;
         const statusLabel = status === 'approved' ? 'approuvé ✅' : status === 'rejected' ? 'rejeté ❌' : 'mis à jour';
-        const msg = `CPlus: Votre document KYC "${doc_label}" a été ${statusLabel}.${rejectionReason ? ' Raison: ' + rejectionReason : ''} Connectez-vous sur app.c-pay.global pour plus de détails.`;
+        const msg = `C-Pay: Votre document KYC "${doc_label}" a été ${statusLabel}.${rejectionReason ? ' Raison: ' + rejectionReason : ''} Connectez-vous sur app.c-pay.global pour plus de détails.`;
         if (phone) {
           try {
             const { sendSmsSmpp } = require('../services/notifications/smpp.service');
@@ -1794,9 +1839,9 @@ router.post('/notification-configs/send-test', adminAuth, async (req, res) => {
         auth: { user: cfg.smtp_user, pass: cfg.smtp_pass }
       });
       await transporter.sendMail({
-        from: `"CPlus Admin" <${cfg.smtp_from||cfg.smtp_user}>`,
+        from: `"C-Pay Admin" <${cfg.smtp_from||cfg.smtp_user}>`,
         to,
-        subject: 'CPlus — Test configuration Email',
+        subject: 'C-Pay — Test configuration Email',
         html: `<div style="font-family:Arial,sans-serif;padding:20px;max-width:500px">
           <h2 style="color:#12b6c7">Calculus Plus</h2>
           <p>Configuration SMTP opérationnelle.</p>
@@ -1804,7 +1849,7 @@ router.post('/notification-configs/send-test', adminAuth, async (req, res) => {
             Serveur: ${cfg.smtp_host}:${cfg.smtp_port}<br/>
             Date: ${new Date().toLocaleString('fr-FR')}
           </p>
-          <p style="color:#5a6677;font-size:12px">CPlus 2.6.0 — admin.c-pay.global</p>
+          <p style="color:#5a6677;font-size:12px">C-Pay — admin.c-pay.global</p>
         </div>`
       });
       return res.json({ success:true, message:`Email test envoyé à ${to} ✅` });
@@ -1824,7 +1869,7 @@ router.post('/notification-configs/send-test', adminAuth, async (req, res) => {
     if (section === 'whatsapp') {
       if (!cfg.wa_token || !cfg.wa_phone_id) return res.status(400).json({error:'Token et Phone ID requis'});
       const https = require('https');
-      const body = JSON.stringify({ messaging_product:'whatsapp', to:to.replace(/\D/g,''), type:'text', text:{ body:`CPlus Test — ${new Date().toLocaleString('fr-FR')}` } });
+      const body = JSON.stringify({ messaging_product:'whatsapp', to:to.replace(/\D/g,''), type:'text', text:{ body:`C-Pay Test — ${new Date().toLocaleString('fr-FR')}` } });
       const result = await new Promise((resolve,reject) => {
         const req2 = https.request({ hostname:'graph.facebook.com', path:`/v18.0/${cfg.wa_phone_id}/messages`, method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${cfg.wa_token}`, 'Content-Length':Buffer.byteLength(body) } }, r2=>{ let d=''; r2.on('data',c=>d+=c); r2.on('end',()=>resolve(JSON.parse(d))); });
         req2.on('error',reject); req2.write(body); req2.end();

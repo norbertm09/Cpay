@@ -1,8 +1,9 @@
-// C-Pay 2.6.0 — Merchant Portal
+// C-Pay 2.7.0 — Merchant Portal
 import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
+import { QRCodeSVG } from 'qrcode.react';
 import { useT } from './i18n';
 
 // Purge unique des tokens herites de l'ancien stockage localStorage.
@@ -27,9 +28,33 @@ const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '';
 let accessToken = null;
 const authListeners = new Set();
 
+// Decodage local du JWT (base64url, expiration verifiee). Ne sert plus qu'a
+// deux choses : savoir si le jeton en memoire est encore valide, et fournir
+// un profil de repli si /auth/me est injoignable (coupure reseau). Le profil
+// de reference vient de GET /auth/me (role, merchantId, mfaEnabled, nom...).
 const decodeJwt = (t) => {
-  try { return JSON.parse(atob(t.split('.')[1])); } catch { return null; }
+  try {
+    const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const p = JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '=')));
+    if (!p.exp || p.exp * 1000 <= Date.now()) return null;
+    return p;
+  } catch { return null; }
 };
+
+// Profil de repli construit a partir des claims du jeton : memes cles que
+// merchantProfile() cote backend pour que les composants n'aient pas a
+// distinguer les deux sources.
+const userFromClaims = (c) => c ? ({
+  userId: c.sub, merchantId: c.merchantId, role: c.role,
+  businessName: c.businessName, country: c.country, currency: c.currency,
+  _source: 'token',
+}) : null;
+
+// Routes d'authentification non protegees : un 401 sur celles-ci est une
+// reponse metier (identifiants faux, refresh revoque...), pas un jeton
+// expire. Tout le reste (/auth/me, /auth/change-password, /auth/2fa/*...)
+// passe par le refresh comme n'importe quelle route protegee.
+const NO_REFRESH_RE = /\/auth\/(login|refresh|register|2fa\/validate|forgot-password|reset-password)(\?|$)/;
 
 const setAccessToken = (t) => {
   accessToken = t || null;
@@ -75,10 +100,10 @@ const refreshAccessToken = () => {
 
 api.interceptors.response.use(r => r, async err => {
   const original = err.config;
-  const isAuthRoute = original?.url?.includes('/auth/');
+  const isAuthRoute = NO_REFRESH_RE.test(original?.url || '');
   // 403 : droits insuffisants -> simple toast, aucune redirection (la session reste valide)
   if (err.response?.status === 403 && !isAuthRoute) toast.error('Accès refusé');
-  if (err.response?.status === 401 && !original._retry && !isAuthRoute) {
+  if (err.response?.status === 401 && original && !original._retry && !isAuthRoute) {
     original._retry = true;
     try {
       const t = await refreshAccessToken();
@@ -102,9 +127,32 @@ api.interceptors.response.use(r => r, async err => {
 // de page avant meme que le refresh ait pu repondre.
 const AuthContext = React.createContext(null);
 
+// Charge le profil depuis GET /auth/me.
+//   - 401 (apres tentative de refresh par l'intercepteur) ou 404 : la session
+//     n'est plus valable -> deconnexion.
+//   - pas de reponse (reseau coupe) ou erreur serveur : on retombe sur les
+//     claims du jeton pour ne pas bloquer le portail.
+const fetchProfile = async (t) => {
+  try {
+    const { data } = await api.get('/auth/me');
+    return { ...data.user, mustChangePassword: !!data.mustChangePassword, _source: 'me' };
+  } catch (err) {
+    const st = err.response?.status;
+    if (st === 401 || st === 404) {
+      setAccessToken(null);
+      try { localStorage.removeItem('merchant_user'); } catch (e) {}
+      if (window.location.pathname !== '/login') window.location.href = '/login';
+      return null;
+    }
+    return userFromClaims(decodeJwt(t));
+  }
+};
+
 const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(accessToken);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [refreshing, setRefreshing] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   useEffect(() => {
     const listener = (t) => setToken(t);
@@ -116,18 +164,39 @@ const AuthProvider = ({ children }) => {
     // Refresh silencieux au demarrage : le cookie HttpOnly survit au
     // rechargement, l'access token en memoire non.
     let cancelled = false;
-    if (accessToken) { setLoading(false); return; }
+    if (accessToken) { setRefreshing(false); return; }
     refreshAccessToken()
       .catch(() => { if (!cancelled) setAccessToken(null); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .finally(() => { if (!cancelled) setRefreshing(false); });
     return () => { cancelled = true; };
   }, []);
 
-  const user = token ? decodeJwt(token) : null;
-  const isAuth = !!user && user.exp * 1000 > Date.now();
+  // Profil : charge des qu'un jeton est disponible (demarrage ou login). Un
+  // simple renouvellement du jeton (toutes les 15 min) ne le recharge pas.
+  const reloadUser = useCallback(async () => {
+    const t = getAccessToken();
+    if (!t) { setUser(null); return null; }
+    setProfileLoading(true);
+    try { const p = await fetchProfile(t); setUser(p); return p; }
+    finally { setProfileLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (!token) { setUser(null); return; }
+    if (user && user._source === 'me') return;
+    let cancelled = false;
+    setProfileLoading(true);
+    fetchProfile(token)
+      .then(p => { if (!cancelled) setUser(p); })
+      .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const isAuth = !!token && !!decodeJwt(token);
+  const loading = refreshing || (isAuth && !user);
 
   return (
-    <AuthContext.Provider value={{ isAuth, user, loading, setAccessToken }}>
+    <AuthContext.Provider value={{ isAuth, user, loading, setAccessToken, reloadUser }}>
       {children}
     </AuthContext.Provider>
   );
@@ -138,8 +207,8 @@ const useAuth = () => {
   // Repli defensif : si un composant appelle useAuth hors du Provider,
   // on lit l'etat module plutot que de planter.
   if (!ctx) {
-    const user = accessToken ? decodeJwt(accessToken) : null;
-    return { isAuth: !!user && user.exp * 1000 > Date.now(), user, loading: false };
+    const claims = accessToken ? decodeJwt(accessToken) : null;
+    return { isAuth: !!claims, user: userFromClaims(claims), loading: false, setAccessToken, reloadUser: async () => null };
   }
   return ctx;
 };
@@ -1093,8 +1162,9 @@ const Operations = ({ lang }) => {
                         <div style={{ background: BG, borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, fontFamily: 'monospace', color: P, wordBreak: 'break-all' }}>
                           {colResult.shortUrl}
                         </div>
-                        <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&format=svg&data=${encodeURIComponent(colResult.shortUrl)}`}
-                          alt="QR" style={{ width: 180, height: 180, margin: '0 auto 14px', display: 'block', borderRadius: 8, border: `1px solid ${BORDER}` }} />
+                        <div role="img" aria-label="QR" style={{ width: 180, height: 180, margin: '0 auto 14px', display: 'block', borderRadius: 8, border: `1px solid ${BORDER}`, background: '#fff', boxSizing: 'border-box', padding: 8 }}>
+                          <QRCodeSVG value={colResult.shortUrl} size={162} level="M" />
+                        </div>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
                           <Btn small onClick={() => navigator.clipboard.writeText(colResult.shortUrl).then(() => toast.success('Copié !'))}>📋 Copier</Btn>
                           {colResult.shortUrl && <a href={`https://wa.me/?text=${encodeURIComponent(colResult.shortUrl)}`} target="_blank" rel="noreferrer" style={{ background: '#25d366', color: '#fff', borderRadius: 8, padding: '6px 14px', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>📲 WhatsApp</a>}
@@ -1174,16 +1244,19 @@ const Layout = ({ children, lang, toggleLang }) => {
   const [show2FA, setShow2FA]       = useState(false);
   const [showConsent, setShowConsent] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
+  // Profil issu de /auth/me (repli : claims du jeton), plus de lecture de
+  // localStorage pour identifier l'utilisateur.
+  const { user } = useAuth();
+  const userId = user?.userId;
 
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('merchant_user')||'{}');
-    if (user?.userId && !consentChecked) {
-      fetch(`${process.env.REACT_APP_API_BASE_URL||''}/api/v1/consent/check?userId=${user.userId}&userType=merchant&portal=merchant`)
+    if (userId && !consentChecked) {
+      fetch(`${process.env.REACT_APP_API_BASE_URL||''}/api/v1/consent/check?userId=${userId}&userType=merchant&portal=merchant`)
         .then(r=>r.json())
         .then(d=>{ if (!d.hasConsented) setShowConsent(true); setConsentChecked(true); })
         .catch(()=>setConsentChecked(true));
     }
-  }, [consentChecked]);
+  }, [userId, consentChecked]);
   const t = useT(lang);
   const navigate = useNavigate();
   const [bizName, setBizName] = useState('');
@@ -1232,7 +1305,7 @@ const Layout = ({ children, lang, toggleLang }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: CARD, borderBottom: `1px solid ${BORDER}`, padding: '10px 16px', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 200, height: 52 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => setMenuOpen(m => !m)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: TEXT, lineHeight: 1, padding: '2px 6px' }}>☰</button>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 32, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ height: 32, objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: MUTED, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bizName}</span>
@@ -1246,7 +1319,7 @@ const Layout = ({ children, lang, toggleLang }) => {
       {/* Bandeau 2FA — dans la top bar, à droite du logo */}
       {showConsent && (
         <ConsentModal
-          userId={JSON.parse(localStorage.getItem('merchant_user')||'{}')?.userId}
+          userId={userId}
           userType="merchant" portal="merchant" lang={lang}
           onAccepted={()=>setShowConsent(false)}
         />
@@ -1471,7 +1544,7 @@ const Login = ({ lang, toggleLang }) => {
         </div>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 180, height: 'auto', display: 'block', margin: '0 auto 12px', objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
+            <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 180, height: 'auto', display: 'block', margin: '0 auto 12px', objectFit: 'contain' }} onError={e => e.target.style.display = 'none'} />
             <div style={{ color: MUTED, fontSize: 13 }}>C-Pay — Espace Marchand</div>
           </div>
           <form onSubmit={onSubmit}>
@@ -1528,7 +1601,7 @@ const ForgotPassword = ({ lang, toggleLang }) => {
       <div style={{ width: '100%', maxWidth: 420, padding: 20 }}>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 48, marginBottom: 12 }} onError={e => e.target.style.display = 'none'} />
+            <img src="/logo-calculus.png" alt="Calculus Plus" style={{ height: 48, marginBottom: 12 }} onError={e => e.target.style.display = 'none'} />
             <div style={{ fontSize: 18, fontWeight: 700 }}>{lang === 'fr' ? 'Réinitialiser le mot de passe' : 'Reset password'}</div>
           </div>
           {sent ? (
@@ -1599,7 +1672,7 @@ const Register = ({ lang, toggleLang }) => {
       <div style={{ width: '100%', maxWidth: 480 }}>
         <Card>
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ height: 48, marginBottom: 10 }} onError={e => e.target.style.display = 'none'} />
+            <img src="/logo-calculus.png" alt="Calculus Plus" style={{ height: 48, marginBottom: 10 }} onError={e => e.target.style.display = 'none'} />
             <div style={{ fontSize: 18, fontWeight: 700 }}>{t('registerTitle') || 'Créer un compte marchand'}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
@@ -3130,8 +3203,9 @@ const PayLinks = ({ lang }) => {
           <div style={{ fontSize: 14, fontWeight: 700, color: G, marginBottom: 12 }}>✅ {lang === 'fr' ? 'Lien créé !' : 'Link created!'}</div>
           <div style={{ background: BG, borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, fontFamily: 'monospace', color: P, wordBreak: 'break-all' }}>{newLink.short_url}</div>
           {newLink.short_url && (
-            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&format=svg&data=${encodeURIComponent(newLink.short_url)}`}
-              alt="QR" style={{ width: 200, height: 200, margin: '0 auto 12px', display: 'block', borderRadius: 8, border: `1px solid ${BORDER}` }} />
+            <div role="img" aria-label="QR" style={{ width: 200, height: 200, margin: '0 auto 12px', display: 'block', borderRadius: 8, border: `1px solid ${BORDER}`, background: '#fff', boxSizing: 'border-box', padding: 8 }}>
+              <QRCodeSVG value={newLink.short_url} size={182} level="M" />
+            </div>
           )}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
             <Btn onClick={() => navigator.clipboard.writeText(newLink.short_url || '').then(() => toast.success(lang === 'fr' ? 'Copié !' : 'Copied!'))}>📋 {lang === 'fr' ? 'Copier' : 'Copy'}</Btn>
@@ -3281,8 +3355,9 @@ const AcceptPayment = ({ lang }) => {
         <Card style={{ maxWidth: 480, textAlign: 'center' }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: G, marginBottom: 16 }}>📷 QR Code</div>
           <div style={{ background: BG, borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, fontFamily: 'monospace', color: P, wordBreak: 'break-all' }}>{result.short_url}</div>
-          <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&format=svg&data=${encodeURIComponent(result.short_url || '')}`}
-            alt="QR" style={{ width: 200, height: 200, margin: '0 auto 16px', display: 'block', borderRadius: 8, border: `1px solid ${BORDER}` }} />
+          <div role="img" aria-label="QR" style={{ width: 200, height: 200, margin: '0 auto 16px', display: 'block', borderRadius: 8, border: `1px solid ${BORDER}`, background: '#fff', boxSizing: 'border-box', padding: 8 }}>
+            <QRCodeSVG value={result.short_url || ''} size={182} level="M" />
+          </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
             <Btn onClick={() => navigator.clipboard.writeText(result.short_url || '').then(() => toast.success(lang === 'fr' ? 'Copié !' : 'Copied!'))}>📋 {lang === 'fr' ? 'Copier' : 'Copy'}</Btn>
             <Btn onClick={() => setShowReceipt({ txn_id: result.pay_link_id, amount: result.amount, status: 'pending', auth_code: result.short_url?.slice(-8), initiated_at: new Date().toISOString() })} color={G}>🧾 Ticket</Btn>
@@ -3741,14 +3816,14 @@ const Integrations = ({ lang, t }) => {
       name: 'C-Pay Android SDK',
       platform: 'Android',
       icon: '📱',
-      version: '2.6.0',
+      version: '2.7.0',
       desc: lang==='fr'
         ? 'SDK natif Kotlin/Java pour intégrer C-Pay dans vos applications Android. Paiement Mobile Money, QR Code et NFC.'
         : 'Native Kotlin/Java SDK to integrate C-Pay in your Android apps. Mobile Money, QR Code and NFC payments.',
       tags: ['Kotlin', 'Java', 'Android 5.0+'],
       tagColors: ['#e8f0fe', '#f0fff4', '#fff3e0'],
       tagTextColors: ['#1d4f92', '#00c896', '#ff9500'],
-      downloadUrl: 'https://c-pay.global/downloads/cplus-android-sdk-v2.6.0.zip',
+      downloadUrl: 'https://c-pay.global/downloads/cpay-android-sdk-v2.7.0.zip',
       docsUrl: 'https://c-pay.global/developers',
       requires: 'Android API 21+ · Kotlin 1.8+ ou Java 11+',
       steps: lang==='fr' ? [
@@ -3770,14 +3845,14 @@ const Integrations = ({ lang, t }) => {
       name: 'C-Pay Payment Gateway',
       platform: 'WooCommerce',
       icon: '🛒',
-      version: '2.6.0',
+      version: '2.7.0',
       desc: lang==='fr'
         ? 'Acceptez Airtel Money, MTN MoMo et carte bancaire sur votre boutique WooCommerce.'
         : 'Accept Airtel Money, MTN MoMo and card payments on your WooCommerce store.',
       tags: ['Airtel Money', 'MTN MoMo', 'Carte Bancaire'],
       tagColors: ['#e8f4f8', '#fff3e0', '#e8f0fe'],
       tagTextColors: ['#12b6c7', '#ff9500', '#1d4f92'],
-      downloadUrl: 'https://c-pay.global/downloads/cplus-payment-gateway-v2.6.0.zip',
+      downloadUrl: 'https://c-pay.global/downloads/cpay-payment-gateway-v2.7.0.zip',
       docsUrl: 'https://c-pay.global/developers',
       requires: 'WooCommerce 6.0+ · PHP 7.4+',
       steps: lang==='fr' ? [
@@ -3898,12 +3973,12 @@ const PluginsTab = ({ lang }) => {
       name: 'C-Pay Android SDK',
       platform: 'Android',
       icon: '📱',
-      version: '2.6.0',
+      version: '2.7.0',
       desc: lang==='fr' ? 'SDK natif Kotlin/Java pour Android.' : 'Native Kotlin/Java SDK for Android.',
       tags: ['Kotlin', 'Java', 'Android 5.0+'],
       tagColors: ['#e8f0fe','#f0fff4','#fff3e0'],
       tagTextColors: ['#1d4f92','#00c896','#ff9500'],
-      downloadUrl: 'https://c-pay.global/downloads/cplus-android-sdk-v2.6.0.zip',
+      downloadUrl: 'https://c-pay.global/downloads/cpay-android-sdk-v2.7.0.zip',
       docsUrl: 'https://c-pay.global/developers',
       requires: 'Android API 21+',
       steps: lang==='fr'
@@ -3915,12 +3990,12 @@ const PluginsTab = ({ lang }) => {
       name: 'C-Pay WooCommerce',
       platform: 'WooCommerce',
       icon: '🛒',
-      version: '2.6.0',
+      version: '2.7.0',
       desc: lang==='fr' ? 'Acceptez Airtel Money et MTN MoMo sur WooCommerce.' : 'Accept Airtel Money and MTN MoMo on WooCommerce.',
       tags: ['Airtel Money','MTN MoMo','Carte'],
       tagColors: ['#e8f4f8','#fff3e0','#e8f0fe'],
       tagTextColors: ['#12b6c7','#ff9500','#1d4f92'],
-      downloadUrl: 'https://c-pay.global/downloads/cplus-payment-gateway-v2.6.0.zip',
+      downloadUrl: 'https://c-pay.global/downloads/cpay-payment-gateway-v2.7.0.zip',
       docsUrl: 'https://c-pay.global/developers',
       requires: 'WooCommerce 6.0+ · PHP 7.4+',
       steps: lang==='fr'

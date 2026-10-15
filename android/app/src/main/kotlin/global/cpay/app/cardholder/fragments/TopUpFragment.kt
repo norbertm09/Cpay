@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import global.cpay.app.common.ApiClient
+import global.cpay.app.common.ApiErrors
 import global.cpay.app.common.CardDetail
 import global.cpay.app.common.SecurityManager
 import global.cpay.app.databinding.FragmentTopupBinding
@@ -138,7 +139,12 @@ class TopUpFragment : Fragment() {
                     b.etTopupAmount.text?.clear()
                     b.etTopupPhone.text?.clear()
                     loadCards()
-                } else err(true, r.errorBody()?.string() ?: "Erreur")
+                } else {
+                    // WAVE-3 : /cardholder/topup repond 410 FEATURE_DISABLED tant que la
+                    // creation de monnaie n'est pas adossee a un mouvement reel.
+                    if (ApiErrors.isFeatureDisabled(r)) b.btnTopup.isEnabled = false
+                    err(true, ApiErrors.message(r))
+                }
             } catch (e: Exception) { err(true, "Erreur réseau") }
             finally { if (_b != null) b.progressTopup.visibility = View.GONE }
         }
@@ -175,7 +181,10 @@ class TopUpFragment : Fragment() {
                     b.etUnloadPhone.text?.clear()
                     b.etUnloadPin.text?.clear()
                     loadCards()
-                } else err(false, r.errorBody()?.string() ?: "Erreur")
+                } else {
+                    if (ApiErrors.isFeatureDisabled(r)) b.btnUnload.isEnabled = false
+                    err(false, ApiErrors.message(r))
+                }
             } catch (e: Exception) { err(false, "Erreur réseau") }
             finally { if (_b != null) b.progressUnload.visibility = View.GONE }
         }

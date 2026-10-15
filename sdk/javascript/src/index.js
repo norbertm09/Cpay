@@ -1,25 +1,36 @@
 'use strict';
 
 /**
- * CPlus SDK — JavaScript/Node.js
- * @version 1.0.0
- * @author Calculus Plus <dev@c-pay.global>
+ * C-Pay SDK — JavaScript/Node.js
+ * @version 1.1.0
+ * @author Calculus Plus SAS <dev@c-pay.global>
  * @link https://c-pay.global/developers
+ *
+ * Compatibilite : les anciens noms `CPlusClient` / `CPlusError` restent
+ * exportes comme alias de `CPayClient` / `CPayError`.
  */
 
-const https = require('https');
-const http  = require('http');
+const https  = require('https');
+const http   = require('http');
+const crypto = require('crypto');
 
-class CPlusError extends Error {
+const SDK_VERSION = '1.1.0';
+const DEFAULT_BASE_URL = 'https://api.c-pay.global/api/v1';
+
+// En-tetes de signature des webhooks, par ordre de preference. Le backend
+// envoie les deux pendant la periode de transition.
+const SIGNATURE_HEADERS = ['x-cpay-signature', 'x-cplus-signature'];
+
+class CPayError extends Error {
   constructor(message, code, statusCode) {
     super(message);
-    this.name    = 'CPlusError';
+    this.name    = 'CPayError';
     this.code    = code;
     this.statusCode = statusCode;
   }
 }
 
-class CPlusClient {
+class CPayClient {
   /**
    * @param {Object} options
    * @param {string} options.apiKey        - Clé API (sk_live_xxx ou sk_test_xxx)
@@ -28,13 +39,13 @@ class CPlusClient {
    * @param {string} [options.currency]    - Devise par défaut (défaut: XAF)
    */
   constructor(options = {}) {
-    if (!options.apiKey) throw new CPlusError('apiKey est requis', 'MISSING_API_KEY');
+    if (!options.apiKey) throw new CPayError('apiKey est requis', 'MISSING_API_KEY');
     this.apiKey   = options.apiKey;
-    this.baseUrl  = options.baseUrl  || 'https://api.c-pay.global/api/v1';
+    this.baseUrl  = options.baseUrl  || DEFAULT_BASE_URL;
     this.timeout  = options.timeout  || 30000;
     this.currency = options.currency || 'XAF';
     this.sandbox  = options.apiKey.startsWith('sk_test_');
-    if (this.sandbox) console.warn('[CPlus SDK] Mode SANDBOX actif — les transactions ne sont pas réelles.');
+    if (this.sandbox) console.warn('[C-Pay SDK] Mode SANDBOX actif — les transactions ne sont pas réelles.');
   }
 
   /**
@@ -56,7 +67,7 @@ class CPlusClient {
           'X-API-Key':    this.apiKey,
           'Content-Type': 'application/json',
           'Accept':       'application/json',
-          'User-Agent':   'cplus-sdk-js/1.0.0',
+          'User-Agent':   `cpay-sdk-js/${SDK_VERSION}`,
         },
         timeout: this.timeout,
       };
@@ -69,17 +80,17 @@ class CPlusClient {
           try {
             const json = JSON.parse(data);
             if (res.statusCode >= 400) {
-              reject(new CPlusError(json.error || 'Erreur API', json.code || 'API_ERROR', res.statusCode));
+              reject(new CPayError(json.error || 'Erreur API', json.code || 'API_ERROR', res.statusCode));
             } else {
               resolve(json);
             }
           } catch {
-            reject(new CPlusError('Réponse invalide du serveur', 'INVALID_RESPONSE', res.statusCode));
+            reject(new CPayError('Réponse invalide du serveur', 'INVALID_RESPONSE', res.statusCode));
           }
         });
       });
-      req.on('error', (e) => reject(new CPlusError(e.message, 'NETWORK_ERROR')));
-      req.on('timeout', ()  => { req.destroy(); reject(new CPlusError('Timeout', 'TIMEOUT')); });
+      req.on('error', (e) => reject(new CPayError(e.message, 'NETWORK_ERROR')));
+      req.on('timeout', ()  => { req.destroy(); reject(new CPayError('Timeout', 'TIMEOUT')); });
       if (payload) req.write(payload);
       req.end();
     });
@@ -99,7 +110,7 @@ class CPlusClient {
    * @returns {Promise<{txnId, status, reference}>}
    *
    * @example
-   * const txn = await cplus.collection.momo({
+   * const txn = await cpay.collection.momo({
    *   amount: 5000,
    *   customerPhone: '+242060000001',
    *   method: 'airtel_money',
@@ -113,9 +124,9 @@ class CPlusClient {
        * Encaissement Mobile Money (Airtel Money ou MTN MoMo)
        */
       async momo({ amount, customerPhone, method, description, reference, currency }) {
-        if (!amount || amount < 100) throw new CPlusError('Montant minimum 100 XAF', 'INVALID_AMOUNT');
-        if (!customerPhone)          throw new CPlusError('customerPhone requis', 'MISSING_PHONE');
-        if (!['airtel_money','mtn_momo'].includes(method)) throw new CPlusError('method doit être airtel_money ou mtn_momo', 'INVALID_METHOD');
+        if (!amount || amount < 100) throw new CPayError('Montant minimum 100 XAF', 'INVALID_AMOUNT');
+        if (!customerPhone)          throw new CPayError('customerPhone requis', 'MISSING_PHONE');
+        if (!['airtel_money','mtn_momo'].includes(method)) throw new CPayError('method doit être airtel_money ou mtn_momo', 'INVALID_METHOD');
         return self._request('POST', '/merchant/public/collect', {
           amount, currency: currency || self.currency,
           customerPhone, method, description, reference
@@ -126,7 +137,7 @@ class CPlusClient {
        * Créer un lien de paiement par carte
        */
       async payLink({ amount, description, psp = 'cybersource', currency, recipientPhone }) {
-        if (!amount || amount < 100) throw new CPlusError('Montant minimum 100 XAF', 'INVALID_AMOUNT');
+        if (!amount || amount < 100) throw new CPayError('Montant minimum 100 XAF', 'INVALID_AMOUNT');
         return self._request('POST', '/merchant/public/pay-links', {
           amount, currency: currency || self.currency,
           description, psp, paymentMethod: 'card', recipientPhone
@@ -137,7 +148,7 @@ class CPlusClient {
        * Encaissement Sans Contact (NFC)
        */
       async contactless({ amount, description, reference, currency }) {
-        if (!amount || amount < 100) throw new CPlusError('Montant minimum 100 XAF', 'INVALID_AMOUNT');
+        if (!amount || amount < 100) throw new CPayError('Montant minimum 100 XAF', 'INVALID_AMOUNT');
         return self._request('POST', '/merchant/collect/contactless', {
           amount, currency: currency || self.currency, description, reference
         });
@@ -157,7 +168,7 @@ class CPlusClient {
    * @param {string} [params.reference]
    *
    * @example
-   * const disb = await cplus.disbursement.momo({
+   * const disb = await cpay.disbursement.momo({
    *   amount: 10000,
    *   recipientPhone: '+242060000001',
    *   operator: 'mtn_momo'
@@ -167,9 +178,9 @@ class CPlusClient {
     const self = this;
     return {
       async momo({ amount, recipientPhone, operator, description, reference, currency }) {
-        if (!amount || amount < 500) throw new CPlusError('Montant minimum 500 XAF', 'INVALID_AMOUNT');
-        if (!recipientPhone)          throw new CPlusError('recipientPhone requis', 'MISSING_PHONE');
-        if (!['airtel_money','mtn_momo'].includes(operator)) throw new CPlusError('operator invalide', 'INVALID_OPERATOR');
+        if (!amount || amount < 500) throw new CPayError('Montant minimum 500 XAF', 'INVALID_AMOUNT');
+        if (!recipientPhone)          throw new CPayError('recipientPhone requis', 'MISSING_PHONE');
+        if (!['airtel_money','mtn_momo'].includes(operator)) throw new CPayError('operator invalide', 'INVALID_OPERATOR');
         return self._request('POST', '/merchant/disburse', {
           amount, currency: currency || self.currency,
           recipientPhone, operator, description, reference
@@ -202,7 +213,7 @@ class CPlusClient {
        * Obtenir une transaction par ID
        */
       async get(txnId) {
-        if (!txnId) throw new CPlusError('txnId requis', 'MISSING_TXN_ID');
+        if (!txnId) throw new CPayError('txnId requis', 'MISSING_TXN_ID');
         return self._request('GET', `/merchant/transactions/${txnId}`);
       }
     };
@@ -228,31 +239,54 @@ class CPlusClient {
   // ─── WEBHOOKS ─────────────────────────────────────────────────
 
   /**
-   * Vérifier la signature d'un webhook CPlus
-   * @param {string} payload         - Corps de la requête (JSON string)
-   * @param {string} signature       - Header X-CPlus-Signature
-   * @param {string} webhookSecret   - Votre secret webhook
+   * Extraire la signature d'un webhook depuis les en-têtes de la requête.
+   * `X-CPay-Signature` est lu en premier, puis `X-CPlus-Signature` (ancien
+   * nom, encore envoyé pendant la transition).
+   * @param {Object} headers  - req.headers (Node/Express), clés insensibles à la casse
+   * @returns {string|null}
+   */
+  static signatureFromHeaders(headers) {
+    if (!headers || typeof headers !== 'object') return null;
+    const lower = {};
+    for (const k of Object.keys(headers)) lower[k.toLowerCase()] = headers[k];
+    for (const name of SIGNATURE_HEADERS) {
+      const v = lower[name];
+      if (v) return Array.isArray(v) ? v[0] : String(v);
+    }
+    return null;
+  }
+
+  /**
+   * Vérifier la signature d'un webhook C-Pay (HMAC-SHA256, comparaison à
+   * temps constant).
+   * @param {string|Object} payload   - Corps brut de la requête (JSON string de préférence)
+   * @param {string|Object} signature - Valeur de l'en-tête X-CPay-Signature, ou l'objet
+   *                                    req.headers (la bonne clé est alors choisie)
+   * @param {string} webhookSecret    - Votre secret webhook
    * @returns {boolean}
    *
    * @example
-   * app.post('/webhook', (req, res) => {
-   *   const valid = CPlusClient.verifyWebhook(
-   *     JSON.stringify(req.body),
-   *     req.headers['x-cplus-signature'],
-   *     process.env.CPLUS_WEBHOOK_SECRET
-   *   );
+   * app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+   *   const valid = CPayClient.verifyWebhook(req.body, req.headers, process.env.CPAY_WEBHOOK_SECRET);
    *   if (!valid) return res.status(401).end();
    *   // Traiter le paiement...
    * });
    */
   static verifyWebhook(payload, signature, webhookSecret) {
-    const crypto = require('crypto');
-    const expected = 'sha256=' + crypto
-      .createHmac('sha256', webhookSecret)
-      .update(typeof payload === 'string' ? payload : JSON.stringify(payload))
-      .digest('hex');
-    return signature === expected;
+    if (!webhookSecret) return false;
+    const sig = (signature && typeof signature === 'object') ? CPayClient.signatureFromHeaders(signature) : signature;
+    if (!sig || typeof sig !== 'string') return false;
+    const raw = Buffer.isBuffer(payload) ? payload
+      : (typeof payload === 'string' ? payload : JSON.stringify(payload));
+    const expected = 'sha256=' + crypto.createHmac('sha256', webhookSecret).update(raw).digest('hex');
+    const a = Buffer.from(expected), b = Buffer.from(sig);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
 }
 
-module.exports = { CPlusClient, CPlusError };
+module.exports = {
+  CPayClient, CPayError,
+  // Alias de compatibilite (SDK 1.0.x)
+  CPlusClient: CPayClient, CPlusError: CPayError,
+  SIGNATURE_HEADERS,
+};

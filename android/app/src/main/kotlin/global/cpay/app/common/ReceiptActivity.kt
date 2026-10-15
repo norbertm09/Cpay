@@ -62,7 +62,7 @@ class ReceiptActivity : AppCompatActivity() {
             val html = buildReceiptHtml(amount, ref, type, methodLabel, phone, statusLabel, fee, date)
             val adapter = android.webkit.WebView(this).let { wv ->
                 wv.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
-                pm.print("Recu_CPlus_$ref", wv.createPrintDocumentAdapter("recu"), PrintAttributes.Builder().build())
+                pm.print("Recu_CPay_$ref", wv.createPrintDocumentAdapter("recu"), PrintAttributes.Builder().build())
             }
         }
 
@@ -70,14 +70,14 @@ class ReceiptActivity : AppCompatActivity() {
         binding.btnSms.setOnClickListener {
             if (phone.length >= 8) {
                 try {
-                    val msg = "CPlus - ${type.uppercase()} ${fmt.format(amount)} XAF\nRef: $ref\nStatut: $statusLabel\nMerci!"
+                    val msg = "C-Pay - ${type.uppercase()} ${fmt.format(amount)} XAF\nRef: $ref\nStatut: $statusLabel\nMerci!"
                     SmsManager.getDefault().sendTextMessage(phone, null, msg, null, null)
                     Toast.makeText(this, "SMS envoyé à $phone ✅", Toast.LENGTH_SHORT).show()
                 } catch(e: Exception) {
                     // Ouvrir l'app SMS
                     val intent = Intent(Intent.ACTION_SENDTO).apply {
                         data = android.net.Uri.parse("smsto:$phone")
-                        putExtra("sms_body", "CPlus - ${type.uppercase()} ${fmt.format(amount)} XAF\nRef: $ref")
+                        putExtra("sms_body", "C-Pay - ${type.uppercase()} ${fmt.format(amount)} XAF\nRef: $ref")
                     }
                     startActivity(intent)
                 }
@@ -89,7 +89,7 @@ class ReceiptActivity : AppCompatActivity() {
         // Partager
         binding.btnShare.setOnClickListener {
             val text = """
-CPlus — Reçu de transaction
+C-Pay — Reçu de transaction
 ----------------------------
 Type    : ${type.uppercase()}
 Montant : ${fmt.format(amount)} XAF

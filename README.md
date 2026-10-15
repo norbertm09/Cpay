@@ -200,7 +200,7 @@ android/
 
 ## Application mobile Android/iOS
 
-Une application cross-platform est disponible dans `mobile/cplus-mobile`.
+Une application cross-platform est disponible dans `mobile/cpay-mobile`.
 
 Fonctions principales:
 - Connexion marchand et administrateur.
@@ -212,7 +212,7 @@ Fonctions principales:
 - Rails Visa: Visa Direct push/pull funds et Visa Account/Wallet payouts.
 
 ```bash
-cd mobile/cplus-mobile
+cd mobile/cpay-mobile
 npm install
 npm run start
 ```

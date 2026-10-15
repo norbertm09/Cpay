@@ -1,5 +1,12 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-wave-3 (2026-10-15) — apps mobiles, reliquats, logo HD
+Voir `docs/WAVE-3.md` : apps Android et Expo alignees sur l'authentification unifiee (refresh 15 min, 2FA,
+mot de passe force, fonctions desactivees explicites, marque C-Pay 2.7.0), reset de mot de passe admin,
+desassignation CRM, en-tetes de webhook `X-CPay-*` (+ legacy), reconciliation des transactions en attente
+pour tous les operateurs, portails sur `/auth/me` avec refresh partout et QR locaux, SDK JS/PHP/Android et
+plugin WooCommerce en marque C-Pay avec compatibilite, logo Calculus Plus HD partout, 475 tests.
+
 ## 2.6.0-wave-2 (2026-10-15) — refonte produit « C-Pay par Calculus Plus »
 Voir `docs/WAVE-2.md` : webhooks Mobile Money reels (Orange, Wave, Africell, Express Union, Free Money, Moov),
 moteur de detection reecrit, secrets providers chiffres au repos, authentification unifiee (JWT 15 min,
@@ -50,7 +57,7 @@ Version cible: CPlus 2.6.0
 - Ajout de `SecureStorage.updateTokens`.
 - Rendu QR Code reel avec ZXing.
 - Partage Pay Link natif: WhatsApp, SMS et copie du lien.
-- Ajout d'une application mobile cross-platform Android/iOS sous `mobile/cplus-mobile`.
+- Ajout d'une application mobile cross-platform Android/iOS sous `mobile/cpay-mobile`.
 - App mobile: marchand, admin, collect, payout, QR, Pay Link, transactions, règlements, APIs, marchands, monitoring et rails Visa.
 
 ## Portail admin

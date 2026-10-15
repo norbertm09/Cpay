@@ -94,7 +94,7 @@ router.post('/topup', cardAuth, async (req, res) => {
     const mtnResult = await mtn.requestToPay({
       amount,
       phone,
-      description: `CPlus Top-up ${amount} XAF`,
+      description: `C-Pay Top-up ${amount} XAF`,
       externalId,
     });
 
@@ -195,7 +195,7 @@ router.post('/payout', cardAuth, async (req, res) => {
       const mtnResult = await mtn.transfer({
         amount,
         phone,
-        description: `CPlus Payout ${amount} XAF`,
+        description: `C-Pay Payout ${amount} XAF`,
         externalId,
       });
 

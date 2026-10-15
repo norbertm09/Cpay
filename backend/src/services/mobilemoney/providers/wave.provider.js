@@ -52,7 +52,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
       receive_amount:  String(amount),
       mobile:          phone.replace('+', ''),
       client_reference: txnId,
-      description:     'CPlus 2.6.0 retrait',
+      description:     'C-Pay retrait',
     },
     { 'Authorization': `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' }
   );
@@ -72,4 +72,31 @@ const req = (method, base, path, body, headers) => new Promise((resolve, reject)
   if (p) r.write(p); r.end();
 });
 
-module.exports = { collectPayment, sendPayout };
+// ─── Statut réel (WAVE-3) ─────────────────────────────────────────
+// Encaissement : GET /v1/checkout/sessions/{id} (id = session stockée dans gateway_payment_id).
+//   payment_status succeeded → SUCCESSFUL ; cancelled / checkout_status expired → FAILED ; sinon PENDING.
+// Versement (B2C) : pas d'endpoint de statut confirmé avec Wave → { available:false } (reste pending).
+const getStatus = async ({ gatewayRef, config, product = 'collection' }) => {
+  if (!config || !config.apiKey) throw new Error('Wave API key not configured');
+  if (product !== 'collection' || !gatewayRef) return { available: false };
+  const r = await req('GET', config.baseUrl || 'https://api.wave.com', `/v1/checkout/sessions/${encodeURIComponent(gatewayRef)}`,
+    null, { 'Authorization': `Bearer ${config.apiKey}` });
+  if (r.status >= 400 || !r.body || !r.body.id) {
+    const err = new Error(`wave status query failed: HTTP ${r.status}`);
+    err.statusCode = r.status;
+    throw err;
+  }
+  const ps = String(r.body.payment_status || '').toLowerCase();
+  const cs = String(r.body.checkout_status || '').toLowerCase();
+  const status = ps === 'succeeded' ? 'SUCCESSFUL' : (ps === 'cancelled' || cs === 'expired') ? 'FAILED' : 'PENDING';
+  return {
+    available: true,
+    status,
+    amount:   r.body.amount != null ? Number(r.body.amount) : null,
+    currency: r.body.currency || null,
+    gatewayRef: r.body.transaction_id || r.body.id,
+    reason:   status === 'FAILED' ? (ps === 'cancelled' ? 'Paiement Wave annulé' : 'Session Wave expirée') : null,
+  };
+};
+
+module.exports = { collectPayment, sendPayout, getStatus };

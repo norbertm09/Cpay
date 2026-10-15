@@ -71,10 +71,14 @@ class MerchProfileFragment : Fragment() {
 
 
         binding.btnLogout.setOnClickListener {
-            SessionManager.clearSession()
-            val intent = Intent(requireContext(), ProfileSelectActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            startActivity(intent)
+            binding.btnLogout.isEnabled = false
+            viewLifecycleOwner.lifecycleScope.launch {
+                // POST /merchant/auth/logout { refreshToken } + effacement local
+                try { ApiClient.logout() } catch (e: Exception) { SessionManager.clearSession() }
+                val intent = Intent(requireContext(), ProfileSelectActivity::class.java)
+                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                startActivity(intent)
+            }
         }
     }
 

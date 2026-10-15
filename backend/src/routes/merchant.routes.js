@@ -1005,7 +1005,7 @@ router.post('/transfer/payout', merchantAuth, idempotency, async (req, res) => {
       const d = await mtn.transfer({
         amount: net,
         phone: walletPhone,
-        description: description || 'Retrait CPlus',
+        description: description || 'Retrait C-Pay',
         externalId: ref,
       });
 
@@ -1390,7 +1390,7 @@ router.post('/pay-links/:id/send', merchantAuth, smsLimiter, async (req, res) =>
       await sendWhatsAppText({ to: phone, text });
     } else {
       const { notifyMultiChannel } = require('../services/notifications/smpp.service');
-      await notifyMultiChannel({ phone, email: req.body.email || null, text, subject: 'CPlus — lien de paiement' });
+      await notifyMultiChannel({ phone, email: req.body.email || null, text, subject: 'C-Pay — lien de paiement' });
     }
     await query(`UPDATE pay_links SET recipient_phone=$1, send_channel=$2, sent_at=NOW() WHERE pay_link_id=$3`, [phone, channel, link.pay_link_id]);
     res.json({ success: true, message: `Lien envoyé via ${channel}` });
@@ -1577,7 +1577,7 @@ router.post('/collect', merchantAuth, idempotency, async (req, res) => {
       const rtp = await mtn.requestToPay({
         amount: amt,
         phone,
-        description: description || 'Paiement CPlus',
+        description: description || 'Paiement C-Pay',
         externalId: ref,
       });
 
@@ -1820,7 +1820,7 @@ router.post('/disburse', merchantAuth, idempotency, async (req, res) => {
       const d = await mtn.transfer({
         amount: amt,
         phone,
-        description: description || 'Paiement CPlus',
+        description: description || 'Paiement C-Pay',
         externalId: ref,
       });
 
@@ -1976,7 +1976,7 @@ router.post('/receipts/sms', merchantAuth, smsLimiter, async (req, res) => {
   const phone = toE164(req.body.phone);
   if (!phone) return res.status(422).json({ error: 'phone invalide (format E.164 attendu, ex: +242061234567)', code: 'INVALID_PHONE' });
   try {
-    const text = `CPlus - ${(type||'Transaction').toUpperCase()}\nMontant: ${amount} XAF\nRef: ${reference||txnId}\nMerci de votre confiance.\nc-pay.global`;
+    const text = `C-Pay - ${(type||'Transaction').toUpperCase()}\nMontant: ${amount} XAF\nRef: ${reference||txnId}\nMerci de votre confiance.\nc-pay.global`;
     try {
       const { sendSmsSmpp } = require('../services/notifications/smpp.service');
       await sendSmsSmpp({ to: phone, text });
@@ -2307,11 +2307,10 @@ router.post('/webhook-config/test', merchantAuth, async (req, res) => {
       status: 'authorized', method: 'test',
       timestamp: new Date().toISOString()
     });
-    const signature = 'sha256=' + crypto.createHmac('sha256', webhook_secret).update(payload).digest('hex');
-
+    // WAVE-3 : signature + en-têtes partagés (X-CPay-* et X-CPlus-* de transition)
     const resp = await integrations.fetchWithTimeout(safeUrl, {
       method: 'POST',
-      headers: { 'Content-Type':'application/json', 'X-CPlus-Signature':signature, 'X-CPlus-Event':'webhook.test' },
+      headers: require('../services/webhooks/outgoing').buildHeaders({ secret: webhook_secret, rawBody: payload, event: 'webhook.test' }),
       body: payload,
     });
 

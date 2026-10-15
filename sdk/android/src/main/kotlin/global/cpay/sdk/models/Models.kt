@@ -1,7 +1,7 @@
 package global.cpay.sdk.models
 
 /**
- * Configuration du SDK CPlus
+ * Configuration du SDK C-Pay
  */
 data class CPlusConfig(
     val apiKey:     String,
@@ -47,7 +47,7 @@ data class CPlusPaymentRequest(
 )
 
 /**
- * Transaction CPlus
+ * Transaction C-Pay
  */
 data class CPlusTransaction(
     val txnId:      String,
@@ -63,7 +63,7 @@ data class CPlusTransaction(
 )
 
 /**
- * Erreur CPlus
+ * Erreur C-Pay
  */
 data class CPlusError(
     val code:    String,

@@ -28,7 +28,6 @@ const express = require('express');
 const crypto  = require('crypto');
 const { query } = require('../config/database');
 const logger  = require('../config/logger');
-const settlementQueue = require('../services/settlement/settlement.queue');
 const mmRouter = require('../services/mobilemoney/mobilemoney.router');
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -80,19 +79,9 @@ const recordWebhookEvent = async ({ provider, referenceId, status, outcome, payl
   } catch (_) { /* jamais bloquant */ }
 };
 
-const recordTransactionEvent = async ({ transactionId, merchantId, eventType, payload }) => {
-  try {
-    await query(
-      `INSERT INTO transaction_events (transaction_id, merchant_id, event_type, payload)
-       VALUES ($1,$2,$3,$4)`,
-      [transactionId, merchantId || null, eventType, JSON.stringify(payload || {})]
-    );
-  } catch (err) {
-    logger.warn('transaction_events insert failed', { transactionId, eventType, err: err.message });
-  }
-};
-
-const SETTLEABLE_TYPES = new Set(['collect', 'qr_payment', 'pay_link']);
+// WAVE-3 : finalisation (claim atomique, règlement, pay_links, transaction_events) partagée
+// avec la réconciliation — services/mobilemoney/finalize.service.js
+const { finalizeTransaction } = require('../services/mobilemoney/finalize.service');
 
 /** Clés de gateway candidates pour charger la config d'un provider (webhookSecret / webhookToken / statusPath). */
 const GATEWAY_KEYS = {
@@ -370,46 +359,14 @@ const processWebhook = async (provider, req, res, { viaSecretPath = false, pathT
     return res.status(202).json({ received: true, status: 'pending' });
   }
 
-  // 5. Claim atomique
-  const message = outcome === 'authorized' ? `Paiement confirmé (${provider})` : (reason || `Paiement refusé (${provider})`);
-  const upd = await query(
-    `UPDATE transactions
-        SET status = $1, auth_code = COALESCE($2, auth_code),
-            gateway_order_id = COALESCE($3, gateway_order_id),
-            response_code = CASE WHEN $1 = 'authorized' THEN '00' ELSE COALESCE(response_code, '05') END,
-            response_message = $4,
-            completed_at = NOW()
-      WHERE transaction_id = $5 AND status = 'pending'
-      RETURNING transaction_id`,
-    [outcome, authCode ? String(authCode).slice(0, 64) : null, info.gatewayRef ? String(info.gatewayRef).slice(0, 128) : null,
-     String(message).slice(0, 500), txn.transaction_id]
-  );
-  if (!upd.rowCount) {
+  // 5-6. Finalisation partagée : claim atomique status='pending', règlement, pay_link, transaction_events
+  const fin = await finalizeTransaction({
+    txn, provider, outcome, authCode, gatewayRef: info.gatewayRef, reason, source: 'webhook',
+    eventPayload: { providerStatus: providerStatus?.status || body.status || null, raw: body },
+  });
+  if (!fin.applied) {
     await recordWebhookEvent({ provider, referenceId: info.ref || info.gatewayRef, status: body.status, outcome: 'replay_ignored', payload: body, ip: req.ip });
     return res.status(200).json({ received: true, outcome: 'already_processed' });
-  }
-
-  await recordTransactionEvent({
-    transactionId: txn.transaction_id, merchantId: txn.merchant_id,
-    eventType: `${provider.toUpperCase()}_CALLBACK`,
-    payload: { outcome, authCode: authCode || null, gatewayRef: info.gatewayRef || null, providerStatus: providerStatus?.status || body.status || null, raw: body },
-  });
-
-  // 6. Effets de bord d'un encaissement confirmé
-  if (outcome === 'authorized') {
-    if (SETTLEABLE_TYPES.has(txn.type)) {
-      try {
-        await settlementQueue.enqueue({ txnId: txn.transaction_id, merchantId: txn.merchant_id, amount: Number(txn.amount), currency: txn.currency });
-      } catch (err) {
-        logger.error('webhook: settlement enqueue failed', { provider, txnId: txn.transaction_id, err: err.message });
-      }
-    }
-    if (txn.pay_link_id) {
-      await query(
-        `UPDATE pay_links SET status='paid', paid_at=NOW(), paid_amount=$1 WHERE pay_link_id=$2 AND status='pending'`,
-        [Number(txn.amount), txn.pay_link_id]
-      ).catch((err) => logger.warn('webhook: pay_link update failed', { payLinkId: txn.pay_link_id, err: err.message }));
-    }
   }
 
   await recordWebhookEvent({ provider, referenceId: info.ref || info.gatewayRef, status: providerStatus?.status || body.status, outcome, payload: body, ip: req.ip });

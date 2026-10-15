@@ -4,7 +4,7 @@ import android.util.Log
 
 object CPlusLogger {
     var enabled: Boolean = false
-    private const val TAG = "CPlus SDK"
+    private const val TAG = "C-Pay SDK"
 
     fun log(message: String) {
         if (enabled) Log.d(TAG, message)

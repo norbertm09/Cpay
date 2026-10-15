@@ -46,7 +46,7 @@ class QRScanActivity : AppCompatActivity() {
     }
 
     private fun handleQRResult(text: String) {
-        // Format attendu: cplus://pay?amount=5000&merchant=xxx
+        // Format attendu: cpay://pay?amount=5000&merchant=xxx
         // ou https://pay.c-pay.global/qr/xxx?amount=5000
         Toast.makeText(this, "QR scanné: $text", Toast.LENGTH_SHORT).show()
         val intent = Intent(this, PaymentConfirmActivity::class.java)

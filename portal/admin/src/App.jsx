@@ -1,12 +1,11 @@
-// C-Pay 2.6.0 — Admin Portal Enrichi
+// C-Pay 2.7.0 — Admin Portal Enrichi
 // Modules: Dashboard, Monitoring, Alerts, Fraud, Merchants, Transactions, Users, APIs, Audit
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { authApi, apiConfigsApi, merchantsApi, monitorApi, terminalsApi, auditApi } from './services/api';
-import axios from 'axios';
+import api, { authApi, apiConfigsApi, merchantsApi, monitorApi, terminalsApi, auditApi, getToken, setToken, clearToken, onTokenChange, decodeJwt, refreshAccessToken, logoutLocal } from './services/api';
 
 
 // ─── i18n Admin ───────────────────────────────────────────────────
@@ -79,19 +78,8 @@ const useLang = () => {
 
 
 // ─── API enrichie ─────────────────────────────────────────────────
-const apiBase = process.env.REACT_APP_API_BASE_URL || '';
-const api = axios.create({ baseURL: `${apiBase}/api/v1/admin` });
-api.interceptors.request.use(cfg => {
-  const token = localStorage.getItem('admin_token');
-  if (token) cfg.headers.Authorization = `Bearer ${token}`;
-  return cfg;
-});
-api.interceptors.response.use(r => r, err => {
-  const st = err.response?.status;
-  if (st === 401) { localStorage.removeItem('admin_token'); if (window.location.pathname !== '/login') window.location.href = '/login'; }
-  else if (st === 403) { toast.error('Accès refusé'); } // droits insuffisants : pas de redirection
-  return Promise.reject(err);
-});
+// Instance unique (services/api.js) : jeton 15 min + refresh single-flight
+// sur 401 via le cookie HttpOnly cp_rt_admin.
 
 // ─── CRM / back-office assistant ──────────────────────────────────
 // Contrat : backend/src/routes/crm-admin.routes.js, monte sur /api/v1/admin/crm.
@@ -117,14 +105,95 @@ const usersApi  = { list: p => api.get('/users', { params: p }), create: d => ap
 const alertsApi = { list: p => api.get('/alerts', { params: p }), resolve: (id, d) => api.patch(`/alerts/${id}/resolve`, d) };
 
 // ─── Auth ─────────────────────────────────────────────────────────
+//
+// Le profil vient de GET /auth/me ({ admin:{adminId,email,firstName,
+// lastName,role,mfaEnabled}, mustChangePassword }). Le decodage local du
+// jeton ne sert plus que de repli reseau et a verifier l'expiration.
+const adminFromClaims = (c) => c ? ({ adminId: c.sub, email: c.email, role: c.role, _source: 'token' }) : null;
+
+const fetchAdminProfile = async (t) => {
+  try {
+    const { data } = await authApi.me();
+    return { ...data.admin, mustChangePassword: !!data.mustChangePassword, _source: 'me' };
+  } catch (err) {
+    const st = err.response?.status;
+    // 401 (apres refresh tente par l'intercepteur) / 404 : session invalide
+    if (st === 401 || st === 404) { logoutLocal(); return null; }
+    // reseau coupe ou erreur serveur : claims du jeton
+    return adminFromClaims(decodeJwt(t));
+  }
+};
+
+const AuthContext = React.createContext(null);
+
+const AuthProvider = ({ children }) => {
+  const [token, setTok] = useState(getToken());
+  const [admin, setAdmin] = useState(null);
+  const [refreshing, setRefreshing] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  useEffect(() => onTokenChange(t => setTok(t)), []);
+
+  // Jeton absent ou expire au demarrage : tentative de refresh silencieux
+  // par le cookie avant de renvoyer sur /login.
+  useEffect(() => {
+    let cancelled = false;
+    if (decodeJwt(getToken() || '')) { setRefreshing(false); return; }
+    refreshAccessToken()
+      .catch(() => { if (!cancelled) clearToken(); })
+      .finally(() => { if (!cancelled) setRefreshing(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const reloadUser = useCallback(async () => {
+    const t = getToken();
+    if (!t) { setAdmin(null); return null; }
+    setProfileLoading(true);
+    try { const p = await fetchAdminProfile(t); setAdmin(p); return p; }
+    finally { setProfileLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (!token) { setAdmin(null); return; }
+    if (admin && admin._source === 'me') return; // simple renouvellement du jeton
+    let cancelled = false;
+    setProfileLoading(true);
+    fetchAdminProfile(token)
+      .then(p => { if (!cancelled) setAdmin(p); })
+      .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const isAuth = !!token && !!decodeJwt(token);
+  const loading = refreshing || (isAuth && !admin);
+  const value = {
+    isAuth, loading, admin, user: admin, reloadUser,
+    isSuperAdmin: admin?.role === 'super_admin',
+    hasRole: (roles) => hasRole(admin, roles),
+  };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
 const useAuth = () => {
-  const token = localStorage.getItem('admin_token');
-  const admin = token ? (() => { try { const b = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(atob(b.padEnd(b.length + (4 - b.length % 4) % 4, '='))); } catch { return null; } })() : null;
-  return { isAuth: !!admin && admin.exp * 1000 > Date.now(), admin };
+  const ctx = React.useContext(AuthContext);
+  if (!ctx) {
+    const claims = decodeJwt(getToken() || '');
+    const admin = adminFromClaims(claims);
+    return { isAuth: !!claims, loading: false, admin, user: admin, isSuperAdmin: admin?.role === 'super_admin', hasRole: (roles) => hasRole(admin, roles), reloadUser: async () => null };
+  }
+  return ctx;
 };
 const useRole = () => useAuth();
 
-const Guard = ({ children }) => { const { isAuth } = useAuth(); return isAuth ? children : <Navigate to="/login" replace />; };
+const AuthSplash = () => (
+  <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f6f8fb', color: '#5a6270', fontSize: 14 }}>Chargement…</div>
+);
+
+const Guard = ({ children }) => {
+  const { isAuth, loading } = useAuth();
+  if (loading) return <AuthSplash />;
+  return isAuth ? children : <Navigate to="/login" replace />;
+};
 
 // ─── Palette ──────────────────────────────────────────────────────
 // ─── i18n simple ──────────────────────────────────────────────────
@@ -336,7 +405,8 @@ const Layout = ({ children }) => {
   const { admin } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const logout = () => { localStorage.removeItem('admin_token'); navigate('/login'); };
+  // Deconnexion reelle : revocation du refresh cote serveur + cookie efface.
+  const logout = () => { authApi.logout().catch(() => {}).finally(() => { clearToken(); navigate('/login'); }); };
 
   const sections = [
     { group: 'PRINCIPAL', items: [{ p: '/', l: '📊 Dashboard' }, { p: '/monitoring', l: '⚡ Monitoring Live' }, { p: '/alerts', l: '🔔 '+t('alerts') }] },
@@ -356,7 +426,7 @@ const Layout = ({ children }) => {
       <aside style={{ width: 230, background: C.card, borderRight: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 100 }}>
         <div style={{ padding: '14px 16px 12px', borderBottom: `1px solid ${C.border}` }}>
           
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 200, height: 'auto', display: 'block', objectFit: 'contain' }} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 200, height: 'auto', display: 'block', objectFit: 'contain' }} />
           <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textAlign: 'center' }}>C-Pay — {t('administration')}</div>
         </div>
         <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
@@ -406,7 +476,7 @@ const Login = () => {
 
   const finishLogin = (data) => {
     if (data.mfaRequired && data.mfaToken) { setMfa({ mfaToken: data.mfaToken }); return; }
-    if (data.access_token) localStorage.setItem('admin_token', data.access_token);
+    if (data.access_token) setToken(data.access_token);
     if (data.mustChangePassword) { setForcePwd(true); return; }
     navigate('/');
   };
@@ -444,7 +514,7 @@ const Login = () => {
       <div style={{ width: 380 }}>
       <Card>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <img src="/logo-calculus.svg" alt="Calculus Plus" style={{ width: 200, height: "auto", display: "block", margin: "0 auto 8px", objectFit: "contain" }} />
+          <img src="/logo-calculus.png" alt="Calculus Plus" style={{ width: 200, height: "auto", display: "block", margin: "0 auto 8px", objectFit: "contain" }} />
           <div style={{ fontSize: 13, color: C.muted }}>C-Pay — Administration</div>
         </div>
         <form onSubmit={onSubmit}>
@@ -3844,6 +3914,7 @@ const Finance = () => {
 export default function App() {
   return (
     <BrowserRouter>
+      <AuthProvider>
       <Toaster position="top-right" toastOptions={{ style: { background: C.card, color: C.text, border: `1px solid ${C.border}`, fontSize: 13 } }} />
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -3875,6 +3946,7 @@ export default function App() {
           <Route path="*"              element={<Navigate to="/" replace />} />
         </Routes></Layout></Guard>} />
       </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

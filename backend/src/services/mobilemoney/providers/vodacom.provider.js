@@ -31,7 +31,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
       input_Currency:              currency || 'CDF',
       input_ServiceProviderCode:   config.serviceCode || config.apiKey,
       input_ThirdPartyConversationID: txnId,
-      input_PurchasedItemsDesc:    description || 'CPlus 2.6.0',
+      input_PurchasedItemsDesc:    description || 'C-Pay',
     },
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json',
       'Origin':        config.origin || 'https://api.c-pay.global' }
@@ -71,7 +71,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
       input_Currency:              currency || 'CDF',
       input_ServiceProviderCode:   config.serviceCode || config.apiKey,
       input_ThirdPartyConversationID: txnId,
-      input_PaymentItemsDesc:      'CPlus 2.6.0 retrait',
+      input_PaymentItemsDesc:      'C-Pay retrait',
     },
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json',
       'Origin': config.origin || 'https://api.c-pay.global' }

@@ -91,7 +91,7 @@ router.post('/card2momo', cardAuth, async (req, res) => {
       leg2Result = await mtn.transfer({
         amount:      leg1Result.creditAmount,
         phone:       momoPhone.replace(/\D/g, ''),
-        description: `CPlus Card2MoMo ${txnId}`,
+        description: `C-Pay Card2MoMo ${txnId}`,
         externalId:  momoTxnId,
       });
     } catch (momoErr) {
@@ -173,7 +173,7 @@ router.post('/momo2card', cardAuth, async (req, res) => {
     const leg1 = await mtn.requestToPay({
       amount:      fees.debitAmount,
       phone:       momoPhone.replace(/\D/g, ''),
-      description: 'CPlus MoMo2Card',
+      description: 'C-Pay MoMo2Card',
       externalId:  momoRef,
     });
 
@@ -246,7 +246,7 @@ router.post('/momo2momo', cardAuth, async (req, res) => {
     const leg1 = await mtn.requestToPay({
       amount:      fees.debitAmount,
       phone:       srcPhone.replace(/\D/g, ''),
-      description: `CPlus MoMo2MoMo -> ${dstPhone}`,
+      description: `C-Pay MoMo2MoMo -> ${dstPhone}`,
       externalId:  leg1Ref,
     });
 
