@@ -80,7 +80,7 @@ export default function AppShell({ children }) {
         </nav>
         <div className="sidebar-foot">
           <Button variant="ghost" size="sm" icon={collapsed ? 'chevronRight' : 'chevronLeft'} onClick={toggleCollapsed} aria-label={collapsed ? 'Déplier le menu' : 'Replier le menu'} />
-          <span className="sidebar-version">v{process.env.REACT_APP_VERSION || '3.0'} · {health?.status === 'ok' ? 'API opérationnelle' : health?.status === 'degraded' ? 'API dégradée' : 'API injoignable'}</span>
+          <span className="sidebar-version">v{process.env.REACT_APP_VERSION || require('../../package.json').version} · {health?.status === 'ok' ? 'API opérationnelle' : health?.status === 'degraded' ? 'API dégradée' : 'API injoignable'}</span>
         </div>
       </aside>
 
