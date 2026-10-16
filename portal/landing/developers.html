@@ -88,6 +88,7 @@
 
         <section class="docsec" id="demarrage" aria-labelledby="demarrage-title">
           <h2 id="demarrage-title">Démarrage rapide</h2>
+          <p class="note">Périmètre de lancement : les six pays de la CEMAC et la RD Congo. Moyens prévus : cartes bancaires, opérateurs de monnaie mobile et GIMAC. Les fonctions sont disponibles selon le pays et le service activés ; la connexion GIMAC est en cours d’intégration. La détection d’un numéro ne garantit pas la disponibilité d’un paiement.</p>
           <p>Trois étapes séparent votre compte de votre premier lien de paiement. Un compte de niveau 0 suffit pour intégrer ; la vérification KYB n'est nécessaire que pour relever vos limites.</p>
           <ol class="steps steps--compact">
             <li class="step"><h3>Créez un compte marchand</h3><p>Sur <a href="https://merchant.c-pay.global/register">merchant.c-pay.global/register</a>. Le portail marchand est aussi l'endroit où vous suivez les paiements reçus par l'API.</p></li>
@@ -101,12 +102,12 @@ curl https://api.c-pay.global/api/v1/merchant/public/transactions?limit=1 \
   -H "X-API-Key: $CPAY_API_KEY" \
   -H "X-API-Secret: $CPAY_API_SECRET"
 
-# 2. Créer un lien de paiement de 25 000 XOF valable 48 h
+# 2. Créer un lien de paiement de 25 000 XAF valable 48 h
 curl -X POST https://api.c-pay.global/api/v1/merchant/public/pay-links \
   -H "X-API-Key: $CPAY_API_KEY" \
   -H "X-API-Secret: $CPAY_API_SECRET" \
   -H "Content-Type: application/json" \
-  -d '{ "amount": 25000, "currency": "XOF", "description": "Facture INV-001", "expiresIn": 48 }'
+  -d '{ "amount": 25000, "currency": "XAF", "description": "Facture INV-001", "expiresIn": 48 }'
 # → 201 { "short_url": "https://pay.c-pay.global/AB12CD", "expires_at": "…", … }
 #   Envoyez short_url à votre client (SMS, WhatsApp, e-mail) ou affichez-le en QR.
 
@@ -135,7 +136,7 @@ curl "https://api.c-pay.global/api/v1/merchant/public/transactions?status=author
           </div>
           <dl class="kv">
             <dt>Base URL</dt><dd><code>https://api.c-pay.global/api/v1</code></dd>
-            <dt>Montants</dt><dd>Entiers en unité de la devise : XOF, XAF et CDF n'ont pas de décimales. Aucune conversion de change : la devise du client doit être celle du marchand.</dd>
+            <dt>Montants</dt><dd>Les exemples du lancement utilisent des montants entiers en XAF ou en CDF. Aucune conversion de change : la devise du client doit être celle du marchand.</dd>
             <dt>Erreurs</dt><dd>Corps <code>{ "error": "message lisible", "code": "CODE_STABLE", "details?": … }</code>. Codez sur <code>code</code>, pas sur <code>error</code>. Liste dans <a href="#erreurs">Codes d'erreur</a>.</dd>
             <dt>Permissions</dt><dd>Chaque clé porte ses permissions (<code>pay_links</code>, <code>transactions</code>, <code>collect</code>, <code>disburse</code>). Permission manquante : <code>403</code>.</dd>
             <dt>Limites de débit</dt><dd>Les points d'entrée publics sont limités en débit ; <code>429</code> avec les en-têtes <code>RateLimit-*</code> standard. <code>POST /detect/phone</code> : 30 requêtes par minute et par adresse.</dd>
@@ -156,7 +157,7 @@ curl "https://api.c-pay.global/api/v1/merchant/public/transactions?status=author
                 <thead><tr><th scope="col">Champ</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
                 <tbody>
                   <tr><td><code>amount</code></td><td>nombre, requis</td><td>Montant strictement positif en unité de la devise.</td></tr>
-                  <tr><td><code>currency</code></td><td>chaîne</td><td><code>XOF</code>, <code>XAF</code> ou <code>CDF</code>. Défaut <code>XAF</code>.</td></tr>
+                  <tr><td><code>currency</code></td><td>chaîne</td><td><code>XAF</code> ou <code>CDF</code>. Défaut <code>XAF</code>.</td></tr>
                   <tr><td><code>description</code></td><td>chaîne</td><td>Libellé affiché au client sur la page de paiement.</td></tr>
                   <tr><td><code>expiresIn</code></td><td>nombre</td><td>Durée de validité en heures, de 1 à 720. Défaut 24. Hors plage : <code>422 INVALID_EXPIRES_IN</code>.</td></tr>
                 </tbody>
@@ -175,7 +176,7 @@ curl "https://api.c-pay.global/api/v1/merchant/public/transactions?status=author
   -H "X-API-Secret: $CPAY_API_SECRET" \
   -H "Idempotency-Key: 0b4e8d2a-11aa-4f4b-8c3e-9d2f1e0a5b6c" \
   -H "Content-Type: application/json" \
-  -d '{ "amount": 25000, "currency": "XOF", "description": "Facture INV-001", "expiresIn": 48 }'</code></pre>
+  -d '{ "amount": 25000, "currency": "XAF", "description": "Facture INV-001", "expiresIn": 48 }'</code></pre>
               </div>
               <div class="tab-panel" id="p-pl-node" role="tabpanel" aria-labelledby="t-pl-node" hidden>
 <pre><code>// Node.js 18+ — côté serveur uniquement
@@ -187,7 +188,7 @@ const res = await fetch('https://api.c-pay.global/api/v1/merchant/public/pay-lin
     'Idempotency-Key': crypto.randomUUID(),
     'Content-Type': 'application/json'
   },
-  body: JSON.stringify({ amount: 25000, currency: 'XOF', description: 'Facture INV-001', expiresIn: 48 })
+  body: JSON.stringify({ amount: 25000, currency: 'XAF', description: 'Facture INV-001', expiresIn: 48 })
 });
 const link = await res.json();
 if (!res.ok) throw new Error(`${link.code}: ${link.error}`);
@@ -207,7 +208,7 @@ curl_setopt_array($ch, [
         'Content-Type: application/json',
     ],
     CURLOPT_POSTFIELDS => json_encode([
-        'amount' => 25000, 'currency' => 'XOF', 'description' => 'Facture INV-001', 'expiresIn' => 48,
+        'amount' => 25000, 'currency' => 'XAF', 'description' => 'Facture INV-001', 'expiresIn' => 48,
     ]),
 ]);
 $link = json_decode(curl_exec($ch), true);
@@ -222,7 +223,7 @@ import json, os, uuid, urllib.request
 
 req = urllib.request.Request(
     "https://api.c-pay.global/api/v1/merchant/public/pay-links",
-    data=json.dumps({"amount": 25000, "currency": "XOF", "description": "Facture INV-001", "expiresIn": 48}).encode(),
+    data=json.dumps({"amount": 25000, "currency": "XAF", "description": "Facture INV-001", "expiresIn": 48}).encode(),
     headers={
         "X-API-Key": os.environ["CPAY_API_KEY"],
         "X-API-Secret": os.environ["CPAY_API_SECRET"],
@@ -243,7 +244,7 @@ print(link["short_url"])</code></pre>
   "short_id": "AB12CD",
   "short_url": "https://pay.c-pay.global/AB12CD",
   "amount": 25000,
-  "currency": "XOF",
+  "currency": "XAF",
   "expires_at": "2026-10-18T10:00:00.000Z"
 }</code></pre>
             <p class="note">Le statut public d'un lien est lisible sans clé par le client : <code>GET https://pay.c-pay.global/&lt;short_id&gt;/status</code> → <code>{ "status": "paid|pending|failed|expired|cancelled" }</code>.</p>
@@ -321,7 +322,7 @@ print(page["total"])</code></pre>
       "transaction_id": "550e8400-e29b-41d4-a716-446655440000",
       "type": "collect",
       "amount": 25000,
-      "currency": "XOF",
+      "currency": "XAF",
       "status": "authorized",
       "payment_method": "mobile_money",
       "auth_code": "FT123456",
@@ -399,7 +400,7 @@ if d["success"]:
   "brand": "MTN Mobile Money",
   "alternatives": [ { "operator": "express_union", "brand": "Express Union" } ]
 }</code></pre>
-            <p class="note">Numéro non reconnu : <code>200</code> avec <code>success: false</code> et un <code>code</code> (<code>PHONE_INVALID</code>, <code>COUNTRY_UNSUPPORTED</code>, <code>PHONE_LENGTH</code>, <code>OPERATOR_UNKNOWN</code>, <code>OPERATOR_NO_WALLET</code>). Corps sans <code>phone</code> : <code>400 PHONE_REQUIRED</code>. <code>alternatives</code> liste les services que le client choisit lui-même (Wave, Express Union).</p>
+            <p class="note">Numéro non reconnu : <code>200</code> avec <code>success: false</code> et un <code>code</code> (<code>PHONE_INVALID</code>, <code>COUNTRY_UNSUPPORTED</code>, <code>PHONE_LENGTH</code>, <code>OPERATOR_UNKNOWN</code>, <code>OPERATOR_NO_WALLET</code>). Corps sans <code>phone</code> : <code>400 PHONE_REQUIRED</code>. <code>alternatives</code> liste les services que le client choisit lui-même (par exemple Express Union dans le périmètre actuel).</p>
           </article>
 
           <article class="endpoint-ref endpoint-ref--soon" id="ep-collect">
@@ -417,7 +418,7 @@ if d["success"]:
               <thead><tr><th scope="col">Endpoint</th><th scope="col">Rôle</th></tr></thead>
               <tbody>
                 <tr><td><span class="badge badge--get">GET</span> <code>/merchant/cash/summary</code></td><td>Solde (<code>available</code>, <code>pending</code>, <code>reserved</code>), totaux du jour, limites et profil (niveau KYB, wallet, comptes bancaires).</td></tr>
-                <tr><td><span class="badge badge--post">POST</span> <code>/merchant/cash/collect</code></td><td>Encaisser. <code>amount</code>, <code>method</code> (<code>mobile_money</code> ou <code>card</code>), <code>customerPhone</code> (requis en Mobile Money, opérateur détecté ; <code>operator</code> seulement pour forcer Wave ou Express Union), <code>currency</code>, <code>description</code>, <code>reference</code>. Mobile Money : <code>201</code> avec <code>txnId</code>, <code>status: "pending"</code>, <code>operator</code>, <code>fee</code>, <code>net</code>, <code>statusUrl</code>. Carte : <code>201</code> avec <code>payLink { shortId, shortUrl, expiresAt }</code> si une passerelle carte est configurée, sinon <code>410 FEATURE_DISABLED</code>.</td></tr>
+                <tr><td><span class="badge badge--post">POST</span> <code>/merchant/cash/collect</code></td><td>Encaisser. <code>amount</code>, <code>method</code> (<code>mobile_money</code> ou <code>card</code>), <code>customerPhone</code> (requis en Mobile Money, opérateur détecté ; <code>operator</code> seulement pour sélectionner un service alternatif activé, par exemple Express Union), <code>currency</code>, <code>description</code>, <code>reference</code>. Mobile Money : <code>201</code> avec <code>txnId</code>, <code>status: "pending"</code>, <code>operator</code>, <code>fee</code>, <code>net</code>, <code>statusUrl</code>. Carte : <code>201</code> avec <code>payLink { shortId, shortUrl, expiresAt }</code> si une passerelle carte est configurée, sinon <code>410 FEATURE_DISABLED</code>.</td></tr>
                 <tr><td><span class="badge badge--get">GET</span> <code>/merchant/cash/collect/:txnId</code></td><td>Statut d'un encaissement : <code>pending</code>, <code>authorized</code>, <code>failed</code>, <code>expired</code>, avec <code>amount</code>, <code>fee</code>, <code>net</code>, <code>receiptUrl</code> si disponible. Interrogez toutes les 3 secondes pendant 90 secondes, puis affichez « en attente de confirmation ».</td></tr>
                 <tr><td><span class="badge badge--get">GET</span> / <span class="badge badge--post">PUT</span> <code>/merchant/cash/wallet</code></td><td>Wallet Mobile Money de destination des retraits (<code>operator</code>, <code>phone</code>, <code>verifiedAt</code>). L'enregistrement exige <code>confirm</code>.</td></tr>
                 <tr><td><span class="badge badge--post">POST</span> <code>/merchant/cash/withdraw</code></td><td>Retirer vers le wallet enregistré. <code>amount</code>, <code>description</code>, <code>confirm</code>. <code>201</code> : <code>reference</code> <code>PAY-XXXXXX</code>, <code>status</code>, <code>fee</code>, <code>net</code>. Erreurs : <code>422 INSUFFICIENT_BALANCE</code>, <code>422 WALLET_MISSING</code>, <code>422 DAILY_LIMIT_EXCEEDED</code>, <code>428 STEP_UP_REQUIRED</code>, <code>410 FEATURE_DISABLED</code>.</td></tr>
@@ -474,7 +475,7 @@ X-CPlus-Signature: sha256=3f1a…c9        (transition, sera retiré)</code></pr
   "txnId": "550e8400-e29b-41d4-a716-446655440000",
   "reference": "INV-001",
   "amount": 25000,
-  "currency": "XOF",
+  "currency": "XAF",
   "status": "authorized",
   "method": "mobile_money",
   "authCode": "FT123456",
@@ -533,7 +534,7 @@ event = json.loads(raw_body)
               <pre><code>npm install @c-pay/sdk
 
 const { CPayClient } = require('@c-pay/sdk');
-const cpay = new CPayClient({ apiKey: process.env.CPAY_API_KEY, currency: 'XOF' });
+const cpay = new CPayClient({ apiKey: process.env.CPAY_API_KEY, currency: 'XAF' });
 const link = await cpay.collection.payLink({ amount: 25000, description: 'Facture INV-001' });
 console.log(link.short_url);</code></pre>
             </article>
@@ -543,7 +544,7 @@ console.log(link.short_url);</code></pre>
               <pre><code>composer require calculus-plus/cpay-sdk
 
 use CPay\CPayClient;
-$cpay = new CPayClient(getenv('CPAY_API_KEY'), ['currency' => 'XOF']);
+$cpay = new CPayClient(getenv('CPAY_API_KEY'), ['currency' => 'XAF']);
 $link = $cpay->createPayLink(25000, ['description' => 'Facture INV-001']);
 echo $link['short_url'];</code></pre>
             </article>

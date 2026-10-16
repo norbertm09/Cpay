@@ -11,13 +11,15 @@ d'encaisser et de reverser de l'argent par Mobile Money, QR code et lien de paie
 Android et un portail web. Principe : le marchand saisit un montant et le numéro du client ; C-Pay détecte
 automatiquement le pays, la devise et l'opérateur, puis route le paiement.
 
-## Pays et opérateurs (détection par numéro)
-- Sénégal (+221, XOF) : Orange Money (77/78), Free Money (76). Alternative choisie par le client : Wave.
-- Côte d'Ivoire (+225, XOF, numéros à 10 chiffres) : Orange Money (07), MTN MoMo (05), Moov Money (01). Alternative : Wave.
-- Cameroun (+237, XAF) : MTN MoMo (67, 68, 650-654), Orange Money (69, 655-659). Alternative : Express Union Mobile.
-- Congo-Brazzaville (+242, XAF) : MTN MoMo (06), Airtel Money (05).
-- RDC (+243, CDF) : Vodacom M-Pesa (81/82), Airtel Money (97-99), Orange Money (84/85/89), Africell Money (90/91).
-Les devises XOF, XAF et CDF n'ont pas de décimales. Aucune conversion de change : la devise du client doit être celle du marchand.
+## Périmètre de lancement et moyens de paiement
+- Sept pays uniquement : les six membres de la CEMAC (Cameroun, République centrafricaine, République du Congo, Gabon, Guinée équatoriale, Tchad) et la RD Congo.
+- XAF dans la CEMAC ; CDF en RD Congo. Aucun change automatique annoncé.
+- Trois familles de moyens : cartes bancaires, opérateurs de monnaie mobile et GIMAC/GIMACPAY, pour les encaissements, retraits et transferts selon les services activés.
+- Le Sénégal et la Côte d’Ivoire sont hors du périmètre de lancement actuel, même si des connecteurs historiques existent.
+- Détection actuellement implémentée dans ce périmètre : Cameroun, République du Congo, RD Congo. Gabon, Guinée équatoriale, Centrafrique et Tchad restent à intégrer techniquement.
+- La passerelle GIMAC C-Pay n’est pas encore intégrée. Ne jamais annoncer un paiement, retrait, transfert ou corridor GIMAC comme opérationnel avant activation.
+- La RD Congo n’est pas membre de la CEMAC. Ne pas lui attribuer automatiquement les services domestiques GIMAC.
+- La détection d’un numéro ne prouve ni un partenariat actif ni la disponibilité d’un service. Renvoyer au support pour la couverture réellement activée.
 
 ## Produits
 - Encaissement Mobile Money (push de paiement sur le téléphone du client, confirmation par PIN côté client).
