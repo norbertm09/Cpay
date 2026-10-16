@@ -1,89 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="match_parent"
-    android:orientation="vertical" android:background="@color/bg">
-
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:background="@color/card"
-        android:padding="16dp" android:elevation="2dp">
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="10dp">
-            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                android:text="@string/journal_title" android:textSize="20sp"
-                android:textStyle="bold" android:textColor="@color/text"/>
-            <TextView android:id="@+id/btn_refresh" android:layout_width="wrap_content"
-                android:layout_height="wrap_content" android:text="↻" android:textSize="20sp"
-                android:textColor="@color/primary" android:paddingStart="12dp" android:paddingEnd="4dp"
-                android:clickable="true" android:focusable="true"/>
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+        android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="12dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/journal_title"
+                android:textAppearance="@style/TextAppearance.CPay.Title"/>
+            <TextView android:id="@+id/tv_count" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
         </LinearLayout>
-
-        <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:scrollbars="none" android:layout_marginBottom="10dp">
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal">
-                <TextView android:id="@+id/chip_all" android:layout_width="wrap_content" android:layout_height="34dp"
-                    android:text="@string/journal_all" android:textSize="12sp" android:textStyle="bold"
-                    android:textColor="#FFFFFF" android:background="@drawable/bg_btn_primary"
-                    android:paddingStart="14dp" android:paddingEnd="14dp" android:gravity="center"
-                    android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
-                <TextView android:id="@+id/chip_collect" android:layout_width="wrap_content" android:layout_height="34dp"
-                    android:text="@string/journal_collect" android:textSize="12sp" android:textStyle="bold"
-                    android:textColor="@color/primary" android:background="@drawable/bg_btn_outline"
-                    android:paddingStart="14dp" android:paddingEnd="14dp" android:gravity="center"
-                    android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
-                <TextView android:id="@+id/chip_withdraw" android:layout_width="wrap_content" android:layout_height="34dp"
-                    android:text="@string/journal_withdraw" android:textSize="12sp" android:textStyle="bold"
-                    android:textColor="@color/primary" android:background="@drawable/bg_btn_outline"
-                    android:paddingStart="14dp" android:paddingEnd="14dp" android:gravity="center"
-                    android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
-                <TextView android:id="@+id/chip_out" android:layout_width="wrap_content" android:layout_height="34dp"
-                    android:text="@string/journal_out" android:textSize="12sp" android:textStyle="bold"
-                    android:textColor="@color/primary" android:background="@drawable/bg_btn_outline"
-                    android:paddingStart="14dp" android:paddingEnd="14dp" android:gravity="center"
-                    android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true"/>
-                <TextView android:id="@+id/chip_in" android:layout_width="wrap_content" android:layout_height="34dp"
-                    android:text="@string/journal_in" android:textSize="12sp" android:textStyle="bold"
-                    android:textColor="@color/primary" android:background="@drawable/bg_btn_outline"
-                    android:paddingStart="14dp" android:paddingEnd="14dp" android:gravity="center"
-                    android:clickable="true" android:focusable="true"/>
-            </LinearLayout>
+        <include android:id="@+id/offline_banner" layout="@layout/view_offline_banner"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+        <com.google.android.material.textfield.TextInputLayout android:id="@+id/til_search" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:hint="@string/journal_search_hint" android:layout_marginTop="8dp"
+            app:startIconDrawable="@drawable/ic_search" app:endIconMode="clear_text" app:boxBackgroundColor="@color/surface">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_search" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" android:imeOptions="actionSearch"/>
+        </com.google.android.material.textfield.TextInputLayout>
+        <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none" android:layout_marginTop="4dp">
+            <com.google.android.material.chip.ChipGroup android:id="@+id/chips_type" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                app:singleLine="true" app:singleSelection="true" app:selectionRequired="true" app:chipSpacingHorizontal="8dp">
+                <com.google.android.material.chip.Chip android:id="@+id/chip_all" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/journal_all" android:checked="true"/>
+                <com.google.android.material.chip.Chip android:id="@+id/chip_collect" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/journal_collect"/>
+                <com.google.android.material.chip.Chip android:id="@+id/chip_withdraw" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/journal_withdraw"/>
+                <com.google.android.material.chip.Chip android:id="@+id/chip_out" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/journal_out"/>
+                <com.google.android.material.chip.Chip android:id="@+id/chip_in" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/journal_in"/>
+            </com.google.android.material.chip.ChipGroup>
         </HorizontalScrollView>
-
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                android:orientation="vertical" android:background="@drawable/bg_input" android:padding="10dp"
-                android:layout_marginEnd="8dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="@string/journal_in_total" android:textColor="@color/text_secondary" android:textSize="11sp"/>
-                <TextView android:id="@+id/tv_total_in" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="—" android:textColor="#007a5a" android:textSize="16sp" android:textStyle="bold"/>
-            </LinearLayout>
-            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                android:orientation="vertical" android:background="@drawable/bg_input" android:padding="10dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="@string/journal_out_total" android:textColor="@color/text_secondary" android:textSize="11sp"/>
-                <TextView android:id="@+id/tv_total_out" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="—" android:textColor="#c47000" android:textSize="16sp" android:textStyle="bold"/>
-            </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp" android:layout_marginBottom="8dp">
+            <com.google.android.material.card.MaterialCardView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginEnd="4dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="10dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/journal_in_total" android:textAppearance="@style/TextAppearance.CPay.Overline"/>
+                    <TextView android:id="@+id/tv_total_in" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold" android:textColor="@color/success_main"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <com.google.android.material.card.MaterialCardView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="4dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="10dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/journal_out_total" android:textAppearance="@style/TextAppearance.CPay.Overline"/>
+                    <TextView android:id="@+id/tv_total_out" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
-        <TextView android:id="@+id/tv_count" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:textColor="@color/text_secondary" android:textSize="12sp" android:layout_marginTop="8dp"/>
+        <TextView android:id="@+id/tv_error" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/bg_banner_error" android:padding="12dp" android:textColor="@color/error_main" android:textSize="13sp"
+            android:layout_marginBottom="8dp" android:visibility="gone"/>
     </LinearLayout>
-
-    <TextView android:id="@+id/tv_error" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:textColor="@color/danger" android:textSize="13sp" android:padding="12dp" android:visibility="gone"/>
-    <TextView android:id="@+id/tv_empty" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="@string/journal_empty" android:textColor="@color/text_secondary" android:textSize="13sp"
-        android:gravity="center" android:padding="24dp" android:visibility="gone"/>
-
-    <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_history"
-        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
-        android:padding="8dp" android:clipToPadding="false"/>
-
-    <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content"
-        android:layout_height="wrap_content" android:layout_gravity="center"
-        android:visibility="gone" android:layout_margin="8dp"/>
-    <TextView android:id="@+id/btn_load_more" android:layout_width="match_parent" android:layout_height="44dp"
-        android:text="@string/journal_load_more" android:textColor="@color/primary" android:textSize="13sp"
-        android:textStyle="bold" android:gravity="center" android:background="@color/card"
-        android:visibility="gone" android:clickable="true" android:focusable="true"/>
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout android:id="@+id/swipe" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <FrameLayout android:layout_width="match_parent" android:layout_height="match_parent">
+            <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_history" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:background="@color/surface" android:clipToPadding="false" android:paddingBottom="8dp"/>
+            <TextView android:id="@+id/tv_empty" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="center"
+                android:text="@string/journal_empty" android:textAppearance="@style/TextAppearance.CPay.Secondary" android:gravity="center" android:padding="32dp" android:visibility="gone"/>
+            <ProgressBar android:id="@+id/progress_bar" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="bottom|center_horizontal"
+                android:layout_margin="16dp" android:visibility="gone"/>
+        </FrameLayout>
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 </LinearLayout>

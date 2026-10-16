@@ -1,0 +1,66 @@
+/* C-Pay — design tokens (espace marchand). Source unique des couleurs,
+   espacements, rayons et ombres. Aucune valeur brute ailleurs. */
+:root {
+  /* Marque */
+  --navy: #12306e;
+  --primary: #1d4f92;
+  --primary-700: #173f75;
+  --primary-50: #e9eff8;
+  --primary-100: #d3dff1;
+  --accent: #f07800;
+  --accent-700: #c46200;
+  --accent-50: #fff1e3;
+  --cyan: #00b4c8;
+  --cyan-700: #008fa0;
+  --cyan-50: #e3f7fa;
+
+  /* Neutres */
+  --n0: #ffffff;
+  --n50: #f5f7fa;
+  --n100: #eef1f5;
+  --n200: #dfe4ec;
+  --n300: #c5cdd9;
+  --n400: #9aa5b5;
+  --n500: #6b7687;
+  --n700: #3b4557;
+  --n900: #16202e;
+
+  /* Sémantique */
+  --success: #1b8f5a;
+  --success-50: #e6f5ec;
+  --warn: #b86a00;
+  --warn-50: #fff4e0;
+  --error: #c93a2c;
+  --error-50: #fcebe9;
+  --info: var(--primary);
+  --info-50: var(--primary-50);
+
+  /* Rôles */
+  --bg: var(--n50);
+  --surface: var(--n0);
+  --border: var(--n200);
+  --text: var(--n900);
+  --text-2: var(--n700);
+  --muted: var(--n500);
+  --focus: 0 0 0 3px rgba(29, 79, 146, 0.35);
+
+  /* Espacements (8 pt) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+
+  /* Rayons et ombres */
+  --r-sm: 6px; --r: 10px; --r-lg: 14px; --r-pill: 999px;
+  --sh-1: 0 1px 2px rgba(22, 32, 46, 0.06), 0 1px 3px rgba(22, 32, 46, 0.04);
+  --sh-2: 0 6px 24px rgba(22, 32, 46, 0.12);
+  --sh-3: 0 20px 60px rgba(22, 32, 46, 0.22);
+
+  /* Typographie */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --fs-xs: 11px; --fs-sm: 13px; --fs: 14px; --fs-md: 15px; --fs-lg: 18px; --fs-xl: 22px; --fs-2xl: 28px; --fs-3xl: 36px;
+
+  /* Dispositions */
+  --sidebar-w: 248px;
+  --topbar-h: 56px;
+  --tabbar-h: 60px;
+  --content-max: 1120px;
+}

@@ -16,10 +16,11 @@ object BiometricHelper {
 
     fun authenticate(
         activity: FragmentActivity,
-        title: String = "Authentification C-Pay",
-        subtitle: String = "Utilisez votre empreinte digitale",
+        title: String = activity.getString(global.cpay.app.R.string.biometric_title),
+        subtitle: String = activity.getString(global.cpay.app.R.string.biometric_subtitle),
         onSuccess: () -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        onCancel: (() -> Unit)? = null,
     ) {
         val executor = ContextCompat.getMainExecutor(activity)
         val callback = object : BiometricPrompt.AuthenticationCallback() {
@@ -30,10 +31,12 @@ object BiometricHelper {
                 if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
                     errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
                     onError(errString.toString())
+                } else {
+                    onCancel?.invoke()
                 }
             }
             override fun onAuthenticationFailed() {
-                onError("Empreinte non reconnue")
+                onError(activity.getString(global.cpay.app.R.string.biometric_failed))
             }
         }
 
@@ -41,7 +44,7 @@ object BiometricHelper {
         val info = BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
-            .setNegativeButtonText("Mot de passe")
+            .setNegativeButtonText(activity.getString(global.cpay.app.R.string.biometric_negative))
             .build()
         prompt.authenticate(info)
     }

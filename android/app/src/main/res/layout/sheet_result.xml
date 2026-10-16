@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:gravity="center_horizontal"
+    android:paddingStart="24dp" android:paddingEnd="24dp" android:paddingBottom="24dp">
+    <View android:layout_width="40dp" android:layout_height="4dp"
+        android:background="@drawable/bg_sheet_handle" android:layout_marginBottom="20dp"/>
+    <ImageView android:id="@+id/iv_result_icon" android:layout_width="72dp" android:layout_height="72dp"
+        android:padding="16dp" android:background="@drawable/bg_circle"
+        android:contentDescription="@string/cd_status" android:layout_marginBottom="16dp"/>
+    <TextView android:id="@+id/tv_result_title" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Title"
+        android:gravity="center"/>
+    <TextView android:id="@+id/tv_result_amount" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Amount"
+        android:layout_marginTop="6dp"/>
+    <TextView android:id="@+id/tv_result_body" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Secondary"
+        android:gravity="center" android:layout_marginTop="8dp" android:lineSpacingExtra="3dp"/>
+    <LinearLayout android:id="@+id/layout_result_rows" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="vertical"
+        android:layout_marginTop="16dp" android:background="@drawable/bg_input"
+        android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="4dp" android:paddingBottom="4dp"/>
+    <com.google.android.material.button.MaterialButton android:id="@+id/btn_result_primary"
+        style="@style/Widget.CPay.Button.Primary" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="@string/close"/>
+    <com.google.android.material.button.MaterialButton android:id="@+id/btn_result_secondary"
+        style="@style/Widget.CPay.Button.Text" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
+</LinearLayout>

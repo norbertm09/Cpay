@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Réclamation — C-Pay</title>
+  <meta name="description" content="Déposer une réclamation sur une transaction C-Pay : un numéro de dossier vous est remis immédiatement et le support Calculus Plus instruit votre demande.">
+  <link rel="canonical" href="https://c-pay.global/reclamation.html">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="stylesheet" href="/style.css">
+  <meta name="cpay-api" content="https://api.c-pay.global">
+  <meta name="theme-color" content="#1d4f92">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="C-Pay">
+  <meta property="og:url" content="https://c-pay.global/reclamation.html">
+  <meta property="og:title" content="Réclamation — C-Pay">
+  <meta property="og:description" content="Un problème sur une transaction ? Déposez une réclamation et recevez immédiatement un numéro de dossier.">
+  <meta property="og:image" content="https://c-pay.global/og-image.png">
+  <meta property="og:locale" content="fr_FR">
+</head>
+<body>
+  <a class="skip-link" href="#main">Aller au contenu</a>
+  <header class="site-header" id="site-header">
+    <div class="container">
+      <a class="brand" href="/" aria-label="C-Pay, accueil">
+        <img src="/logo-calculus.png" alt="Calculus Plus" width="140" height="40">
+        <span class="brand-product"><strong>C-Pay</strong><small>par Calculus Plus</small></span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Ouvrir le menu"><span></span></button>
+      <nav class="site-nav" id="site-nav" aria-label="Navigation principale">
+        <a href="/#caisse">Solution</a>
+        <a href="/#pays">Pays &amp; opérateurs</a>
+        <a href="/developers.html">Développeurs</a>
+        <a href="/#contact">Contact</a>
+      </nav>
+      <div class="header-cta">
+        <a class="btn btn--outline btn--sm" href="https://merchant.c-pay.global">Se connecter</a>
+        <a class="btn btn--primary btn--sm" href="https://merchant.c-pay.global/register">Ouvrir un compte</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <div class="container">
+        <span class="eyebrow eyebrow--light">Support</span>
+        <h1>Un problème sur une transaction ?</h1>
+        <p>Décrivez-le ici. Un numéro de dossier vous est attribué immédiatement ; conservez-le pour vos échanges avec le support C-Pay.</p>
+      </div>
+    </section>
+
+    <section class="section" id="reclamation" aria-labelledby="claim-title">
+      <div class="container">
+        <h2 id="claim-title" class="visually-hidden">Formulaire de réclamation</h2>
+        <div class="contact-grid">
+          <form id="claim-form" novalidate>
+            <div class="form-row">
+              <div class="field"><label for="claim-name">Nom et prénom <span class="req" aria-hidden="true">*</span></label><input id="claim-name" name="name" type="text" autocomplete="name" required></div>
+              <div class="field"><label for="claim-email">E-mail <span class="req" aria-hidden="true">*</span></label><input id="claim-email" name="email" type="email" autocomplete="email" required></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label for="claim-phone">Téléphone utilisé pour le paiement</label><input id="claim-phone" name="phone" type="tel" autocomplete="tel" placeholder="+242 …"></div>
+              <div class="field"><label for="claim-ref">Référence de la transaction <span class="req" aria-hidden="true">*</span></label><input id="claim-ref" name="transactionReference" type="text" required placeholder="ex. MOB-ABC123 ou identifiant du lien"><p class="hint">Visible dans le SMS de confirmation, le reçu ou le portail marchand.</p></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label for="claim-amount">Montant</label><input id="claim-amount" name="amount" type="number" min="0" step="1" inputmode="numeric"></div>
+              <div class="field"><label for="claim-currency">Devise</label><select id="claim-currency" name="currency"><option value="">—</option><option>XOF</option><option>XAF</option><option>CDF</option></select></div>
+            </div>
+            <div class="field">
+              <label for="claim-type">Nature du problème</label>
+              <select id="claim-type" name="type">
+                <option value="not_received">Paiement débité mais non reçu par le marchand</option>
+                <option value="double_charge">Double prélèvement</option>
+                <option value="refund">Demande de remboursement</option>
+                <option value="settlement">Règlement non reçu (marchand)</option>
+                <option value="other">Autre</option>
+              </select>
+            </div>
+            <div class="field"><label for="claim-desc">Description <span class="req" aria-hidden="true">*</span></label><textarea id="claim-desc" name="description" required minlength="10"></textarea></div>
+            <div class="field field--check">
+              <input id="claim-consent" name="consent" type="checkbox" required>
+              <label for="claim-consent">J'accepte que Calculus Plus SAS traite ces informations pour instruire ma réclamation, conformément à la <a href="/legal/confidentialite.html">politique de confidentialité</a>. <span class="req" aria-hidden="true">*</span></label>
+            </div>
+            <button class="btn btn--primary" type="submit">Déposer la réclamation</button>
+            <div class="form-status" id="claim-status" role="status" aria-live="polite"></div>
+          </form>
+          <aside class="contact-aside">
+            <div class="card">
+              <h3>Avant de déposer une réclamation</h3>
+              <p>Un paiement Mobile Money peut rester « en attente » quelques minutes le temps que le client confirme sur son téléphone. Vérifiez d'abord le statut dans le portail marchand ou auprès de votre opérateur.</p>
+              <p>Première réponse du support en règle générale sous 1 jour ouvré. Les litiges de paiement sont instruits plus vite avec la date, le montant, le numéro du client et la référence de la transaction.</p>
+              <p class="note mb-0">Les réclamations sont traitées par le support C-Pay (<a href="mailto:support@c-pay.global">support@c-pay.global</a>). Les litiges relatifs au fonctionnement d'un service Mobile Money peuvent nécessiter l'intervention de l'opérateur concerné.</p>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <img src="/logo-calculus.png" alt="Calculus Plus" width="119" height="34">
+          <p>C-Pay est un produit de Calculus Plus SAS.</p>
+        </div>
+        <div><h3>Solution</h3><ul><li><a href="/#caisse">Votre caisse</a></li><li><a href="/#pourquoi">Pourquoi C-Pay</a></li><li><a href="/#pays">Pays &amp; opérateurs</a></li><li><a href="/developers.html">Développeurs</a></li></ul></div>
+        <div><h3>Accès</h3><ul><li><a href="https://merchant.c-pay.global">Portail marchand</a></li><li><a href="https://merchant.c-pay.global/register">Ouvrir un compte</a></li><li><a href="/#contact">Contact</a></li><li><a href="/reclamation.html">Réclamation</a></li></ul></div>
+        <div><h3>Légal</h3><ul><li><a href="/legal/mentions-legales.html">Mentions légales</a></li><li><a href="/legal/cgu.html">CGU</a></li><li><a href="/legal/confidentialite.html">Confidentialité</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+      </div>
+      <div class="footer-bottom">© 2026 Calculus Plus SAS — Tous droits réservés.</div>
+    </div>
+  </footer>
+  <script src="/app.js" defer></script>
+  <script src="/assistant.js" defer></script>
+</body>
+</html>

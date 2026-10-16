@@ -1,26 +1,25 @@
 package global.cpay.app.merchant.fragments
 
-import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.view.Window
-import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import global.cpay.app.R
 import global.cpay.app.common.ApiClient
 import global.cpay.app.common.ApiErrors
@@ -29,28 +28,27 @@ import global.cpay.app.common.BankInstructions
 import global.cpay.app.common.SecurityManager
 import global.cpay.app.common.Transfer
 import global.cpay.app.common.TransferRequest
+import global.cpay.app.common.ui.Fmt
+import global.cpay.app.common.ui.ResultSheet
+import global.cpay.app.common.ui.StatusUi
 import global.cpay.app.databinding.FragmentTransfersBinding
 import global.cpay.app.merchant.CashSession
 import global.cpay.app.merchant.MerchantMainActivity
 import global.cpay.app.merchant.StepUp
 import kotlinx.coroutines.launch
-import java.text.NumberFormat
-import java.util.Locale
 
 /**
- * Transférer (WAVE-4, docs/CAISSE-API.md §5).
- *  - wallet → banque : compte bancaire vérifié (GET /merchant/bank-accounts), montant,
- *    step-up, POST /merchant/cash/transfers → processing | pending_manual.
- *  - banque → wallet : ordre d'approvisionnement → instructions de virement (banque,
- *    titulaire, compte, IBAN/SWIFT, référence, échéance) avec copie.
- *  - liste GET /merchant/cash/transfers, badges de statut, annulation
- *    (awaiting_funds, pending_manual) via POST …/:id/cancel.
+ * Transferer (WAVE-5, docs/CAISSE-API.md §5).
+ *  - wallet → banque : compte verifie (GET /merchant/bank-accounts), montant, step-up,
+ *    POST /merchant/cash/transfers → feuille de resultat (processing | pending_manual).
+ *  - banque → wallet : ordre d'approvisionnement (sans confirmation forte, §5) →
+ *    feuille d'instructions de virement avec copie par champ / tout copier.
+ *  - liste GET /merchant/cash/transfers : puces de statut, detail (instructions, annulation).
  */
 class TransfersFragment : Fragment() {
 
     private var _b: FragmentTransfersBinding? = null
     private val b get() = _b!!
-    private val fmt = NumberFormat.getNumberInstance(Locale.FRANCE)
 
     private var currency = CashSession.currency
     private var available = CashSession.summary?.available ?: 0.0
@@ -58,8 +56,11 @@ class TransfersFragment : Fragment() {
     private var direction = "wallet_to_bank"
     private var accounts: List<BankAccount> = emptyList()
     private var selAccount: BankAccount? = null
-    private var transfers: List<Transfer> = emptyList()
+    private val transfers = mutableListOf<Transfer>()
     private var featureDisabled = false
+    private val adapter = TransferAdapter()
+
+    private val act: MerchantMainActivity? get() = activity as? MerchantMainActivity
 
     override fun onCreateView(i: LayoutInflater, c: ViewGroup?, s: Bundle?): View {
         _b = FragmentTransfersBinding.inflate(i, c, false)
@@ -67,32 +68,28 @@ class TransfersFragment : Fragment() {
     }
 
     override fun onViewCreated(v: View, s: Bundle?) {
+        b.header.tvScreenTitle.text = getString(R.string.transfers_title)
+        b.header.btnBack.setOnClickListener { act?.pop() }
         b.rvTransfers.layoutManager = LinearLayoutManager(context)
-        b.tabToBank.setOnClickListener   { setDirection("wallet_to_bank") }
-        b.tabToWallet.setOnClickListener { setDirection("bank_to_wallet") }
-        b.btnManageAccounts.setOnClickListener { (activity as? MerchantMainActivity)?.openBankAccounts() }
+        b.rvTransfers.adapter = adapter
+        b.toggleDirection.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) setDirection(if (checkedId == R.id.tab_to_bank) "wallet_to_bank" else "bank_to_wallet")
+        }
+        b.btnManageAccounts.setOnClickListener { act?.openBankAccounts() }
         b.btnTransferBank.setOnClickListener { submit("wallet_to_bank") }
         b.btnFund.setOnClickListener         { submit("bank_to_wallet") }
         b.btnRefreshList.setOnClickListener  { loadTransfers() }
-        b.btnCloseInstr.setOnClickListener   { b.layoutInstructions.visibility = View.GONE }
-        b.spinnerAccount.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { selAccount = accounts.getOrNull(pos) }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
-        b.tvAvailable.text = "Disponible : ${money(available)}"
+        b.acAccount.setOnItemClickListener { _, _, pos, _ -> selAccount = accounts.getOrNull(pos) }
+        b.tvAvailable.text = getString(R.string.transfers_available_fmt, money(available))
         setDirection(direction)
         load()
     }
 
-    private fun money(v: Double?) = "${fmt.format(v ?: 0.0)} $currency"
+    private fun money(v: Double?) = Fmt.money(v, currency)
 
     private fun setDirection(d: String) {
         direction = d
         val toBank = d == "wallet_to_bank"
-        b.tabToBank.setTextColor(Color.parseColor(if (toBank) "#12b6c7" else "#5a6677"))
-        b.tabToBank.setTypeface(null, if (toBank) Typeface.BOLD else Typeface.NORMAL)
-        b.tabToWallet.setTextColor(Color.parseColor(if (!toBank) "#12b6c7" else "#5a6677"))
-        b.tabToWallet.setTypeface(null, if (!toBank) Typeface.BOLD else Typeface.NORMAL)
         b.layoutToBank.visibility   = if (toBank) View.VISIBLE else View.GONE
         b.layoutToWallet.visibility = if (toBank) View.GONE else View.VISIBLE
         b.tvError.visibility = View.GONE
@@ -109,10 +106,12 @@ class TransfersFragment : Fragment() {
                     CashSession.summary = s
                     currency = s.cur; available = s.available
                     s.limits?.transferMin?.let { transferMin = it }
-                    b.tvAvailable.text = "Disponible : ${money(available)}"
+                    b.tvAvailable.text = getString(R.string.transfers_available_fmt, money(available))
+                    b.tilAmountBank.helperText = getString(R.string.transfers_min_fmt, money(transferMin))
+                    b.tilAmountFund.helperText = getString(R.string.transfers_min_fmt, money(transferMin))
                 } else if (ApiErrors.isFeatureDisabled(rs)) {
                     featureDisabled = true
-                    showErr(ApiErrors.FEATURE_DISABLED_MESSAGE)
+                    showErr(getString(R.string.feature_disabled))
                 }
             } catch (_: Exception) {}
             try {
@@ -129,18 +128,16 @@ class TransfersFragment : Fragment() {
     private fun renderAccounts() {
         if (accounts.isEmpty()) {
             b.tvNoAccount.visibility = View.VISIBLE
-            b.spinnerAccount.visibility = View.GONE
+            b.tilAccount.visibility = View.GONE
             selAccount = null
             return
         }
         b.tvNoAccount.visibility = View.GONE
-        b.spinnerAccount.visibility = View.VISIBLE
-        val labels = accounts.map { "🏦 ${it.displayBank} — ${it.displayNumber} · ${it.accountName}" }
-        val ad = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, labels)
-        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        b.spinnerAccount.adapter = ad
+        b.tilAccount.visibility = View.VISIBLE
+        val labels = accounts.map { "${it.displayBank} — ${it.displayNumber} · ${it.accountName}" }
+        b.acAccount.setAdapter(ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, labels))
         selAccount = accounts.firstOrNull { it.isDefault } ?: accounts[0]
-        b.spinnerAccount.setSelection(accounts.indexOfFirst { it === selAccount }.coerceAtLeast(0))
+        b.acAccount.setText(labels[accounts.indexOfFirst { it === selAccount }.coerceAtLeast(0)], false)
     }
 
     private fun loadTransfers() {
@@ -149,9 +146,9 @@ class TransfersFragment : Fragment() {
                 val r = ApiClient.api.cashTransfers(limit = 20)
                 if (_b == null) return@launch
                 if (r.isSuccessful) {
-                    transfers = r.body()?.data ?: emptyList()
+                    transfers.clear(); transfers.addAll(r.body()?.data ?: emptyList())
                     b.tvNoTransfers.visibility = if (transfers.isEmpty()) View.VISIBLE else View.GONE
-                    b.rvTransfers.adapter = TransferAdapter(transfers)
+                    adapter.notifyDataSetChanged()
                 }
             } catch (_: Exception) {
             } finally {
@@ -162,28 +159,32 @@ class TransfersFragment : Fragment() {
 
     // ─── Creation ───────────────────────────────────────────────────
     private fun submit(dir: String) {
-        if (featureDisabled) { showErr(ApiErrors.FEATURE_DISABLED_MESSAGE); return }
+        if (featureDisabled) { showErr(getString(R.string.feature_disabled)); return }
         val toBank = dir == "wallet_to_bank"
+        val til = if (toBank) b.tilAmountBank else b.tilAmountFund
         val et = if (toBank) b.etAmountBank else b.etAmountFund
         val amt = et.text.toString().replace(" ", "").replace(",", ".").toDoubleOrNull()
-        if (amt == null || amt < transferMin) { showErr("Montant minimum : ${money(transferMin)}"); return }
+        if (amt == null || amt < transferMin) { til.error = getString(R.string.transfers_min_fmt, money(transferMin)); return }
+        til.error = null
         val account = selAccount
         if (toBank && account == null) { showErr(getString(R.string.transfers_no_account)); return }
-        if (toBank && amt > available) { showErr("Solde insuffisant — disponible : ${money(available)}"); return }
+        if (toBank && amt > available) { showErr(getString(R.string.withdraw_insufficient_fmt, money(available))); return }
         val desc = (if (toBank) b.etDescBank else b.etDescFund).text.toString().trim()
         val idem = SecurityManager.generateRef("IDK")
         val ctx = requireContext()
-        val title = if (toBank) "Transfert de ${money(amt)} vers la banque" else "Approvisionnement de ${money(amt)}"
 
         b.tvError.visibility = View.GONE
         b.progressBar.visibility = View.VISIBLE
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val r = StepUp.run(ctx, title) { confirm ->
+                val call: suspend (Map<String, String>) -> retrofit2.Response<Transfer> = { confirm ->
                     ApiClient.api.cashTransferCreate(idem, TransferRequest(
                         direction = dir, amount = amt, accountId = if (toBank) account?.accountId else null,
                         description = desc.ifEmpty { null }, confirm = confirm))
                 }
+                // §5 : aucune confirmation forte pour bank_to_wallet (aucun fonds ne sort).
+                val r = if (toBank) StepUp.run(ctx, getString(R.string.transfers_confirm_bank_fmt, money(amt)), call)
+                        else call(emptyMap())
                 if (_b == null || r == null) return@launch
                 val t = r.body()
                 if (r.isSuccessful && t != null) {
@@ -193,7 +194,7 @@ class TransfersFragment : Fragment() {
                 } else {
                     val e = ApiErrors.of(r)
                     if (r.code() == 410 || e.code == ApiErrors.FEATURE_DISABLED) featureDisabled = true
-                    showErr(ApiErrors.cashMessage(r.code(), e, currency, "Transfert refusé"))
+                    showErr(ApiErrors.cashMessage(r.code(), e, currency, getString(R.string.transfers_refused)))
                 }
             } catch (e: Exception) {
                 if (_b != null) showErr(getString(R.string.network_error))
@@ -204,78 +205,112 @@ class TransfersFragment : Fragment() {
     }
 
     private fun showResult(t: Transfer) {
-        val d = Dialog(requireContext())
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        d.setContentView(R.layout.dialog_transfer_result)
-        d.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        d.findViewById<TextView>(R.id.tv_icon).text = "✅"
-        d.findViewById<TextView>(R.id.tv_title).apply {
-            text = "Transfert demandé"; setTextColor(Color.parseColor("#007a5a"))
-        }
-        d.findViewById<TextView>(R.id.tv_amount).text = money(t.net ?: t.amount)
-        d.findViewById<TextView>(R.id.tv_details).text = buildString {
-            append("Réf : ${t.reference ?: t.transferId}\n")
-            append("Statut : ${t.statusLabel}\n")
-            t.bankAccount?.let { append("Vers ${it.bankName ?: "banque"} ${it.accountMasked ?: ""}\n") }
-            if (t.status == "pending_manual") append("Exécuté par les opérations C-Pay (J+1 ouvré).\n")
-            if ((t.fee ?: 0.0) > 0) append("Frais : ${money(t.fee)}")
-        }
-        d.findViewById<TextView>(R.id.btn_close).setOnClickListener { d.dismiss() }
-        d.show()
+        val ctx = requireContext()
+        ResultSheet.show(ctx, ResultSheet.Spec(
+            kind = if (t.status == "failed" || t.status == "rejected") ResultSheet.Kind.ERROR else ResultSheet.Kind.SUCCESS,
+            title = getString(R.string.transfers_requested),
+            amount = money(t.net ?: t.amount),
+            body = when (t.status) {
+                "pending_manual" -> getString(R.string.transfers_manual_body)
+                "processing"     -> getString(R.string.transfers_processing_body)
+                else             -> null
+            },
+            rows = listOf(
+                getString(R.string.reference) to (t.reference ?: t.transferId),
+                getString(R.string.status) to StatusUi.statusLabel(ctx, t.status),
+                getString(R.string.transfers_instr_bank) to t.bankAccount?.let { "${it.bankName ?: ""} ${it.accountMasked ?: ""}".trim() },
+                getString(R.string.fees) to t.fee?.takeIf { it > 0 }?.let { money(it) },
+            ),
+        ))
     }
 
     // ─── Instructions d'approvisionnement ───────────────────────────
     private fun showInstructions(t: Transfer) {
+        val ctx = requireContext()
         val i = t.instructions ?: BankInstructions(reference = t.reference)
-        b.tvInstrAmount.text = money(t.amount)
-        fun row(row: View, tv: TextView, btn: View, value: String?) {
-            if (value.isNullOrBlank()) { row.visibility = View.GONE; return }
-            row.visibility = View.VISIBLE
-            tv.text = value
-            btn.setOnClickListener { copy(value) }
+        val dlg = BottomSheetDialog(ctx)
+        val v = LayoutInflater.from(ctx).inflate(R.layout.sheet_funding_instructions, null, false)
+        v.findViewById<TextView>(R.id.tv_instr_amount).text = money(t.amount)
+        val rows = v.findViewById<LinearLayout>(R.id.layout_instr_rows)
+        val lines = listOf(
+            getString(R.string.transfers_instr_bank) to i.bankName,
+            getString(R.string.transfers_instr_holder) to i.accountName,
+            getString(R.string.transfers_instr_account) to i.accountNumber,
+            getString(R.string.transfers_instr_iban) to i.iban,
+            getString(R.string.transfers_instr_swift) to i.swift,
+            getString(R.string.transfers_instr_reference) to (i.reference ?: t.reference),
+        ).filter { !it.second.isNullOrBlank() }
+        lines.forEach { (label, value) ->
+            val row = LayoutInflater.from(ctx).inflate(R.layout.item_instruction_row, rows, false)
+            row.findViewById<TextView>(R.id.tv_row_label).text = label
+            row.findViewById<TextView>(R.id.tv_row_value).text = value
+            row.findViewById<MaterialButton>(R.id.btn_row_copy).setOnClickListener { copy(value!!) }
+            rows.addView(row)
         }
-        row(b.rowBank,   b.tvInstrBank,   b.btnCopyBank,   i.bankName)
-        row(b.rowName,   b.tvInstrName,   b.btnCopyName,   i.accountName)
-        row(b.rowNumber, b.tvInstrNumber, b.btnCopyNumber, i.accountNumber)
-        row(b.rowIban,   b.tvInstrIban,   b.btnCopyIban,   i.iban)
-        row(b.rowSwift,  b.tvInstrSwift,  b.btnCopySwift,  i.swift)
-        row(b.rowRef,    b.tvInstrRef,    b.btnCopyRef,    i.reference ?: t.reference)
         val exp = i.expiresAt
-        b.tvInstrExpiry.text = if (exp.isNullOrBlank()) "" else "À virer avant le ${exp.take(16).replace("T", " à ")}"
-        b.btnCopyAll.setOnClickListener {
+        v.findViewById<TextView>(R.id.tv_instr_expiry).text = if (exp.isNullOrBlank()) "" else getString(R.string.transfers_instr_expires_fmt, Fmt.dateTime(exp))
+        v.findViewById<MaterialButton>(R.id.btn_copy_all).setOnClickListener {
             copy(buildString {
-                append("Virement C-Pay ${money(t.amount)}\n")
-                i.bankName?.let { append("Banque : $it\n") }
-                i.accountName?.let { append("Titulaire : $it\n") }
-                i.accountNumber?.let { append("Compte : $it\n") }
-                i.iban?.let { append("IBAN : $it\n") }
-                i.swift?.let { append("SWIFT : $it\n") }
-                append("Référence : ${i.reference ?: t.reference ?: ""}")
-            })
+                append("C-Pay — ${getString(R.string.transfers_instructions)} ${money(t.amount)}\n")
+                lines.forEach { (label, value) -> append("$label : $value\n") }
+            }.trim())
         }
-        b.layoutInstructions.visibility = View.VISIBLE
-        b.root.post { b.root.smoothScrollTo(0, 0) }
+        v.findViewById<MaterialButton>(R.id.btn_instr_close).setOnClickListener { dlg.dismiss() }
+        dlg.setContentView(v)
+        dlg.show()
     }
 
     private fun copy(text: String) {
         val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("C-Pay", text))
-        toast("Copié")
+        Toast.makeText(requireContext(), R.string.copied, Toast.LENGTH_SHORT).show()
     }
 
-    // ─── Annulation ─────────────────────────────────────────────────
+    // ─── Detail / annulation ────────────────────────────────────────
+    private fun showDetail(t: Transfer) {
+        val ctx = requireContext()
+        val hasInstr = t.instructions != null && t.status == "awaiting_funds"
+        ResultSheet.show(ctx, ResultSheet.Spec(
+            kind = when (t.status) {
+                "completed" -> ResultSheet.Kind.SUCCESS
+                "failed", "rejected", "cancelled" -> ResultSheet.Kind.ERROR
+                else -> ResultSheet.Kind.PENDING
+            },
+            title = transferTitle(t),
+            amount = (if (t.isFunding) "+ " else "- ") + money(t.amount),
+            body = if (t.status == "pending_manual") getString(R.string.transfers_manual_body) else null,
+            rows = listOf(
+                getString(R.string.reference) to (t.reference ?: t.transferId),
+                getString(R.string.status) to StatusUi.statusLabel(ctx, t.status),
+                getString(R.string.date) to Fmt.dateTime(t.createdAt),
+                getString(R.string.fees) to t.fee?.takeIf { it > 0 }?.let { money(it) },
+                getString(R.string.description) to t.description,
+            ),
+            primaryLabel = if (hasInstr) getString(R.string.transfers_instructions) else getString(R.string.close),
+            primary = if (hasInstr) ({ showInstructions(t) }) else null,
+            secondaryLabel = if (t.canCancel) getString(R.string.transfers_cancel) else null,
+            secondary = if (t.canCancel) ({ cancelTransfer(t) }) else null,
+        ))
+    }
+
+    private fun transferTitle(t: Transfer): String = when {
+        t.isFunding -> getString(R.string.transfers_funding_title)
+        t.bankAccount != null -> getString(R.string.transfers_bank_title_fmt, t.bankAccount.bankName ?: getString(R.string.method_bank), t.bankAccount.accountMasked ?: "").trim()
+        else -> getString(R.string.transfers_to_bank_generic)
+    }
+
     private fun cancelTransfer(t: Transfer) {
-        AlertDialog.Builder(requireContext())
-            .setTitle("Annuler ce transfert ?")
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.transfers_cancel_confirm_title)
             .setMessage("${t.reference ?: t.transferId} — ${money(t.amount)}")
-            .setNegativeButton("Non", null)
-            .setPositiveButton("Oui, annuler") { _, _ ->
+            .setNegativeButton(R.string.no, null)
+            .setPositiveButton(R.string.transfers_cancel_yes) { _, _ ->
                 viewLifecycleOwner.lifecycleScope.launch {
                     try {
                         val r = ApiClient.api.cashTransferCancel(t.transferId)
                         if (_b == null) return@launch
-                        if (r.isSuccessful) { toast("Transfert annulé"); load() }
-                        else showErr(ApiErrors.cashMessage(r, currency, "Annulation impossible"))
+                        if (r.isSuccessful) { Toast.makeText(requireContext(), R.string.transfers_cancelled, Toast.LENGTH_SHORT).show(); load() }
+                        else showErr(ApiErrors.cashMessage(r, currency, getString(R.string.transfers_cancel_error)))
                     } catch (e: Exception) { if (_b != null) showErr(getString(R.string.network_error)) }
                 }
             }
@@ -285,40 +320,30 @@ class TransfersFragment : Fragment() {
     private fun showErr(m: String) {
         if (_b == null) return
         b.tvError.text = m; b.tvError.visibility = View.VISIBLE
+        b.scroll.post { b.scroll.smoothScrollTo(0, b.tvError.top) }
     }
-    private fun toast(m: String) = Toast.makeText(requireContext(), m, Toast.LENGTH_SHORT).show()
 
-    inner class TransferAdapter(private val items: List<Transfer>) : RecyclerView.Adapter<TransferAdapter.VH>() {
+    inner class TransferAdapter : RecyclerView.Adapter<TransferAdapter.VH>() {
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
-            val icon: TextView = v.findViewById(R.id.tv_icon)
+            val icon: ImageView = v.findViewById(R.id.iv_type)
             val title: TextView = v.findViewById(R.id.tv_title)
             val sub: TextView = v.findViewById(R.id.tv_subtitle)
             val amount: TextView = v.findViewById(R.id.tv_amount)
             val status: TextView = v.findViewById(R.id.tv_status)
-            val actions: View = v.findViewById(R.id.layout_actions)
-            val btnInstr: TextView = v.findViewById(R.id.btn_instructions)
-            val btnCancel: TextView = v.findViewById(R.id.btn_cancel)
         }
         override fun onCreateViewHolder(p: ViewGroup, t: Int) =
             VH(LayoutInflater.from(p.context).inflate(R.layout.item_cash_transfer, p, false))
         override fun onBindViewHolder(h: VH, pos: Int) {
-            val t = items[pos]
-            h.icon.text = if (t.isFunding) "💰" else "🏦"
-            h.title.text = t.title
-            h.sub.text = "${t.reference ?: t.transferId} · ${(t.createdAt ?: "").take(16).replace("T", " ")}"
-            h.amount.text = (if (t.isFunding) "+ " else "- ") + fmt.format(t.amount) + " " + (t.currency ?: currency)
-            h.amount.setTextColor(Color.parseColor(if (t.isFunding) "#007a5a" else "#c47000"))
-            h.status.text = t.statusLabel
-            h.status.setTextColor(Color.parseColor(t.statusColor))
-            h.status.setBackgroundColor(Color.parseColor(t.statusColor + "1A"))
-            val showInstr = t.instructions != null && t.status == "awaiting_funds"
-            h.btnInstr.visibility = if (showInstr) View.VISIBLE else View.GONE
-            h.btnCancel.visibility = if (t.canCancel) View.VISIBLE else View.GONE
-            h.actions.visibility = if (showInstr || t.canCancel) View.VISIBLE else View.GONE
-            h.btnInstr.setOnClickListener { showInstructions(t) }
-            h.btnCancel.setOnClickListener { cancelTransfer(t) }
+            val t = transfers[pos]
+            StatusUi.bindTypeIcon(h.icon, if (t.isFunding) "transfer_in" else "transfer_out")
+            h.title.text = transferTitle(t)
+            h.sub.text = listOfNotNull(t.reference ?: t.transferId, Fmt.dateTime(t.createdAt).takeIf { it.isNotBlank() }).joinToString(" · ")
+            h.amount.text = (if (t.isFunding) "+ " else "- ") + Fmt.money(t.amount, t.currency ?: currency)
+            h.amount.setTextColor(ContextCompat.getColor(h.itemView.context, if (t.isFunding) R.color.success_main else R.color.on_surface))
+            StatusUi.bindChip(h.status, t.status)
+            h.itemView.setOnClickListener { showDetail(t) }
         }
-        override fun getItemCount() = items.size
+        override fun getItemCount() = transfers.size
     }
 
     override fun onDestroyView() { super.onDestroyView(); _b = null }

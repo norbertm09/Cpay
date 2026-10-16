@@ -82,7 +82,7 @@ class MerchTransferFragment : Fragment() {
                     ra.body()!!.data.forEach {
                         list.add(TransferSource("bank", it.accountId,
                             it.institution?.name ?: "Banque",
-                            "${it.accountNumber} · ${it.accountName}", "🏦"))
+                            "${it.accountNumber} · ${it.accountName}", "B"))
                     }
                 }
             } catch (e: Exception) { }
@@ -143,7 +143,7 @@ class MerchTransferFragment : Fragment() {
     private fun showBankForm() {
         addMode = "bank"
         b.layoutForm.visibility = View.VISIBLE
-        b.tvFormTitle.text = "🏦 Ajouter un compte bancaire"
+        b.tvFormTitle.text = "Ajouter un compte bancaire"
         b.layoutBankFields.visibility = View.VISIBLE
         b.layoutWalletFields.visibility = View.GONE
         selCountry("CG")
@@ -152,7 +152,7 @@ class MerchTransferFragment : Fragment() {
     private fun showWalletForm() {
         addMode = "wallet"
         b.layoutForm.visibility = View.VISIBLE
-        b.tvFormTitle.text = "📱 Ajouter un Mobile Money"
+        b.tvFormTitle.text = "Ajouter un Mobile Money"
         b.layoutBankFields.visibility = View.GONE
         b.layoutWalletFields.visibility = View.VISIBLE
         selOp("mtn")
@@ -167,14 +167,14 @@ class MerchTransferFragment : Fragment() {
 
     private fun selCountry(c: String) {
         country = c
-        val on = Color.parseColor("#12b6c7"); val off = Color.parseColor("#5a6677")
+        val on = Color.parseColor("#1d4f92"); val off = Color.parseColor("#5a6677")
         b.btnCountryCg.setTextColor(if (c == "CG") on else off)
         b.btnCountryCm.setTextColor(if (c == "CM") on else off)
         loadInstitutions()
     }
 
     private fun selOp(op: String) {
-        val on = Color.parseColor("#12b6c7"); val off = Color.parseColor("#5a6677")
+        val on = Color.parseColor("#1d4f92"); val off = Color.parseColor("#5a6677")
         b.btnOpMtn.setTextColor(if (op == "mtn") on else off)
         b.btnOpMtn.setTypeface(null, if (op == "mtn") Typeface.BOLD else Typeface.NORMAL)
         b.btnOpAirtel.setTextColor(if (op == "airtel") on else off)
@@ -227,7 +227,7 @@ class MerchTransferFragment : Fragment() {
                     "accountNumber" to num,
                     "accountName"   to name))
                 if (_b == null) return@launch
-                if (r.isSuccessful) { toast("Compte ajouté ✅"); hideForm(); loadAll() }
+                if (r.isSuccessful) { toast("Compte ajouté"); hideForm(); loadAll() }
                 else toast(r.errorBody()?.string() ?: "Erreur")
             } catch (e: Exception) { toast("Erreur réseau") }
         }
@@ -277,7 +277,7 @@ class MerchTransferFragment : Fragment() {
         d.setContentView(R.layout.dialog_transfer_result)
         d.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
 
-        d.findViewById<TextView>(R.id.tv_icon).text = "✅"
+        d.findViewById<TextView>(R.id.tv_icon).text = "OK"
         d.findViewById<TextView>(R.id.tv_title).apply {
             text = "Retrait demandé"
             setTextColor(Color.parseColor("#007a5a"))

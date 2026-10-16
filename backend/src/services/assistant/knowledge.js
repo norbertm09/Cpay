@@ -27,11 +27,13 @@ Les devises XOF, XAF et CDF n'ont pas de décimales. Aucune conversion de change
 - API REST et SDK (JavaScript, PHP, Android) et extension WooCommerce, documentés sur c-pay.global/developers.html ; environnement de test sur demande.
 - Paiement par carte sans contact (Tap-to-Phone) : en préparation, conditionné à un SDK certifié ; pas encore disponible.
 
-## Tarifs indicatifs (commission par transaction, à confirmer contractuellement)
-- Mobile Money : 1,5 % (compte créé), 1,2 % (KYB validé), 1,0 % (contrat).
-- Carte : 2,5 % / 2,0 % / 1,8 % selon le niveau, lorsque le service sera ouvert.
-- Pas de frais d'abonnement annoncés publiquement. Les plafonds journaliers dépendent du niveau KYB :
-  500 000 (compte créé), 5 000 000 (KYB validé), sans plafond (contrat), en devise locale.
+## Tarifs
+- Les tarifs ne sont pas publiés sur le site : chaque marchand consulte sa grille (commission par encaissement
+  selon son niveau KYB, frais de retrait et de transfert) dans son portail marchand, rubrique « Tarifs & frais ».
+- Les frais de chaque opération sont affichés avant confirmation ; ce montant fait foi.
+- Aucun abonnement ni frais d'installation. Les frais prélevés par l'opérateur côté payeur ne dépendent pas de C-Pay.
+- Si un visiteur demande un pourcentage : expliquer qu'il dépend du niveau du compte et l'inviter à ouvrir un compte
+  ou à contacter sales@c-pay.global ; ne jamais citer de chiffre.
 
 ## Caisse (encaisser, retirer, transférer — portail marchand et apps)
 - Encaisser : par Mobile Money, le marchand saisit le montant et le numéro du client ; l'opérateur est détecté
@@ -40,7 +42,7 @@ Les devises XOF, XAF et CDF n'ont pas de décimales. Aucune conversion de change
   configurée pour le pays du marchand ; sinon la fonction est indiquée « en cours d'intégration ».
 - Retirer : paiement du solde disponible vers le wallet Mobile Money du marchand (enregistré dans le portail,
   marqué vérifié après le premier retrait abouti), dans la limite journalière du niveau KYB
-  (100 000 / 500 000 / 2 000 000 en devise locale pour les niveaux 0 / 1 / 2) ; frais plateforme indicatifs 1 %.
+  (100 000 / 500 000 / 2 000 000 en devise locale pour les niveaux 0 / 1 / 2) ; les frais sont affichés avant confirmation.
 - Transférer wallet → banque : vers un compte bancaire vérifié du marchand ; exécuté par les opérations C-Pay
   à J+1 ouvré (le marchand voit le statut « en attente d'exécution » puis « exécuté » avec la référence du virement).
 - Transférer banque → wallet (approvisionnement) : C-Pay remet un ordre avec une référence FND-XXXXXX et les

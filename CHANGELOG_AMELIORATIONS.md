@@ -1,5 +1,11 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-wave-5 (2026-10-16) — deploiement automatique, refonte des interfaces
+Voir `docs/WAVE-5.md` : deploiement automatique apres CI verte sur main ; vitrine allegee (4 entrees, sans tarifs,
+page reclamation, hub developpeurs) ; refonte complete des portails marchand (accueil 360, caisse, activite,
+ventes, integrations, compte avec tarifs), utilisateur et admin (design system, API simulee, captures) ;
+app Android marchande en Material 3 avec parcours d'encaissement en 4 ecrans et cache hors ligne.
+
 ## 2.7.0 (2026-10-15) — vague 4 : CI/CD GitHub, caisse marchande
 Voir `docs/WAVE-4.md` : GitHub Actions (tests, builds portails/vitrine/PHP/Expo/Android, release sur tag,
 deploiement OVH par SSH avec approbation), gestion des versions (2.7.0 partout, bump-version/check-version),

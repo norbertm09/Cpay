@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>C-Pay — Votre caisse digitale : carte, Mobile Money, retraits, transferts</title>
-  <meta name="description" content="C-Pay, par Calculus Plus SAS : la caisse digitale des commerçants au Sénégal, en Côte d'Ivoire, au Cameroun, au Congo et en RDC. Encaissez par carte et Mobile Money (opérateur détecté automatiquement), retirez vers votre wallet, transférez entre wallet et banque, avec un seul journal.">
+  <title>C-Pay — La caisse digitale des commerçants : carte, Mobile Money, retraits, transferts</title>
+  <meta name="description" content="C-Pay, par Calculus Plus SAS : la caisse digitale des commerçants au Sénégal, en Côte d'Ivoire, au Cameroun, au Congo et en RDC. Encaissez par carte et Mobile Money (opérateur détecté automatiquement), retirez vers votre wallet, transférez entre wallet et banque, suivez tout dans un seul journal.">
   <link rel="canonical" href="https://c-pay.global/">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon.png">
@@ -15,14 +15,14 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="C-Pay">
   <meta property="og:url" content="https://c-pay.global/">
-  <meta property="og:title" content="C-Pay — Votre caisse digitale : carte, Mobile Money, retraits, transferts">
+  <meta property="og:title" content="C-Pay — La caisse digitale des commerçants">
   <meta property="og:description" content="Encaissez par carte et Mobile Money dans 5 pays, retirez vers votre wallet, transférez entre wallet et banque : une seule caisse, un seul journal. Un produit de Calculus Plus SAS.">
   <meta property="og:image" content="https://c-pay.global/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:locale" content="fr_FR">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="C-Pay — Votre caisse digitale : carte, Mobile Money, retraits, transferts">
+  <meta name="twitter:title" content="C-Pay — La caisse digitale des commerçants">
   <meta name="twitter:description" content="Encaissez par carte et Mobile Money dans 5 pays, retirez, transférez : une seule caisse, un seul journal.">
   <meta name="twitter:image" content="https://c-pay.global/og-image.png">
 </head>
@@ -37,13 +37,8 @@
       </a>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Ouvrir le menu"><span></span></button>
       <nav class="site-nav" id="site-nav" aria-label="Navigation principale">
-        <a href="#caisse">Caisse</a>
-        <a href="#demo">Démo</a>
-        <a href="#produits">Produits</a>
-        <a href="#pays">Pays</a>
-        <a href="#tarifs">Tarifs</a>
-        <a href="#securite">Sécurité</a>
-        <a href="#faq">FAQ</a>
+        <a href="#caisse">Solution</a>
+        <a href="#pays">Pays &amp; opérateurs</a>
         <a href="/developers.html">Développeurs</a>
         <a href="#contact">Contact</a>
       </nav>
@@ -58,13 +53,14 @@
     <section class="hero" aria-labelledby="hero-title">
       <div class="container">
         <div>
-          <h1 id="hero-title">Votre <em>caisse digitale</em> : encaissez par carte et Mobile Money, retirez, transférez.</h1>
-          <p>C-Pay aide les commerçants à collecter leurs recettes par carte et par les opérateurs de Mobile Money de cinq pays, puis à gérer leur caisse : retirer vers leur wallet, transférer entre wallet et banque, avec un seul journal. Le marchand ne choisit rien : l'opérateur est détecté à partir du numéro du client.</p>
+          <span class="eyebrow eyebrow--light">C-Pay pour les commerçants</span>
+          <h1 id="hero-title">La <em>caisse digitale</em> des commerçants</h1>
+          <p>Encaissez par carte et Mobile Money, retirez vos recettes vers votre wallet, transférez entre wallet et banque, et suivez chaque mouvement dans un seul journal. Vous saisissez un montant et un numéro : C-Pay reconnaît l'opérateur de votre client, vous n'avez rien à choisir.</p>
           <ul class="hero-ops" aria-label="Les quatre opérations de la caisse">
             <li>Encaisser</li>
             <li>Retirer</li>
             <li>Transférer</li>
-            <li>Journal</li>
+            <li>Suivre</li>
           </ul>
           <div class="hero-actions">
             <a class="btn btn--light" href="https://merchant.c-pay.global/register">Ouvrir un compte marchand</a>
@@ -72,14 +68,30 @@
           </div>
           <p class="hero-note">Déjà client ? <a href="https://merchant.c-pay.global">Se connecter au portail marchand</a>.</p>
         </div>
-        <div class="hero-card" aria-label="Exemple de détection">
-          <h2>Exemple : ce que C-Pay déduit d'un numéro</h2>
-          <div class="ex-phone">+237 6 70 12 34 56</div>
-          <div class="ex-row"><span>Pays</span><span>Cameroun</span></div>
-          <div class="ex-row"><span>Devise</span><span>XAF</span></div>
-          <div class="ex-row"><span>Opérateur</span><span>MTN Mobile Money</span></div>
-          <div class="ex-row"><span>Alternative au choix du client</span><span>Express Union</span></div>
-          <p class="ex-foot">Le marchand saisit un montant et un numéro. Rien d'autre.</p>
+        <div class="hero-card" aria-labelledby="demo-title">
+          <h2 id="demo-title">Testez la détection d'opérateur</h2>
+          <form class="demo-form" id="detect-form" novalidate>
+            <label class="visually-hidden" for="detect-phone">Numéro de téléphone avec indicatif</label>
+            <input type="tel" id="detect-phone" name="phone" inputmode="tel" autocomplete="off" placeholder="+221 77 123 45 67" required>
+            <button class="btn btn--primary" type="submit" id="detect-btn">Détecter</button>
+          </form>
+          <div class="chips" aria-label="Exemples de numéros">
+            <button type="button" class="chip" data-phone="+221771234567">+221 Sénégal</button>
+            <button type="button" class="chip" data-phone="+2250701234567">+225 Côte d'Ivoire</button>
+            <button type="button" class="chip" data-phone="+237670123456">+237 Cameroun</button>
+            <button type="button" class="chip" data-phone="+242061234567">+242 Congo</button>
+            <button type="button" class="chip" data-phone="+243811234567">+243 RDC</button>
+          </div>
+          <div class="result" id="detect-result" aria-live="polite">
+            <p class="result-example">Exemple : <span class="ex-phone">+237 6 70 12 34 56</span></p>
+            <dl class="result-rows">
+              <div><dt>Pays</dt><dd>Cameroun (CM)</dd></div>
+              <div><dt>Devise</dt><dd>XAF</dd></div>
+              <div><dt>Opérateur</dt><dd>MTN Mobile Money</dd></div>
+              <div><dt>Au choix du client</dt><dd>Express Union</dd></div>
+            </dl>
+          </div>
+          <p class="ex-foot">Aucune transaction n'est créée. Service limité à 30 requêtes par minute ; hors ligne, une table locale indicative prend le relais.</p>
         </div>
       </div>
     </section>
@@ -87,7 +99,7 @@
     <section class="section section--alt" id="caisse" aria-labelledby="caisse-title">
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">La caisse</span>
+          <span class="eyebrow">Votre caisse</span>
           <h2 id="caisse-title">Quatre opérations, un seul journal</h2>
           <p class="lead">Tout ce que vous encaissez alimente un solde disponible ; vous le retirez ou le transférez quand vous le souhaitez, et chaque mouvement s'inscrit dans le même journal.</p>
         </div>
@@ -97,8 +109,8 @@
             <div class="op-kicker">1 · Encaisser</div>
             <h3>Carte et Mobile Money</h3>
             <ul>
-              <li><strong>Carte</strong> via un lien ou un QR hébergé sur pay.c-pay.global, lorsqu'une passerelle carte est active dans votre pays. Tap-to-Phone <span class="badge badge--soon">bientôt</span>, après certification.</li>
               <li><strong>Mobile Money</strong> : vous saisissez le montant et le numéro du client ; C-Pay détecte l'opérateur et envoie la demande de paiement. Wave et Express Union restent au choix du client.</li>
+              <li><strong>Carte</strong> via un lien ou un QR hébergé sur pay.c-pay.global, lorsqu'une passerelle carte est active dans votre pays. Tap-to-Phone <span class="badge badge--soon">bientôt</span>, après certification.</li>
               <li>Statut suivi en temps réel, puis « en attente de confirmation » si le client tarde.</li>
             </ul>
           </li>
@@ -118,14 +130,14 @@
             <h3>Wallet ↔ banque</h3>
             <ul>
               <li><strong>Wallet → banque</strong> : vers un compte bancaire vérifié de votre entreprise, exécuté sous 1 jour ouvré en règle générale.</li>
-              <li><strong>Banque → wallet</strong> : vous créez un ordre d'approvisionnement, virez le montant sur le compte de collecte C-Pay en indiquant la référence fournie ; votre solde est crédité à réception.</li>
+              <li><strong>Banque → wallet</strong> : vous créez un ordre d'approvisionnement, virez le montant avec la référence fournie ; votre solde est crédité à réception.</li>
               <li>Même confirmation forte que pour les retraits.</li>
             </ul>
           </li>
           <li class="card op">
             <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg></div>
-            <div class="op-kicker">4 · Journal</div>
-            <h3>Un historique unifié</h3>
+            <div class="op-kicker">4 · Suivre</div>
+            <h3>Un journal unifié</h3>
             <ul>
               <li>Encaissements, retraits et transferts dans la même liste, avec les totaux entrants et sortants.</li>
               <li>Filtres par période et par type, export CSV.</li>
@@ -133,164 +145,80 @@
             </ul>
           </li>
         </ol>
-        <p class="caisse-note"><strong>Votre solde disponible</strong> = encaissements confirmés non encore reversés + approvisionnements reçus − retraits et transferts sortants en cours. Il est visible à tout moment dans le portail marchand et dans l'application.</p>
+        <p class="caisse-note"><strong>Votre solde disponible</strong> = encaissements confirmés non encore reversés + approvisionnements reçus − retraits et transferts sortants en cours. Il est visible à tout moment dans le portail marchand et dans l'application Android.</p>
       </div>
     </section>
 
-    <section class="section" id="demo" aria-labelledby="demo-title">
+    <section class="section" id="pourquoi" aria-labelledby="why-title">
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">Démo interactive</span>
-          <h2 id="demo-title">Testez la détection</h2>
-          <p class="lead">Saisissez un numéro au format international. La page interroge le moteur de détection C-Pay et affiche le pays, la devise et l'opérateur reconnus. Aucune transaction n'est créée.</p>
+          <span class="eyebrow">Pourquoi C-Pay</span>
+          <h2 id="why-title">Pensée pour votre commerce, pas pour les techniciens</h2>
+          <p class="lead">Une seule caisse pour le comptoir, les ventes à distance et la boutique en ligne : vous encaissez, le reste suit.</p>
         </div>
-        <div class="demo">
-          <div>
-            <form class="demo-form" id="detect-form" novalidate>
-              <label class="visually-hidden" for="detect-phone">Numéro de téléphone avec indicatif</label>
-              <input type="tel" id="detect-phone" name="phone" inputmode="tel" autocomplete="off" placeholder="+221 77 123 45 67" required>
-              <button class="btn btn--primary" type="submit" id="detect-btn">Détecter</button>
-            </form>
-            <div class="chips" aria-label="Exemples de numéros">
-              <button type="button" class="chip" data-phone="+221771234567">+221 77… Sénégal</button>
-              <button type="button" class="chip" data-phone="+2250701234567">+225 07… Côte d'Ivoire</button>
-              <button type="button" class="chip" data-phone="+237670123456">+237 67… Cameroun</button>
-              <button type="button" class="chip" data-phone="+242061234567">+242 06… Congo</button>
-              <button type="button" class="chip" data-phone="+243811234567">+243 81… RDC</button>
-            </div>
-            <p class="note mt-4">Service public limité en débit (30 requêtes par minute et par adresse). Si l'API n'est pas joignable, la page utilise une table locale indicative.</p>
-          </div>
-          <div class="result" id="detect-result" aria-live="polite">
-            <p class="result-empty">Le résultat s'affichera ici.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section section--alt" id="simulateur" aria-labelledby="sim-title">
-      <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">Simulateur</span>
-          <h2 id="sim-title">Estimez vos frais</h2>
-          <p class="lead">Commission C-Pay par défaut selon la méthode d'encaissement et le niveau de vérification de votre compte (KYB).</p>
-        </div>
-        <div class="sim">
-          <form id="sim-form" novalidate>
-            <div class="form-row">
-              <div class="field">
-                <label for="sim-amount">Montant encaissé</label>
-                <input type="number" id="sim-amount" min="1" step="1" value="25000" inputmode="numeric">
-              </div>
-              <div class="field">
-                <label for="sim-currency">Devise</label>
-                <select id="sim-currency">
-                  <option value="XOF">XOF (Sénégal, Côte d'Ivoire)</option>
-                  <option value="XAF" selected>XAF (Cameroun, Congo)</option>
-                  <option value="CDF">CDF (RDC)</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="field">
-                <label for="sim-method">Méthode</label>
-                <select id="sim-method">
-                  <option value="mobile_money" selected>Mobile Money (incl. QR et lien)</option>
-                  <option value="card">Carte (Tap-to-Phone, bientôt)</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="sim-level">Niveau de compte</label>
-                <select id="sim-level">
-                  <option value="0" selected>Niveau 0 — KYB en cours</option>
-                  <option value="1">Niveau 1 — KYB validé</option>
-                  <option value="2">Niveau 2 — Contrat négocié</option>
-                </select>
-              </div>
-            </div>
-          </form>
-          <div class="sim-out" aria-live="polite">
-            <p class="note sim-label">Vous recevez (net)</p>
-            <div class="sim-big" id="sim-net">24 625 XAF</div>
-            <div class="sim-row mt-4"><span>Montant</span><strong id="sim-gross">25 000 XAF</strong></div>
-            <div class="sim-row"><span>Taux appliqué</span><strong id="sim-rate">1,5 %</strong></div>
-            <div class="sim-row"><span>Commission C-Pay</span><strong id="sim-fee">375 XAF</strong></div>
-            <p class="note mt-4 mb-0">Taux indicatifs : il s'agit des taux par défaut de la plateforme, hors éventuels frais facturés par l'opérateur Mobile Money au payeur. Le taux contractuel figure dans votre convention marchand.</p>
-          </div>
+        <div class="grid grid--3">
+          <article class="card benefit">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg></div>
+            <h3>Aucun choix d'opérateur à faire</h3>
+            <p>Le pays, la devise et l'opérateur sont déduits du numéro du client. Un seul geste quel que soit son réseau ; seuls Wave et Express Union sont choisis par le client lui-même.</p>
+          </article>
+          <article class="card benefit">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></div>
+            <h3>Un seul solde</h3>
+            <p>Carte, Mobile Money, comptoir ou boutique en ligne : tout alimente le même solde disponible, que vous retirez ou transférez quand vous le souhaitez.</p>
+          </article>
+          <article class="card benefit">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M9 15l2 2 4-4"/></svg></div>
+            <h3>Règlements à J+1 ouvré</h3>
+            <p>Les encaissements de la journée sont regroupés et reversés, en règle générale le jour ouvré suivant, vers votre compte bancaire ou votre wallet. Le délai effectif dépend de votre banque ou de votre opérateur.</p>
+          </article>
+          <article class="card benefit">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/></svg></div>
+            <h3>Reçus et journal</h3>
+            <p>Un reçu pour chaque encaissement, une référence pour chaque mouvement et un journal exportable en CSV : votre comptabilité se fait sans ressaisie.</p>
+          </article>
+          <article class="card benefit">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 2h6M12 18h.01"/><path d="M9 8h6M9 11h6M9 14h3"/></svg></div>
+            <h3>Application Android, liens et QR</h3>
+            <p>Encaissez au comptoir avec l'application Android, à distance avec un lien de paiement envoyé par SMS ou WhatsApp, ou avec un QR affiché en caisse. Boutique en ligne ? L'extension WooCommerce et l'<a href="/developers.html">API</a> versent dans la même caisse.</p>
+          </article>
+          <article class="card benefit">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12a8 8 0 0 1 16 0v5a2 2 0 0 1-2 2h-2v-6h4M4 12v5a2 2 0 0 0 2 2h2v-6H4"/></svg></div>
+            <h3>Un support qui connaît votre pays</h3>
+            <p>Une équipe joignable par e-mail et par l'assistant du site, une réclamation tracée par un numéro de dossier et une couverture confirmée pays par pays avant votre démarrage.</p>
+          </article>
         </div>
       </div>
     </section>
 
-    <section class="section" id="fonctionnement" aria-labelledby="how-title">
+    <section class="section section--alt" id="demarrer" aria-labelledby="start-title">
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">Comment ça marche</span>
-          <h2 id="how-title">Trois étapes, aucun choix technique</h2>
+          <span class="eyebrow">Comment démarrer</span>
+          <h2 id="start-title">Trois étapes jusqu'au premier encaissement</h2>
         </div>
         <ol class="steps">
           <li class="step">
-            <h3>Vous saisissez le montant</h3>
-            <p>Et le numéro du client — ou vous affichez un QR code, ou vous envoyez un lien de paiement par SMS ou WhatsApp.</p>
+            <h3>Créez votre compte</h3>
+            <p>Inscrivez votre commerce sur <a href="https://merchant.c-pay.global/register">merchant.c-pay.global/register</a> : nom commercial, pays, téléphone et e-mail. Votre compte démarre au niveau 0.</p>
           </li>
           <li class="step">
-            <h3>C-Pay détecte et route</h3>
-            <p>Pays, devise et opérateur sont déduits du numéro. La demande de paiement part vers le bon réseau Mobile Money.</p>
+            <h3>Faites vérifier votre entreprise (KYB)</h3>
+            <p>Depuis le portail, transmettez le registre de commerce, l'identifiant fiscal et la pièce d'identité du représentant. La validation ouvre le niveau 1 et des limites plus élevées.</p>
           </li>
           <li class="step">
-            <h3>Le client confirme, votre caisse est créditée</h3>
-            <p>Le client valide sur son téléphone. L'encaissement rejoint votre journal et votre solde disponible : vous retirez ou transférez vos recettes quand vous le souhaitez, ou attendez le règlement automatique (en règle générale à J+1 ouvré).</p>
+            <h3>Encaissez</h3>
+            <p>Saisissez un montant et le numéro de votre client, ou envoyez-lui un lien de paiement. Il confirme sur son téléphone ; votre caisse est créditée et le reçu est disponible.</p>
           </li>
         </ol>
-      </div>
-    </section>
-
-    <section class="section section--alt" id="produits" aria-labelledby="products-title">
-      <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">Produits</span>
-          <h2 id="products-title">Les briques de votre caisse</h2>
-          <p class="lead">Chaque produit C-Pay est une façon d'alimenter ou de piloter la même caisse : un seul solde, un seul journal.</p>
-        </div>
-        <div class="grid grid--3">
-          <article class="card">
-            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3M21 14v7h-7"/></svg></div>
-            <h3>Lien de paiement et QR code</h3>
-            <p>Un lien hébergé sur pay.c-pay.global à envoyer par SMS, WhatsApp ou e-mail, ou un QR à afficher en caisse : le client paie par Mobile Money — ou par carte lorsqu'une passerelle carte est active dans votre pays — sans application à installer. L'encaissement rejoint votre journal.</p>
-          </article>
-          <article class="card">
-            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
-            <h3>Mobile Money au comptoir</h3>
-            <p>Vous saisissez le montant et le numéro ; C-Pay détecte le pays, la devise et l'opérateur, puis envoie la demande de paiement sur le téléphone du client, qui confirme avec son code. Retraits vers votre propre wallet depuis la même caisse.</p>
-          </article>
-          <article class="card card--soon">
-            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></div>
-            <h3>Tap-to-Phone <span class="badge badge--soon">Bientôt</span></h3>
-            <p>Acceptation de cartes sans contact directement sur un smartphone Android, via un SDK certifié. Disponible après certification du module ; nous ne l'activons pas avant.</p>
-          </article>
-          <article class="card">
-            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 21h8"/></svg></div>
-            <h3>Portail marchand</h3>
-            <p>La caisse complète : solde, journal et export, retraits, transferts, comptes bancaires, liens de paiement, clés API, utilisateurs et double authentification. Le portail administrateur sert à l'exploitation par Calculus Plus (confirmation des approvisionnements, exécution des virements).</p>
-            <p><a href="https://merchant.c-pay.global">merchant.c-pay.global</a></p>
-          </article>
-          <article class="card">
-            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 2h6M12 18h.01"/><path d="M9 8h6M9 11h6M9 14h3"/></svg></div>
-            <h3>Application Android</h3>
-            <p>Les opérations de caisse sur smartphone : encaissement au comptoir, suivi du paiement et reçu, retrait vers votre wallet. L'application est remise aux marchands par Calculus Plus ; demandez-la via le <a href="#contact">formulaire de contact</a>.</p>
-          </article>
-          <article class="card">
-            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 9l-4 3 4 3M16 9l4 3-4 3M14 4l-4 16"/></svg></div>
-            <h3>API, SDK et WooCommerce</h3>
-            <p>API REST avec clés par marchand et en-tête d'idempotence, API de caisse pour vos propres outils, SDK Android et extension WooCommerce pour les boutiques en ligne : vos ventes en ligne tombent dans la même caisse.</p>
-            <p><a href="/developers.html">Espace développeurs</a></p>
-          </article>
-        </div>
+        <p class="mt-5"><a class="btn btn--primary" href="https://merchant.c-pay.global/register">Ouvrir un compte marchand</a></p>
       </div>
     </section>
 
     <section class="section" id="pays" aria-labelledby="countries-title">
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">Couverture</span>
+          <span class="eyebrow">Pays &amp; opérateurs</span>
           <h2 id="countries-title">Cinq pays, trois devises</h2>
           <p class="lead">Les opérateurs ci-dessous sont ceux que le moteur de détection reconnaît. Les opérateurs marqués « au choix du client » (Wave, Express Union) ne se déduisent pas du numéro : le client les sélectionne lui-même sur la page de paiement. L'activation effective de chaque opérateur dépend de nos accords locaux — demandez-nous la couverture exacte pour votre pays.</p>
         </div>
@@ -313,41 +241,21 @@
     <section class="section section--alt" id="securite" aria-labelledby="security-title">
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">Sécurité et conformité</span>
+          <span class="eyebrow">Sécurité</span>
           <h2 id="security-title">Ce que nous faisons, sans promesse excessive</h2>
         </div>
         <ul class="sec-list">
-          <li><strong>Double authentification</strong>Les accès au portail marchand et au portail administrateur peuvent être protégés par un second facteur (code à usage unique).</li>
-          <li><strong>Chiffrement en transit</strong>Toutes les communications passent en TLS 1.2 ou 1.3 avec HSTS. Les secrets d'API ne sont jamais réaffichés après leur création.</li>
-          <li><strong>Aucun numéro de carte stocké</strong>C-Pay ne conserve jamais de numéro de carte complet (PAN) : seuls des jetons sont stockés. Nous ne revendiquons pas de certification PCI DSS à ce jour ; les paiements par carte passent par des passerelles tierces et le module Tap-to-Phone sera activé après certification.</li>
-          <li><strong>Hébergement OVH, Union européenne</strong>La plateforme est hébergée chez OVH SAS (Roubaix, France). Voir les <a href="/legal/mentions-legales.html">mentions légales</a>.</li>
-          <li><strong>Journal d'audit et limitation de débit</strong>Les opérations sensibles sont journalisées ; les points d'entrée publics de l'API sont limités en débit.</li>
           <li><strong>Confirmation forte des opérations de caisse</strong>Retraits, transferts et changement de wallet exigent un code à usage unique (si la double authentification est activée) ou votre mot de passe ; cinq confirmations erronées en 15 minutes bloquent temporairement l'opération.</li>
+          <li><strong>Double authentification</strong>Les accès au portail marchand peuvent être protégés par un second facteur (code à usage unique). Les secrets d'API ne sont jamais réaffichés après leur création.</li>
+          <li><strong>Aucun numéro de carte stocké</strong>C-Pay ne conserve jamais de numéro de carte complet : les paiements par carte passent par des passerelles tierces. Nous ne revendiquons aucune certification PCI DSS à ce jour ; Tap-to-Phone sera activé après certification.</li>
+          <li><strong>Chiffrement et hébergement</strong>Communications en TLS 1.2 ou 1.3 avec HSTS ; plateforme hébergée chez OVH SAS (Roubaix, France), Union européenne. Voir les <a href="/legal/mentions-legales.html">mentions légales</a>.</li>
+          <li><strong>Journal d'audit et limitation de débit</strong>Les opérations sensibles sont journalisées ; les points d'entrée publics de l'API sont limités en débit.</li>
           <li><strong>Signalement responsable</strong>Les chercheurs en sécurité peuvent nous écrire à <a href="mailto:security@c-pay.global">security@c-pay.global</a> (fichier <a href="/.well-known/security.txt">security.txt</a>).</li>
         </ul>
       </div>
     </section>
 
-    <section class="section pricing" id="tarifs" aria-labelledby="pricing-title">
-      <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">Tarifs</span>
-          <h2 id="pricing-title">Une commission par transaction, rien d'autre</h2>
-          <p class="lead">Pas d'abonnement ni de frais d'ouverture. La commission baisse avec le niveau de vérification de votre compte.</p>
-        </div>
-        <table>
-          <caption class="visually-hidden">Taux de commission par méthode et niveau de compte</caption>
-          <thead><tr><th scope="col">Méthode</th><th scope="col">Niveau 0<br><small>KYB en cours</small></th><th scope="col">Niveau 1<br><small>KYB validé</small></th><th scope="col">Niveau 2<br><small>Contrat</small></th></tr></thead>
-          <tbody>
-            <tr><th scope="row">Mobile Money, QR, lien de paiement</th><td>1,5 %</td><td>1,2 %</td><td>1,0 %</td></tr>
-            <tr><th scope="row">Carte Tap-to-Phone <span class="badge badge--soon">bientôt</span></th><td>2,5 %</td><td>2,0 %</td><td>1,8 %</td></tr>
-          </tbody>
-        </table>
-        <p class="note mt-3">Taux par défaut de la plateforme, indicatifs et hors frais éventuels de l'opérateur Mobile Money supportés par le payeur. Les reversements vers un compte bancaire ou un portefeuille Mobile Money peuvent faire l'objet de frais de transfert précisés dans votre convention. <a href="#simulateur">Utiliser le simulateur</a>.</p>
-      </div>
-    </section>
-
-    <section class="section section--alt faq" id="faq" aria-labelledby="faq-title">
+    <section class="section faq" id="faq" aria-labelledby="faq-title">
       <div class="container">
         <div class="section-head">
           <span class="eyebrow">FAQ</span>
@@ -355,60 +263,32 @@
         </div>
         <details>
           <summary>Dois-je choisir l'opérateur Mobile Money de mon client ?</summary>
-          <div class="faq-body"><p>Non. Vous saisissez le montant et le numéro de téléphone ; C-Pay déduit le pays, la devise et l'opérateur à partir de l'indicatif et du préfixe. Si le numéro ne permet pas une détection fiable, le client choisit lui-même sur la page de paiement.</p></div>
-        </details>
-        <details>
-          <summary>Dans quels pays puis-je encaisser ?</summary>
-          <div class="faq-body"><p>Sénégal et Côte d'Ivoire (XOF), Cameroun et Congo-Brazzaville (XAF), République démocratique du Congo (CDF). La liste des opérateurs par pays figure dans la section <a href="#pays">Pays</a>.</p></div>
-        </details>
-        <details>
-          <summary>Que se passe-t-il si mon client utilise Wave ou Express Union ?</summary>
-          <div class="faq-body"><p>Ces services ne sont pas liés à un préfixe téléphonique : ils ne peuvent pas être détectés automatiquement. Ils sont proposés comme alternative sur la page de paiement et c'est le client qui les sélectionne.</p></div>
+          <div class="faq-body"><p>Non. Vous saisissez le montant et le numéro de téléphone ; C-Pay déduit le pays, la devise et l'opérateur à partir de l'indicatif et du préfixe. Wave et Express Union ne sont pas liés à un préfixe : ils sont proposés sur la page de paiement et c'est le client qui les sélectionne.</p></div>
         </details>
         <details>
           <summary>Combien coûte C-Pay ?</summary>
-          <div class="faq-body"><p>Une commission par transaction : 1,5 % sur Mobile Money (1,2 % une fois votre KYB validé, 1,0 % avec un contrat). Aucun abonnement. Les taux complets sont dans la section <a href="#tarifs">Tarifs</a> et vous pouvez les tester avec le <a href="#simulateur">simulateur</a>.</p></div>
+          <div class="faq-body"><p>Aucun abonnement ni frais d'ouverture. Vos tarifs et les frais de chaque opération sont affichés dans votre portail marchand avant confirmation : la grille dépend du niveau de vérification de votre compte et, le cas échéant, de votre convention. Les frais éventuellement prélevés par l'opérateur Mobile Money auprès du payeur ne sont pas perçus par C-Pay.</p></div>
         </details>
         <details>
-          <summary>Quand suis-je réglé ?</summary>
-          <div class="faq-body"><p>Les encaissements de la journée sont regroupés et reversés, commission déduite, en règle générale à J+1 ouvré, par virement bancaire ou vers votre portefeuille Mobile Money. Le délai effectif peut dépendre de votre banque ou de votre opérateur.</p></div>
-        </details>
-        <details>
-          <summary>Quels sont les délais de retrait et de transfert ?</summary>
-          <div class="faq-body"><p>Un retrait vers votre wallet Mobile Money est transmis immédiatement à l'opérateur et reste « en cours » jusqu'à sa confirmation. Un transfert wallet → banque est exécuté en règle générale sous 1 jour ouvré ; selon la banque, il peut être traité manuellement par nos opérations. Un approvisionnement banque → wallet est crédité dès que nos opérations confirment la réception de votre virement, qui doit porter la référence de l'ordre. Ces délais sont indicatifs et dépendent des banques et des opérateurs.</p></div>
-        </details>
-        <details>
-          <summary>Combien coûtent les retraits et les transferts ?</summary>
-          <div class="faq-body"><p>Les frais éventuels d'un retrait ou d'un transfert sont calculés selon la règle de votre convention et <strong>affichés avant que vous confirmiez l'opération</strong>, avec le montant net. La commission d'encaissement reste celle de la section <a href="#tarifs">Tarifs</a>.</p></div>
-        </details>
-        <details>
-          <summary>Comment sont sécurisées les confirmations de retrait et de transfert ?</summary>
-          <div class="faq-body"><p>Chaque retrait, transfert ou changement de wallet exige une confirmation forte : le code à usage unique de votre application d'authentification si la double authentification est activée, sinon votre mot de passe. Les retraits ne vont que vers le wallet enregistré sur votre compte, les transferts sortants que vers des comptes bancaires vérifiés, et une limite journalière de retrait s'applique selon votre niveau de vérification. Après cinq confirmations erronées en 15 minutes, l'opération est bloquée temporairement.</p></div>
+          <summary>Quand suis-je réglé, et comment récupérer mes recettes ?</summary>
+          <div class="faq-body"><p>Les encaissements de la journée sont regroupés et reversés en règle générale à J+1 ouvré, par virement bancaire ou vers votre wallet Mobile Money. Vous pouvez aussi, à tout moment, retirer votre solde disponible vers le wallet enregistré sur votre compte (transmis immédiatement à l'opérateur) ou le transférer vers un compte bancaire vérifié (en règle générale sous 1 jour ouvré). Ces délais sont indicatifs et dépendent des banques et des opérateurs.</p></div>
         </details>
         <details>
           <summary>Comment ouvrir un compte marchand ?</summary>
-          <div class="faq-body"><p>Créez votre compte sur <a href="https://merchant.c-pay.global/register">merchant.c-pay.global/register</a>. Vous pouvez commencer avec un compte de niveau 0 ; pour passer au niveau 1, nous vous demandons les pièces de votre entreprise (registre de commerce, identifiant fiscal, pièce d'identité du représentant) dans le cadre de la vérification KYB.</p></div>
-        </details>
-        <details>
-          <summary>Puis-je intégrer C-Pay à mon site ou à mon application ?</summary>
-          <div class="faq-body"><p>Oui. L'API REST, le SDK Android et l'extension WooCommerce sont documentés dans l'<a href="/developers.html">espace développeurs</a>. Les clés API se créent depuis le portail marchand.</p></div>
+          <div class="faq-body"><p>Créez votre compte sur <a href="https://merchant.c-pay.global/register">merchant.c-pay.global/register</a>. Vous commencez au niveau 0 ; pour passer au niveau 1, nous vous demandons les pièces de votre entreprise (registre de commerce, identifiant fiscal, pièce d'identité du représentant) dans le cadre de la vérification KYB.</p></div>
         </details>
         <details>
           <summary>Puis-je accepter les cartes bancaires ?</summary>
-          <div class="faq-body"><p>L'acceptation de cartes sans contact sur smartphone (Tap-to-Phone) est en préparation et sera proposée via un SDK certifié. Nous ne l'activons pas avant la certification du module. Inscrivez-vous via le formulaire de contact pour être prévenu.</p></div>
-        </details>
-        <details>
-          <summary>Mes données et celles de mes clients sont-elles protégées ?</summary>
-          <div class="faq-body"><p>Les échanges sont chiffrés, les accès peuvent être protégés par double authentification, aucun numéro de carte complet n'est conservé et les données sont hébergées chez OVH en Union européenne. Le détail figure dans la section <a href="#securite">Sécurité</a> et dans notre <a href="/legal/confidentialite.html">politique de confidentialité</a>.</p></div>
+          <div class="faq-body"><p>Oui, par lien ou QR de paiement hébergé sur pay.c-pay.global lorsqu'une passerelle carte est active dans votre pays. L'acceptation sans contact sur smartphone (Tap-to-Phone) est en préparation via un SDK certifié ; nous ne l'activons pas avant la certification du module.</p></div>
         </details>
         <details>
           <summary>Comment déposer une réclamation sur une transaction ?</summary>
-          <div class="faq-body"><p>Utilisez le <a href="#reclamation">formulaire de réclamation</a> avec la référence de la transaction. Vous recevez immédiatement un numéro de dossier à rappeler dans vos échanges avec le support.</p></div>
+          <div class="faq-body"><p>Utilisez le <a href="/reclamation.html">formulaire de réclamation</a> avec la référence de la transaction. Vous recevez immédiatement un numéro de dossier à rappeler dans vos échanges avec le support.</p></div>
         </details>
       </div>
     </section>
 
-    <section class="section" id="contact" aria-labelledby="contact-title">
+    <section class="section section--alt" id="contact" aria-labelledby="contact-title">
       <div class="container">
         <div class="section-head">
           <span class="eyebrow">Contact</span>
@@ -452,57 +332,8 @@
               <p>Développeurs : <a href="mailto:developers@c-pay.global">developers@c-pay.global</a></p>
               <p>Sécurité : <a href="mailto:security@c-pay.global">security@c-pay.global</a></p>
               <p>Données personnelles : <a href="mailto:dpo@c-pay.global">dpo@c-pay.global</a></p>
+              <p>Un problème sur une transaction ? <a href="/reclamation.html">Déposer une réclamation</a>.</p>
               <p class="note mb-0">Vous pouvez aussi poser vos questions à l'assistant en bas à droite de la page.</p>
-            </div>
-          </aside>
-        </div>
-      </div>
-    </section>
-
-    <section class="section section--alt" id="reclamation" aria-labelledby="claim-title">
-      <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">Réclamation</span>
-          <h2 id="claim-title">Un problème sur une transaction ?</h2>
-          <p class="lead">Décrivez-le ici. Un numéro de dossier vous est attribué immédiatement ; conservez-le pour vos échanges avec le support.</p>
-        </div>
-        <div class="contact-grid">
-          <form id="claim-form" novalidate>
-            <div class="form-row">
-              <div class="field"><label for="claim-name">Nom et prénom <span class="req" aria-hidden="true">*</span></label><input id="claim-name" name="name" type="text" autocomplete="name" required></div>
-              <div class="field"><label for="claim-email">E-mail <span class="req" aria-hidden="true">*</span></label><input id="claim-email" name="email" type="email" autocomplete="email" required></div>
-            </div>
-            <div class="form-row">
-              <div class="field"><label for="claim-phone">Téléphone utilisé pour le paiement</label><input id="claim-phone" name="phone" type="tel" autocomplete="tel" placeholder="+242 …"></div>
-              <div class="field"><label for="claim-ref">Référence de la transaction <span class="req" aria-hidden="true">*</span></label><input id="claim-ref" name="transactionReference" type="text" required placeholder="ex. MOB-ABC123 ou identifiant du lien"><p class="hint">Visible dans le SMS de confirmation, le reçu ou le portail marchand.</p></div>
-            </div>
-            <div class="form-row">
-              <div class="field"><label for="claim-amount">Montant</label><input id="claim-amount" name="amount" type="number" min="0" step="1" inputmode="numeric"></div>
-              <div class="field"><label for="claim-currency">Devise</label><select id="claim-currency" name="currency"><option value="">—</option><option>XOF</option><option>XAF</option><option>CDF</option></select></div>
-            </div>
-            <div class="field">
-              <label for="claim-type">Nature du problème</label>
-              <select id="claim-type" name="type">
-                <option value="not_received">Paiement débité mais non reçu par le marchand</option>
-                <option value="double_charge">Double prélèvement</option>
-                <option value="refund">Demande de remboursement</option>
-                <option value="settlement">Règlement non reçu (marchand)</option>
-                <option value="other">Autre</option>
-              </select>
-            </div>
-            <div class="field"><label for="claim-desc">Description <span class="req" aria-hidden="true">*</span></label><textarea id="claim-desc" name="description" required minlength="10"></textarea></div>
-            <div class="field field--check">
-              <input id="claim-consent" name="consent" type="checkbox" required>
-              <label for="claim-consent">J'accepte que Calculus Plus SAS traite ces informations pour instruire ma réclamation, conformément à la <a href="/legal/confidentialite.html">politique de confidentialité</a>. <span class="req" aria-hidden="true">*</span></label>
-            </div>
-            <button class="btn btn--primary" type="submit">Déposer la réclamation</button>
-            <div class="form-status" id="claim-status" role="status" aria-live="polite"></div>
-          </form>
-          <aside class="contact-aside">
-            <div class="card">
-              <h3>Avant de déposer une réclamation</h3>
-              <p>Un paiement Mobile Money peut rester « en attente » quelques minutes le temps que le client confirme sur son téléphone. Vérifiez d'abord le statut dans le portail marchand ou auprès de votre opérateur.</p>
-              <p class="note mb-0">Les réclamations sont traitées par le support C-Pay. Les litiges relatifs au fonctionnement d'un service Mobile Money peuvent nécessiter l'intervention de l'opérateur concerné.</p>
             </div>
           </aside>
         </div>
@@ -518,12 +349,11 @@
           <p>C-Pay est un produit de Calculus Plus SAS.</p>
         </div>
         <div>
-          <h3>Produit</h3>
+          <h3>Solution</h3>
           <ul>
-            <li><a href="#caisse">La caisse</a></li>
-            <li><a href="#produits">Produits</a></li>
-            <li><a href="#tarifs">Tarifs</a></li>
-            <li><a href="#pays">Pays couverts</a></li>
+            <li><a href="#caisse">Votre caisse</a></li>
+            <li><a href="#pourquoi">Pourquoi C-Pay</a></li>
+            <li><a href="#pays">Pays &amp; opérateurs</a></li>
             <li><a href="/developers.html">Développeurs</a></li>
           </ul>
         </div>
@@ -533,7 +363,7 @@
             <li><a href="https://merchant.c-pay.global">Portail marchand</a></li>
             <li><a href="https://merchant.c-pay.global/register">Ouvrir un compte</a></li>
             <li><a href="#contact">Contact</a></li>
-            <li><a href="#reclamation">Réclamation</a></li>
+            <li><a href="/reclamation.html">Réclamation</a></li>
           </ul>
         </div>
         <div>

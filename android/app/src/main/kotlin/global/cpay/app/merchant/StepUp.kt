@@ -1,13 +1,17 @@
 package global.cpay.app.merchant
 
 import android.content.Context
+import android.text.InputFilter
 import android.text.InputType
 import android.util.Log
-import android.widget.EditText
-import android.widget.LinearLayout
+import android.view.LayoutInflater
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
+import global.cpay.app.R
 import global.cpay.app.common.ApiClient
 import global.cpay.app.common.ApiErrors
 import global.cpay.app.common.SessionManager
@@ -17,7 +21,7 @@ import kotlin.coroutines.resume
 
 /**
  * Confirmation forte (WAVE-4, docs/CAISSE-API.md §6) partagee par Retirer, Transferer
- * et l'enregistrement du wallet.
+ * et l'enregistrement du wallet. WAVE-5 : feuille inferieure Material 3.
  *
  *  - `{ "code": "<TOTP 6 chiffres>" }` si le 2FA du compte est actif, sinon
  *    `{ "password": "<mot de passe>" }` ;
@@ -52,68 +56,67 @@ object StepUp {
     }
 
     /**
-     * Affiche la boite de dialogue de confirmation et rend l'objet `confirm`
+     * Affiche la feuille de confirmation et rend l'objet `confirm`
      * (`{code}` ou `{password}`), ou null si l'utilisateur annule.
      */
-    suspend fun ask(ctx: Context, method: String, title: String = "Confirmation requise"): Map<String, String>? =
+    suspend fun ask(ctx: Context, method: String, title: String? = null): Map<String, String>? =
         suspendCancellableCoroutine { cont ->
             val isTotp = method == "totp"
-            val pad = (20 * ctx.resources.displayMetrics.density).toInt()
-            val box = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(pad, pad / 2, pad, 0)
+            val dlg = BottomSheetDialog(ctx)
+            val v = LayoutInflater.from(ctx).inflate(R.layout.sheet_step_up, null, false)
+            v.findViewById<TextView>(R.id.tv_stepup_title).text =
+                ctx.getString(if (isTotp) R.string.stepup_totp_title else R.string.stepup_password_title)
+            v.findViewById<TextView>(R.id.tv_stepup_operation).text =
+                title ?: ctx.getString(R.string.stepup_title_default)
+            v.findViewById<TextView>(R.id.tv_stepup_body).text =
+                ctx.getString(if (isTotp) R.string.stepup_totp_body else R.string.stepup_password_body)
+            val til = v.findViewById<TextInputLayout>(R.id.til_stepup)
+            val et  = v.findViewById<TextInputEditText>(R.id.et_stepup)
+            til.hint = ctx.getString(if (isTotp) R.string.stepup_totp_hint else R.string.stepup_password_hint)
+            if (isTotp) {
+                et.inputType = InputType.TYPE_CLASS_NUMBER
+                et.filters = arrayOf(InputFilter.LengthFilter(6))
+                et.textSize = 26f
+                et.letterSpacing = 0.3f
+                til.endIconMode = TextInputLayout.END_ICON_NONE
+            } else {
+                et.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                til.endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
             }
-            box.addView(TextView(ctx).apply {
-                text = if (isTotp) "Saisissez le code à 6 chiffres de votre application d'authentification."
-                       else "Saisissez votre mot de passe pour confirmer l'opération."
-                textSize = 14f
-                setPadding(0, 0, 0, pad / 2)
-            })
-            val input = EditText(ctx).apply {
-                hint = if (isTotp) "000000" else "Mot de passe"
-                inputType = if (isTotp) InputType.TYPE_CLASS_NUMBER
-                            else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                if (isTotp) filters = arrayOf(android.text.InputFilter.LengthFilter(6))
-                textSize = if (isTotp) 24f else 16f
-                letterSpacing = if (isTotp) 0.3f else 0f
-            }
-            box.addView(input)
 
             var answered = false
-            val dlg = AlertDialog.Builder(ctx)
-                .setTitle(if (isTotp) "🔐 $title — code 2FA" else "🔐 $title — mot de passe")
-                .setView(box)
-                .setPositiveButton("Confirmer", null)
-                .setNegativeButton("Annuler") { d, _ -> d.dismiss() }
-                .create()
-            dlg.setOnDismissListener {
-                if (!answered && cont.isActive) { answered = true; cont.resume(null) }
+            fun finish(confirm: Map<String, String>?) {
+                if (answered) return
+                answered = true
+                try { dlg.dismiss() } catch (_: Exception) {}
+                if (cont.isActive) cont.resume(confirm)
             }
-            dlg.setOnShowListener {
-                input.requestFocus()
-                dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    val v = input.text.toString().trim()
-                    if (isTotp && !Regex("^\\d{6}$").matches(v)) {
-                        input.error = "6 chiffres attendus"; return@setOnClickListener
-                    }
-                    if (!isTotp && v.isEmpty()) { input.error = "Mot de passe requis"; return@setOnClickListener }
-                    answered = true
-                    val confirm = if (isTotp) mapOf("code" to v) else mapOf("password" to v)
-                    dlg.dismiss()
-                    if (cont.isActive) cont.resume(confirm)
+            v.findViewById<MaterialButton>(R.id.btn_stepup_confirm).setOnClickListener {
+                val value = et.text?.toString()?.trim() ?: ""
+                if (isTotp && !Regex("^\\d{6}$").matches(value)) {
+                    til.error = ctx.getString(R.string.stepup_error_6); return@setOnClickListener
                 }
+                if (!isTotp && value.isEmpty()) {
+                    til.error = ctx.getString(R.string.stepup_error_pwd); return@setOnClickListener
+                }
+                til.error = null
+                finish(if (isTotp) mapOf("code" to value) else mapOf("password" to value))
             }
+            v.findViewById<MaterialButton>(R.id.btn_stepup_cancel).setOnClickListener { finish(null) }
+            dlg.setOnDismissListener { finish(null) }
+            dlg.setOnShowListener { et.requestFocus() }
             cont.invokeOnCancellation { try { dlg.dismiss() } catch (_: Exception) {} }
+            dlg.setContentView(v)
             dlg.show()
         }
 
     /**
-     * Enchaine : methode → dialogue → appel → (428 → relecture de `methods` → redemande).
+     * Enchaine : methode → feuille → appel → (428 → relecture de `methods` → redemande).
      * Rend la derniere reponse (jamais un 428 non traite), ou null si annule / abandon.
      */
     suspend fun <T> run(
         ctx: Context,
-        title: String = "Confirmation requise",
+        title: String? = null,
         call: suspend (confirm: Map<String, String>) -> Response<T>,
     ): Response<T>? {
         var method = resolveMethod()
@@ -126,7 +129,7 @@ object StepUp {
             if (announced != null) { method = announced; mfaEnabled = announced == "totp" }
             val left = MAX_ATTEMPTS - attempt - 1
             Toast.makeText(ctx,
-                if (left > 0) "Confirmation refusée — ${left} essai(s) restant(s)" else "Confirmation refusée",
+                if (left > 0) ctx.getString(R.string.stepup_refused_left_fmt, left) else ctx.getString(R.string.stepup_refused),
                 Toast.LENGTH_SHORT).show()
         }
         return null

@@ -93,14 +93,14 @@ class TopUpFragment : Fragment() {
     }
 
     private fun switchTab(isTopup: Boolean) {
-        b.tabTopup.setTextColor(if (isTopup) Color.parseColor("#12b6c7") else Color.parseColor("#5a6677"))
-        b.tabUnload.setTextColor(if (!isTopup) Color.parseColor("#12b6c7") else Color.parseColor("#5a6677"))
+        b.tabTopup.setTextColor(if (isTopup) Color.parseColor("#1d4f92") else Color.parseColor("#5a6677"))
+        b.tabUnload.setTextColor(if (!isTopup) Color.parseColor("#1d4f92") else Color.parseColor("#5a6677"))
         b.layoutTopup.visibility  = if (isTopup && cards.isNotEmpty()) View.VISIBLE else View.GONE
         b.layoutUnload.visibility = if (!isTopup && cards.isNotEmpty()) View.VISIBLE else View.GONE
     }
 
     private fun selOp(isTopup: Boolean, op: String) {
-        val active = Color.parseColor("#12b6c7")
+        val active = Color.parseColor("#1d4f92")
         val idle   = Color.parseColor("#5a6677")
         if (isTopup) {
             topupOp = op

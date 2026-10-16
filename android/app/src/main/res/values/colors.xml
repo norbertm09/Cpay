@@ -1,21 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#12b6c7</color>
-    <color name="primary_dark">#1d4f92</color>
-    <color name="accent">#00c896</color>
-    <color name="warning">#ff9500</color>
-    <color name="danger">#ff3b30</color>
-    <color name="bg">#f0f4f8</color>
-    <color name="card">#FFFFFF</color>
-    <color name="border">#dce3ed</color>
-    <color name="text">#1e2d3d</color>
-    <color name="text_secondary">#5a6677</color>
-    <color name="white">#FFFFFF</color>
+    <!-- WAVE-5 : jetons de couleur de la marque C-Pay (Material 3). -->
+    <color name="brand_navy">#12306e</color>
+    <color name="brand_primary">#1d4f92</color>
+    <color name="brand_accent">#f07800</color>
+    <color name="brand_cyan">#00b4c8</color>
+
+    <color name="primary_container">#dbe6f7</color>
+    <color name="on_primary_container">#0b1f45</color>
+    <color name="accent_dark">#c86300</color>
+    <color name="accent_container">#ffe6cc</color>
+    <color name="on_accent_container">#4a2400</color>
+    <color name="cyan_container">#d4f4f8</color>
+    <color name="on_cyan_container">#003c44</color>
+
+    <color name="surface">#ffffff</color>
+    <color name="surface_variant">#eef2f8</color>
+    <color name="surface_dim">#f3f5f9</color>
+    <color name="outline">#d9e0ea</color>
+    <color name="outline_strong">#aab6c8</color>
+    <color name="on_surface">#15213a</color>
+    <color name="on_surface_variant">#5b6676</color>
+    <color name="on_surface_disabled">#9aa5b5</color>
+
+    <color name="success_main">#1b8a4c</color>
+    <color name="success_container">#e3f5ea</color>
+    <color name="warn_main">#b45f06</color>
+    <color name="warn_container">#fff1dc</color>
+    <color name="error_main">#c0392b</color>
+    <color name="error_container">#fde8e6</color>
+    <color name="info_container">#e6eef9</color>
+    <color name="neutral_container">#e9edf3</color>
+
+    <color name="keypad_bg">#f3f5f9</color>
+    <color name="scrim">#66000000</color>
+
+    <!-- Noms historiques (ecrans porteur et anciens ecrans) : remappes sur la marque. -->
+    <color name="primary">#1d4f92</color>
+    <color name="primary_dark">#12306e</color>
+    <color name="accent">#f07800</color>
+    <color name="warning">#b45f06</color>
+    <color name="danger">#c0392b</color>
+    <color name="bg">#f3f5f9</color>
+    <color name="card">#ffffff</color>
+    <color name="border">#d9e0ea</color>
+    <color name="text">#15213a</color>
+    <color name="text_secondary">#5b6676</color>
+    <color name="white">#ffffff</color>
     <color name="black">#000000</color>
-    <!-- Aliases -->
-    <color name="primary_cyan">#12b6c7</color>
+    <color name="primary_cyan">#00b4c8</color>
     <color name="primary_blue">#1d4f92</color>
-    <color name="success">#00c896</color>
-    <color name="background">#f0f4f8</color>
-    <color name="muted">#5a6677</color>
+    <color name="success">#1b8a4c</color>
+    <color name="background">#f3f5f9</color>
+    <color name="muted">#5b6676</color>
 </resources>

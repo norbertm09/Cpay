@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:gravity="center" android:padding="32dp" android:background="@color/surface">
+    <FrameLayout android:layout_width="120dp" android:layout_height="120dp">
+        <com.google.android.material.progressindicator.CircularProgressIndicator android:id="@+id/progress_ring"
+            android:layout_width="120dp" android:layout_height="120dp" app:indicatorSize="120dp" app:trackThickness="8dp"
+            app:indicatorColor="@color/brand_accent" app:trackColor="@color/surface_variant" android:max="100"/>
+        <ImageView android:layout_width="44dp" android:layout_height="44dp" android:layout_gravity="center"
+            android:src="@drawable/ic_phone" app:tint="@color/brand_navy" android:contentDescription="@null"/>
+    </FrameLayout>
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/collect_waiting_title"
+        android:textAppearance="@style/TextAppearance.CPay.Title" android:layout_marginTop="24dp"/>
+    <TextView android:id="@+id/tv_amount" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.CPay.Amount" android:textColor="@color/brand_navy" android:layout_marginTop="8dp"/>
+    <TextView android:id="@+id/tv_phone" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.CPay.Body" android:layout_marginTop="4dp"/>
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/collect_waiting_body"
+        android:textAppearance="@style/TextAppearance.CPay.Secondary" android:gravity="center" android:layout_marginTop="16dp" android:lineSpacingExtra="3dp"/>
+    <TextView android:id="@+id/tv_countdown" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.CPay.Label" android:layout_marginTop="12dp"/>
+    <com.google.android.material.button.MaterialButton android:id="@+id/btn_cancel" style="@style/Widget.CPay.Button.Outlined"
+        android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/collect_waiting_cancel" android:layout_marginTop="32dp"/>
+</LinearLayout>

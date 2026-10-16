@@ -1,142 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@color/bg" android:padding="16dp">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical">
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/surface_dim" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+        <com.google.android.material.button.MaterialButton android:id="@+id/tv_back" style="@style/Widget.CPay.Button.Text"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/back" app:icon="@drawable/ic_back" android:layout_marginStart="-12dp"/>
 
-        <TextView android:id="@+id/tv_back" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:text="← Retour"
-            android:textColor="@color/primary" android:textSize="14sp"
-            android:layout_marginTop="16dp" android:layout_marginBottom="20dp"
-            android:clickable="true" android:focusable="true"/>
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+            <LinearLayout android:id="@+id/layout_ticket" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp">
+                <ImageView android:layout_width="160dp" android:layout_height="wrap_content" android:adjustViewBounds="true" android:layout_gravity="center_horizontal"
+                    android:src="@drawable/logo_cpay" android:contentDescription="@string/cd_logo"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/receipt_title" android:layout_gravity="center_horizontal"
+                    android:textAppearance="@style/TextAppearance.CPay.Secondary" android:layout_marginTop="6dp"/>
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/outline" android:layout_marginTop="16dp" android:layout_marginBottom="16dp"/>
+                <TextView android:id="@+id/tv_status_badge" android:layout_width="wrap_content" android:layout_height="30dp" android:layout_gravity="center_horizontal"
+                    android:gravity="center" android:paddingStart="14dp" android:paddingEnd="14dp" android:textSize="13sp" android:textStyle="bold"
+                    android:background="@drawable/bg_chip" android:layout_marginBottom="8dp"/>
+                <TextView android:id="@+id/tv_amount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal"
+                    android:textAppearance="@style/TextAppearance.CPay.Display" android:textSize="34sp" android:textColor="@color/brand_navy" android:layout_marginBottom="20dp"/>
 
-        <!-- Ticket -->
-        <LinearLayout android:id="@+id/layout_ticket"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="vertical" android:background="@drawable/bg_card"
-            android:padding="24dp" android:layout_marginBottom="16dp">
-
-            <!-- Header ticket -->
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:gravity="center"
-                android:layout_marginBottom="16dp">
-                <ImageView android:layout_width="60dp" android:layout_height="60dp"
-                    android:src="@mipmap/ic_launcher_round" android:layout_marginBottom="8dp"/>
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="CALCULUS PLUS" android:textColor="@color/primary_dark"
-                    android:textSize="16sp" android:textStyle="bold"/>
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Reçu de transaction" android:textColor="@color/text_secondary"
-                    android:textSize="12sp" android:layout_marginTop="2dp"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="8dp" android:paddingBottom="8dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/reference" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    <TextView android:id="@+id/tv_ref" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold" android:fontFamily="monospace" android:textSize="13sp"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="8dp" android:paddingBottom="8dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/receipt_type" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    <TextView android:id="@+id/tv_type" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="8dp" android:paddingBottom="8dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/method" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    <TextView android:id="@+id/tv_method" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="8dp" android:paddingBottom="8dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/receipt_phone" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    <TextView android:id="@+id/tv_phone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="8dp" android:paddingBottom="8dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/date" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    <TextView android:id="@+id/tv_date" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="8dp" android:paddingBottom="8dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/fees" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    <TextView android:id="@+id/tv_fee" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                </LinearLayout>
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/outline" android:layout_marginTop="12dp" android:layout_marginBottom="12dp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/receipt_thanks" android:layout_gravity="center_horizontal"
+                    android:textAppearance="@style/TextAppearance.CPay.Secondary" android:textSize="11sp" android:gravity="center"/>
             </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-            <!-- Séparateur pointillé -->
-            <View android:layout_width="match_parent" android:layout_height="1dp"
-                android:background="@color/border" android:layout_marginBottom="16dp"/>
-
-            <!-- Statut -->
-            <TextView android:id="@+id/tv_status_badge" android:layout_width="wrap_content"
-                android:layout_height="wrap_content" android:text="✅ APPROUVÉ"
-                android:textColor="#00c896" android:textSize="18sp" android:textStyle="bold"
-                android:layout_gravity="center" android:layout_marginBottom="8dp"/>
-
-            <TextView android:id="@+id/tv_amount" android:layout_width="wrap_content"
-                android:layout_height="wrap_content" android:text="0 XAF"
-                android:textColor="@color/primary_dark" android:textSize="32sp"
-                android:textStyle="bold" android:layout_gravity="center"
-                android:layout_marginBottom="20dp"/>
-
-            <!-- Détails -->
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:layout_marginBottom="10dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:text="Référence"
-                        android:textColor="@color/text_secondary" android:textSize="13sp"/>
-                    <TextView android:id="@+id/tv_ref" android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" android:textColor="@color/text"
-                        android:textSize="13sp" android:textStyle="bold" android:fontFamily="monospace"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:layout_marginBottom="10dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:text="Type"
-                        android:textColor="@color/text_secondary" android:textSize="13sp"/>
-                    <TextView android:id="@+id/tv_type" android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" android:textColor="@color/text"
-                        android:textSize="13sp" android:textStyle="bold"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:layout_marginBottom="10dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:text="Méthode"
-                        android:textColor="@color/text_secondary" android:textSize="13sp"/>
-                    <TextView android:id="@+id/tv_method" android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" android:textColor="@color/text"
-                        android:textSize="13sp" android:textStyle="bold"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:layout_marginBottom="10dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:text="Téléphone"
-                        android:textColor="@color/text_secondary" android:textSize="13sp"/>
-                    <TextView android:id="@+id/tv_phone" android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" android:textColor="@color/text"
-                        android:textSize="13sp" android:textStyle="bold"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:layout_marginBottom="10dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:text="Date"
-                        android:textColor="@color/text_secondary" android:textSize="13sp"/>
-                    <TextView android:id="@+id/tv_date" android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" android:textColor="@color/text"
-                        android:textSize="13sp" android:textStyle="bold"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:text="Frais"
-                        android:textColor="@color/text_secondary" android:textSize="13sp"/>
-                    <TextView android:id="@+id/tv_fee" android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" android:textColor="@color/text"
-                        android:textSize="13sp" android:textStyle="bold"/>
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- Footer ticket -->
-            <View android:layout_width="match_parent" android:layout_height="1dp"
-                android:background="@color/border" android:layout_marginTop="16dp"
-                android:layout_marginBottom="12dp"/>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="Merci de votre confiance\nc-pay.global"
-                android:textColor="@color/text_secondary" android:textSize="11sp"
-                android:gravity="center" android:layout_gravity="center"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="16dp">
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_print" style="@style/Widget.CPay.Button"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/print" app:icon="@drawable/ic_print" app:iconGravity="textStart" android:layout_marginEnd="6dp"/>
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_sms" style="@style/Widget.CPay.Button.Outlined"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/receipt_sms" app:icon="@drawable/ic_sms" app:iconGravity="textStart" android:layout_marginStart="6dp" android:textSize="13sp"/>
         </LinearLayout>
-
-        <!-- Actions -->
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginBottom="10dp">
-            <TextView android:id="@+id/btn_print" android:layout_width="0dp"
-                android:layout_height="52dp" android:layout_weight="1"
-                android:text="🖨️ Imprimer" android:textColor="#FFFFFF"
-                android:textSize="14sp" android:textStyle="bold"
-                android:background="@drawable/bg_btn_primary" android:gravity="center"
-                android:layout_marginEnd="8dp" android:clickable="true" android:focusable="true"/>
-            <TextView android:id="@+id/btn_sms" android:layout_width="0dp"
-                android:layout_height="52dp" android:layout_weight="1"
-                android:text="💬 Envoyer SMS" android:textColor="@color/primary"
-                android:textSize="14sp" android:textStyle="bold"
-                android:background="@drawable/bg_btn_outline" android:gravity="center"
-                android:clickable="true" android:focusable="true"/>
-        </LinearLayout>
-
-        <TextView android:id="@+id/btn_share" android:layout_width="match_parent"
-            android:layout_height="52dp" android:text="📤 Partager le reçu"
-            android:textColor="@color/text_secondary" android:textSize="14sp"
-            android:background="@drawable/bg_card" android:gravity="center"
-            android:clickable="true" android:focusable="true"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/btn_share" style="@style/Widget.CPay.Button.Tonal"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/collect_share_receipt" app:icon="@drawable/ic_share" app:iconGravity="textStart" android:layout_marginTop="10dp"/>
     </LinearLayout>
 </ScrollView>

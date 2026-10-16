@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/swipe"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:fillViewport="true" android:clipToPadding="false"
+        android:paddingBottom="16dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="12dp">
+
+            <!-- En-tete -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+                    <TextView android:id="@+id/tv_welcome" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.CPay.Title" android:maxLines="1" android:ellipsize="end"/>
+                    <TextView android:id="@+id/tv_terminal" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                </LinearLayout>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btn_profile" style="@style/Widget.CPay.Button.Icon"
+                    android:layout_width="48dp" android:layout_height="48dp" app:icon="@drawable/ic_person"
+                    app:iconTint="@color/brand_navy" android:contentDescription="@string/more_profile"/>
+            </LinearLayout>
+
+            <include android:id="@+id/offline_banner" layout="@layout/view_offline_banner"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp"/>
+
+            <!-- Solde -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:background="@drawable/bg_balance_card" android:padding="20dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                        android:text="@string/caisse_available" android:textColor="#CCFFFFFF" android:textSize="14sp"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btn_eye" style="@style/Widget.CPay.Button.Icon"
+                        android:layout_width="48dp" android:layout_height="48dp" app:icon="@drawable/ic_visibility"
+                        app:iconTint="@color/white" android:contentDescription="@string/cd_eye"/>
+                </LinearLayout>
+                <TextView android:id="@+id/tv_available" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:textColor="@color/white" android:textSize="36sp" android:textStyle="bold" android:layout_marginTop="-4dp"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="6dp">
+                    <TextView android:id="@+id/tv_pending" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="#D9FFFFFF" android:textSize="13sp"/>
+                    <TextView android:id="@+id/tv_reserved" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="#D9FFFFFF" android:textSize="13sp" android:layout_marginStart="12dp" android:visibility="gone"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Aujourd'hui -->
+            <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                            android:text="@string/caisse_today" android:textAppearance="@style/TextAppearance.CPay.Overline"/>
+                        <TextView android:id="@+id/tv_today_count" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    </LinearLayout>
+                    <TextView android:id="@+id/tv_today_collected" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.CPay.Amount" android:textSize="28sp" android:layout_marginTop="4dp"/>
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="12dp">
+                        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                            <ImageView android:layout_width="32dp" android:layout_height="32dp" android:padding="7dp" android:background="@drawable/bg_circle"
+                                android:src="@drawable/ic_phone" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_by_momo" android:textAppearance="@style/TextAppearance.CPay.Secondary" android:textSize="12sp"/>
+                                <TextView android:id="@+id/tv_by_momo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                            </LinearLayout>
+                        </LinearLayout>
+                        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                            <ImageView android:layout_width="32dp" android:layout_height="32dp" android:padding="7dp" android:background="@drawable/bg_circle"
+                                android:src="@drawable/ic_card" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="8dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_by_card" android:textAppearance="@style/TextAppearance.CPay.Secondary" android:textSize="12sp"/>
+                                <TextView android:id="@+id/tv_by_card" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                            </LinearLayout>
+                        </LinearLayout>
+                    </LinearLayout>
+                    <TextView android:id="@+id/tv_withdrawn" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.CPay.Secondary" android:layout_marginTop="10dp"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Erreur -->
+            <TextView android:id="@+id/tv_error" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:background="@drawable/bg_banner_error" android:padding="12dp" android:textColor="@color/error_main"
+                android:textSize="13sp" android:layout_marginTop="12dp" android:visibility="gone"/>
+
+            <!-- Tuiles -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="12dp">
+                <com.google.android.material.card.MaterialCardView android:id="@+id/tile_collect" style="@style/Widget.CPay.Card.Tile"
+                    android:layout_width="0dp" android:layout_weight="1" android:layout_height="112dp" android:layout_marginEnd="6dp"
+                    app:cardBackgroundColor="@color/brand_accent" app:strokeWidth="0dp" android:clickable="true" android:focusable="true">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="14dp" android:gravity="bottom">
+                        <ImageView android:layout_width="28dp" android:layout_height="28dp" android:src="@drawable/ic_collect" app:tint="@color/white" android:contentDescription="@null"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_tile_collect"
+                            android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold" android:layout_marginTop="8dp"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_tile_collect_sub" android:textColor="#E6FFFFFF" android:textSize="12sp"/>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+                <com.google.android.material.card.MaterialCardView android:id="@+id/tile_withdraw" style="@style/Widget.CPay.Card.Tile"
+                    android:layout_width="0dp" android:layout_weight="1" android:layout_height="112dp" android:layout_marginStart="6dp"
+                    android:clickable="true" android:focusable="true">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="14dp" android:gravity="bottom">
+                        <ImageView android:layout_width="28dp" android:layout_height="28dp" android:src="@drawable/ic_withdraw" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_tile_withdraw"
+                            android:textAppearance="@style/TextAppearance.CPay.Subtitle" android:textSize="18sp" android:layout_marginTop="8dp"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_tile_withdraw_sub" android:textAppearance="@style/TextAppearance.CPay.Secondary" android:textSize="12sp"/>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="12dp">
+                <com.google.android.material.card.MaterialCardView android:id="@+id/tile_transfer" style="@style/Widget.CPay.Card.Tile"
+                    android:layout_width="0dp" android:layout_weight="1" android:layout_height="112dp" android:layout_marginEnd="6dp"
+                    android:clickable="true" android:focusable="true">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="14dp" android:gravity="bottom">
+                        <ImageView android:layout_width="28dp" android:layout_height="28dp" android:src="@drawable/ic_transfer" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_tile_transfer"
+                            android:textAppearance="@style/TextAppearance.CPay.Subtitle" android:textSize="18sp" android:layout_marginTop="8dp"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_tile_transfer_sub" android:textAppearance="@style/TextAppearance.CPay.Secondary" android:textSize="12sp"/>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+                <com.google.android.material.card.MaterialCardView android:id="@+id/tile_journal" style="@style/Widget.CPay.Card.Tile"
+                    android:layout_width="0dp" android:layout_weight="1" android:layout_height="112dp" android:layout_marginStart="6dp"
+                    android:clickable="true" android:focusable="true">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="14dp" android:gravity="bottom">
+                        <ImageView android:layout_width="28dp" android:layout_height="28dp" android:src="@drawable/ic_journal" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_tile_journal"
+                            android:textAppearance="@style/TextAppearance.CPay.Subtitle" android:textSize="18sp" android:layout_marginTop="8dp"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_tile_journal_sub" android:textAppearance="@style/TextAppearance.CPay.Secondary" android:textSize="12sp"/>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <!-- Aides onboarding (cartes fermables) -->
+            <com.google.android.material.card.MaterialCardView android:id="@+id/hint_wallet" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:visibility="gone" app:cardBackgroundColor="@color/info_container" app:strokeWidth="0dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="14dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="36dp" android:layout_height="36dp" android:padding="8dp" android:background="@drawable/bg_circle"
+                        android:backgroundTint="@color/white" android:src="@drawable/ic_wallet" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="12dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_wallet_title" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_wallet_body" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                        <com.google.android.material.button.MaterialButton android:id="@+id/btn_hint_wallet" style="@style/Widget.CPay.Button.Text"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_wallet_action" android:layout_marginStart="-12dp"/>
+                    </LinearLayout>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btn_hint_wallet_close" style="@style/Widget.CPay.Button.Icon"
+                        android:layout_width="48dp" android:layout_height="48dp" app:icon="@drawable/ic_close" android:contentDescription="@string/dismiss"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <com.google.android.material.card.MaterialCardView android:id="@+id/hint_bank" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:visibility="gone" app:cardBackgroundColor="@color/info_container" app:strokeWidth="0dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="14dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="36dp" android:layout_height="36dp" android:padding="8dp" android:background="@drawable/bg_circle"
+                        android:backgroundTint="@color/white" android:src="@drawable/ic_bank" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="12dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_bank_title" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_bank_body" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                        <com.google.android.material.button.MaterialButton android:id="@+id/btn_hint_bank" style="@style/Widget.CPay.Button.Text"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_bank_action" android:layout_marginStart="-12dp"/>
+                    </LinearLayout>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btn_hint_bank_close" style="@style/Widget.CPay.Button.Icon"
+                        android:layout_width="48dp" android:layout_height="48dp" app:icon="@drawable/ic_close" android:contentDescription="@string/dismiss"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <com.google.android.material.card.MaterialCardView android:id="@+id/hint_kyb" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:visibility="gone" app:cardBackgroundColor="@color/info_container" app:strokeWidth="0dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="14dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="36dp" android:layout_height="36dp" android:padding="8dp" android:background="@drawable/bg_circle"
+                        android:backgroundTint="@color/white" android:src="@drawable/ic_document" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="12dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_kyb_title" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_kyb_body" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                        <com.google.android.material.button.MaterialButton android:id="@+id/btn_hint_kyb" style="@style/Widget.CPay.Button.Text"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_hint_kyb_action" android:layout_marginStart="-12dp"/>
+                    </LinearLayout>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btn_hint_kyb_close" style="@style/Widget.CPay.Button.Icon"
+                        android:layout_width="48dp" android:layout_height="48dp" app:icon="@drawable/ic_close" android:contentDescription="@string/dismiss"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <TextView android:id="@+id/tv_hint_card" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:background="@drawable/bg_banner_info" android:padding="12dp" android:textAppearance="@style/TextAppearance.CPay.Secondary"
+                android:layout_marginTop="12dp" android:visibility="gone"/>
+
+            <!-- Dernieres operations -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+                android:gravity="center_vertical" android:layout_marginTop="20dp">
+                <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:text="@string/caisse_recent" android:textAppearance="@style/TextAppearance.CPay.Subtitle"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btn_recent_all" style="@style/Widget.CPay.Button.Text"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/caisse_recent_all"/>
+            </LinearLayout>
+            <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                    <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_recent" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:nestedScrollingEnabled="false" android:overScrollMode="never"/>
+                    <TextView android:id="@+id/tv_recent_empty" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="@string/caisse_recent_empty" android:textAppearance="@style/TextAppearance.CPay.Secondary"
+                        android:padding="20dp" android:gravity="center" android:visibility="gone"/>
+                    <ProgressBar android:id="@+id/progress_recent" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_gravity="center" android:layout_margin="16dp" android:visibility="gone"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</androidx.swiperefreshlayout.widget.SwipeRefreshLayout>

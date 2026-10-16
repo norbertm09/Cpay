@@ -5,16 +5,14 @@
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="%PUBLIC_URL%/favicon.png" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
-    <meta name="description" content="C-Pay — Carte Virtuelle. Plateforme de paiement éditée par Calculus Plus SAS." />
+    <meta name="description" content="C-Pay — votre carte virtuelle : soldes, paiements marchands, opérations et sécurité. Un service édité par Calculus Plus SAS." />
     <meta name="application-name" content="C-Pay" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#1d4f92" />
-    <title>C-Pay — Carte Virtuelle</title>
+    <title>C-Pay — Carte virtuelle</title>
     <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
     <style>
-      /* Inter (corps) et Jost (titres) — polices variables auto-hebergees,
-         subset latin uniquement. Subset latin uniquement.
-         font-weight: 100 900 = plage variable, pas une valeur unique. */
+      /* Inter — police variable auto-hébergée (subset latin). */
       @font-face {
         font-family: 'Inter';
         font-style: normal;
@@ -23,31 +21,11 @@
         src: url('/fonts/inter-latin.woff2') format('woff2-variations');
         unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
       }
-      @font-face {
-        font-family: 'Jost';
-        font-style: normal;
-        font-weight: 100 900;
-        font-display: swap;
-        src: url('/fonts/jost-latin.woff2') format('woff2-variations');
-        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-      /* Century Gothic via Google Fonts fallback (Nunito est très proche) */
-      * {
-        font-family:Inter,'Century Gothic','URW Gothic',Jost,system-ui,sans-serif!important;
-      }
-      body {
-        margin: 0;
-        font-family:Inter,'Century Gothic','URW Gothic',Jost,system-ui,sans-serif!important;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-      }
-      input, button, select, textarea {
-        font-family:Inter,'Century Gothic','URW Gothic',Jost,system-ui,sans-serif!important;
-      }
+      body { margin: 0; }
     </style>
   </head>
   <body>
-    <noscript>JavaScript requis</noscript>
+    <noscript>Cette application nécessite JavaScript.</noscript>
     <div id="root"></div>
   </body>
 </html>

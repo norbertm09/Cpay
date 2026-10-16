@@ -68,7 +68,7 @@ class TerminalsFragment : Fragment() {
                 val body = mutableMapOf("label" to label)
                 if (serial.isNotEmpty()) body["serial"] = serial
                 val r = ApiClient.api.merchantCreateTerminal(body)
-                if (r.isSuccessful) { toast("Terminal ajouté ✅"); toggle(); load() }
+                if (r.isSuccessful) { toast("Terminal ajouté"); toggle(); load() }
                 else toast(r.errorBody()?.string() ?: "Erreur")
             } catch (e: Exception) { toast("Erreur réseau") }
         }

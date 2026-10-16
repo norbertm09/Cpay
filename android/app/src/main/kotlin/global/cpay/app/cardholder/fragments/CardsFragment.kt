@@ -50,8 +50,8 @@ class CardsFragment : Fragment() {
     }
 
     private fun switchTab(isCreated: Boolean) {
-        b.tabCreated.setTextColor(if (isCreated) Color.parseColor("#12b6c7") else Color.parseColor("#5a6677"))
-        b.tabEnrolled.setTextColor(if (!isCreated) Color.parseColor("#12b6c7") else Color.parseColor("#5a6677"))
+        b.tabCreated.setTextColor(if (isCreated) Color.parseColor("#1d4f92") else Color.parseColor("#5a6677"))
+        b.tabEnrolled.setTextColor(if (!isCreated) Color.parseColor("#1d4f92") else Color.parseColor("#5a6677"))
         b.layoutCreated.visibility  = if (isCreated) View.VISIBLE else View.GONE
         b.layoutEnrolled.visibility = if (!isCreated) View.VISIBLE else View.GONE
     }
