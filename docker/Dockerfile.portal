@@ -9,6 +9,9 @@ ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
 ENV INLINE_RUNTIME_CHUNK=false
 # Les warnings ESLint ne doivent pas faire echouer le build en CI.
 ENV CI=false
+# Build CRA : pas de source maps (memoire et temps) et tas Node borne pour les VPS modestes
+ENV GENERATE_SOURCEMAP=false
+ENV NODE_OPTIONS=--max-old-space-size=2048
 COPY ${APP_DIR}/package*.json ./
 RUN npm install
 COPY ${APP_DIR}/public ./public
