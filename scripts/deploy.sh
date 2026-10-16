@@ -108,11 +108,15 @@ log "Journal : $LOG_FILE"
 
 # ─── 2. Build des images (necessaire pour la verification d'env dans l'image) ───
 if [ "$SKIP_BUILD" = false ]; then
-  log "docker compose build (CPLUS_TAG=$CPLUS_TAG)…"
+  log "docker compose build (CPLUS_TAG=$CPLUS_TAG) — un service a la fois pour menager la memoire du VPS…"
   BUILD_STATUS="$LOG_DIR/.build_status_$TIMESTAMP"
-  { compose build 2>&1; echo "$?" > "$BUILD_STATUS"; } | tee -a "$LOG_FILE"
-  _st="$(cat "$BUILD_STATUS")"; rm -f "$BUILD_STATUS"
-  [ "$_st" = "0" ] || die "docker compose build en echec (code $_st)"
+  for svc in $(compose config --services); do
+    log "build $svc"
+    # set +e dans le sous-shell : avec set -e, un echec de build sortait avant d'ecrire le statut
+    ( set +e; compose build "$svc" 2>&1; echo "$?" > "$BUILD_STATUS" ) | tee -a "$LOG_FILE"
+    _st="$(cat "$BUILD_STATUS" 2>/dev/null || echo 1)"; rm -f "$BUILD_STATUS"
+    [ "$_st" = "0" ] || die "docker compose build $svc en echec (code $_st) — voir $LOG_FILE"
+  done
   log "Images construites"
 else
   warn "Build ignore (--skip-build)"
