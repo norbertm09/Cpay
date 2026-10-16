@@ -72,8 +72,8 @@ api.interceptors.response.use(r => r, async e => {
   return Promise.reject(e);
 });
 
-const FONT = "Inter, 'Century Gothic', 'URW Gothic', Jost, system-ui, sans-serif";
-const FONT_TITRE = "Jost, 'Century Gothic', 'URW Gothic', Questrial, system-ui, sans-serif";
+const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif';
+const FONT_TITRE = FONT;
 const P='#12b6c7',BLUE='#1d4f92',G='#00c896',DANGER='#ff3b30',WARNING='#ff9500';
 const BG='#f0f4f8',CARD='#fff',BORDER='#dce3ed',TEXT='#1e2d3d',MUTED='#5a6677';
 const fmtNum = n => parseFloat(n||0).toLocaleString('fr-FR');

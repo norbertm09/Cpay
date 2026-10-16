@@ -74,8 +74,8 @@ api.interceptors.response.use(r => r, async e => {
   return Promise.reject(e);
 });
 
-const FONT = "Inter, 'Century Gothic', 'URW Gothic', Jost, system-ui, sans-serif";
-const FONT_TITRE = "Jost, 'Century Gothic', 'URW Gothic', Questrial, system-ui, sans-serif";
+const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif';
+const FONT_TITRE = FONT;
 const P='#12b6c7',BLUE='#1d4f92',G='#00c896',R='#ff3b30',O='#ff9500';
 const BG='#f0f4f8',CARD='#fff',BORDER='#dce3ed',TEXT='#1e2d3d',MUTED='#5a6677';
 const fmtNum = n => parseFloat(n||0).toLocaleString('fr-FR');
@@ -1196,7 +1196,7 @@ const Transactions = () => {
       t.type, fmtNum(t.amount)+' XAF', fmtNum(t.fee_amount)+' XAF', t.status
     ]);
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <style>body{font-family:Arial,sans-serif;padding:20px}h1{color:#1d4f92}
+    <style>body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;padding:20px}h1{color:#1d4f92}
     table{width:100%;border-collapse:collapse;font-size:11px}
     th{background:#1d4f92;color:#fff;padding:7px;text-align:left}
     td{padding:6px 7px;border-bottom:1px solid #dce3ed}
@@ -1817,7 +1817,7 @@ const Rapport = () => {
     const t = data.totals;
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <style>
-      body{font-family:Arial,sans-serif;padding:24px;color:#1e2d3d}
+      body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;padding:24px;color:#1e2d3d}
       h1{color:#1d4f92;margin-bottom:4px}
       .subtitle{color:#5a6677;font-size:13px;margin-bottom:20px}
       .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
