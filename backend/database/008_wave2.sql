@@ -140,7 +140,7 @@ ALTER TABLE IF EXISTS distribution_agents ADD COLUMN IF NOT EXISTS temp_password
 -- C-Pay — Migration 008c (vague 2) : CRM vitrine — leads, réclamations, assistant
 -- ================================================================
 CREATE TABLE IF NOT EXISTS assistant_conversations (
-  conversation_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  conversation_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   locale            VARCHAR(5)  NOT NULL DEFAULT 'fr',
   page              VARCHAR(200),
   ip_address        INET,
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS assistant_conversations (
 CREATE INDEX IF NOT EXISTS idx_assistant_conv_last ON assistant_conversations(last_message_at DESC);
 
 CREATE TABLE IF NOT EXISTS assistant_messages (
-  message_id      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  message_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id UUID NOT NULL REFERENCES assistant_conversations(conversation_id) ON DELETE CASCADE,
   role            VARCHAR(16) NOT NULL,          -- user | assistant
   content         TEXT NOT NULL,
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS assistant_messages (
 CREATE INDEX IF NOT EXISTS idx_assistant_msg_conv ON assistant_messages(conversation_id, created_at);
 
 CREATE TABLE IF NOT EXISTS crm_leads (
-  lead_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  lead_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name            VARCHAR(120) NOT NULL,
   email           VARCHAR(160),
   phone           VARCHAR(32),
@@ -191,7 +191,7 @@ CREATE INDEX IF NOT EXISTS idx_crm_leads_status ON crm_leads(status, created_at 
 CREATE INDEX IF NOT EXISTS idx_crm_leads_email  ON crm_leads(email);
 
 CREATE TABLE IF NOT EXISTS crm_claims (
-  claim_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  claim_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   reference       VARCHAR(12) NOT NULL UNIQUE,            -- REC-XXXXXX
   name            VARCHAR(120) NOT NULL,
   email           VARCHAR(160),

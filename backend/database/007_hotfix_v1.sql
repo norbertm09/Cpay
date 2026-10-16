@@ -17,7 +17,7 @@ CREATE INDEX IF NOT EXISTS idx_sq_unsettled ON settlement_queue(merchant_id, cur
 
 -- Callbacks opérateurs : traçabilité (table déjà présente en 00x si créée ailleurs)
 CREATE TABLE IF NOT EXISTS transaction_events (
-  event_id       UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   transaction_id UUID,
   merchant_id    UUID,
   event_type     VARCHAR(64) NOT NULL,
