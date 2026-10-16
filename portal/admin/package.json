@@ -1,6 +1,6 @@
 {
   "name": "cpay-admin-portal",
-  "version": "3.0.0",
+  "version": "2.7.0",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",
