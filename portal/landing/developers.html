@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Développeurs — API C-Pay</title>
-  <meta name="description" content="Intégrez la caisse C-Pay : API REST (Mobile Money, QR, lien de paiement, retraits, transferts, journal), clés API, idempotence, webhooks, SDK Android et extension WooCommerce.">
+  <meta name="description" content="Documentation développeurs C-Pay : démarrage rapide, authentification par clé API, endpoints publics, API Caisse, webhooks signés, SDK JavaScript, PHP et Android, extension WooCommerce, sandbox et codes d'erreur.">
   <link rel="canonical" href="https://c-pay.global/developers.html">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon.png">
@@ -16,15 +16,15 @@
   <meta property="og:site_name" content="C-Pay">
   <meta property="og:url" content="https://c-pay.global/developers.html">
   <meta property="og:title" content="Développeurs — API C-Pay">
-  <meta property="og:description" content="API REST, SDK Android et extension WooCommerce pour encaisser par Mobile Money, QR et lien de paiement dans 5 pays.">
+  <meta property="og:description" content="API REST, webhooks signés, SDK JavaScript, PHP et Android, extension WooCommerce : intégrez la caisse C-Pay à votre site ou votre application.">
   <meta property="og:image" content="https://c-pay.global/og-image.png">
   <meta property="og:locale" content="fr_FR">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Développeurs — API C-Pay">
-  <meta name="twitter:description" content="API REST, SDK Android et extension WooCommerce pour encaisser par Mobile Money, QR et lien de paiement.">
+  <meta name="twitter:description" content="API REST, webhooks signés, SDK et extension WooCommerce pour intégrer la caisse C-Pay.">
   <meta name="twitter:image" content="https://c-pay.global/og-image.png">
 </head>
-<body>
+<body class="page-dev">
   <a class="skip-link" href="#main">Aller au contenu</a>
   <header class="site-header" id="site-header">
     <div class="container">
@@ -34,323 +34,606 @@
       </a>
       <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Ouvrir le menu"><span></span></button>
       <nav class="site-nav" id="site-nav" aria-label="Navigation principale">
-        <a href="#demarrage">Démarrage</a>
-        <a href="#auth">Authentification</a>
-        <a href="#endpoints">Endpoints</a>
-        <a href="#caisse-api">Caisse</a>
-        <a href="#exemples">Exemples</a>
-        <a href="#webhooks">Webhooks</a>
-        <a href="#sdk">SDK</a>
+        <a href="/#caisse">Solution</a>
+        <a href="/#pays">Pays &amp; opérateurs</a>
+        <a href="/developers.html" aria-current="page">Développeurs</a>
         <a href="/#contact">Contact</a>
       </nav>
       <div class="header-cta">
-        <a class="btn btn--outline btn--sm" href="https://api.c-pay.global/api/v1/docs/" rel="noopener">Swagger</a>
-        <a class="btn btn--primary btn--sm" href="https://merchant.c-pay.global">Portail</a>
+        <a class="btn btn--outline btn--sm" href="https://merchant.c-pay.global">Se connecter</a>
+        <a class="btn btn--primary btn--sm" href="https://merchant.c-pay.global/register">Ouvrir un compte</a>
       </div>
     </div>
   </header>
 
   <main id="main">
-    <section class="page-hero">
+    <section class="page-hero page-hero--dev">
       <div class="container">
-        <span class="eyebrow eyebrow--light">Espace développeurs</span>
-        <h1>Intégrez C-Pay à votre site ou votre application</h1>
-        <p>Une API REST pour alimenter et piloter la caisse C-Pay : encaisser par Mobile Money et par carte (lien ou QR hébergé), retirer vers le wallet du marchand, transférer entre wallet et banque, lire le journal, et recevoir des webhooks. Le pays, la devise et l'opérateur sont détectés à partir du numéro du client : votre code n'a rien à choisir.</p>
-        <p class="mt-5">
-          <a class="btn btn--light" href="https://api.c-pay.global/api/v1/docs/" rel="noopener">Référence API (Swagger)</a>
-          <a class="btn btn--ghost-light" href="mailto:developers@c-pay.global?subject=Acc%C3%A8s%20sandbox%20C-Pay">Demander un accès sandbox</a>
+        <span class="eyebrow eyebrow--light">Documentation développeurs</span>
+        <h1>Intégrez la caisse C-Pay à votre site ou votre application</h1>
+        <p>Une API REST, des webhooks signés, des SDK et une extension WooCommerce pour que vos ventes en ligne tombent dans la même caisse que le comptoir. Base : <code>https://api.c-pay.global/api/v1</code>.</p>
+        <p class="hero-actions">
+          <a class="btn btn--light" href="#demarrage">Démarrage rapide</a>
+          <a class="btn btn--ghost-light" href="https://api.c-pay.global/api/v1/docs/" rel="noopener">Référence Swagger</a>
         </p>
       </div>
     </section>
 
-    <section class="section" id="capacites">
-      <div class="container">
-        <h2>Ce que vous pouvez faire</h2>
-        <div class="grid grid--4">
-          <article class="card"><h3>Encaisser</h3><p>Une demande de paiement part vers le téléphone du client ; il confirme avec son code Mobile Money. Statut en temps réel par webhook.</p></article>
-          <article class="card"><h3>QR et lien de paiement</h3><p>Générez un QR à afficher ou un lien à envoyer par SMS, WhatsApp ou e-mail. Le client paie sans application.</p></article>
-          <article class="card"><h3>Retirer et transférer</h3><p>Retrait du solde vers le wallet enregistré du marchand, transferts wallet → banque et ordres d'approvisionnement banque → wallet, avec confirmation forte (<a href="#caisse-api">API Caisse</a>).</p></article>
-          <article class="card"><h3>Suivre</h3><p>Journal de caisse unifié avec export CSV, liste des transactions, webhooks signés et clés API gérées depuis le portail marchand.</p></article>
-        </div>
-      </div>
-    </section>
+    <div class="container devdoc">
+      <aside class="toc" id="toc">
+        <button class="toc-toggle" id="toc-toggle" type="button" aria-expanded="false" aria-controls="toc-nav">Sommaire</button>
+        <nav class="toc-nav" id="toc-nav" aria-label="Sommaire de la documentation">
+          <ol>
+            <li><a href="#demarrage">Démarrage rapide</a></li>
+            <li><a href="#auth">Authentification</a></li>
+            <li><a href="#endpoints">Endpoints publics</a>
+              <ol>
+                <li><a href="#ep-pay-links">Créer un lien de paiement</a></li>
+                <li><a href="#ep-transactions">Lister les transactions</a></li>
+                <li><a href="#ep-detect">Détecter un opérateur</a></li>
+                <li><a href="#ep-collect">Encaissement direct <span class="badge badge--soon">bientôt</span></a></li>
+              </ol>
+            </li>
+            <li><a href="#caisse-api">API Caisse (session)</a></li>
+            <li><a href="#webhooks">Webhooks sortants</a></li>
+            <li><a href="#sdk">SDK &amp; plugin</a></li>
+            <li><a href="#sandbox">Sandbox</a></li>
+            <li><a href="#erreurs">Codes d'erreur</a></li>
+          </ol>
+          <p class="toc-extra"><a href="https://api.c-pay.global/api/v1/docs/" rel="noopener">Référence Swagger ↗</a><br><a href="mailto:developers@c-pay.global">developers@c-pay.global</a></p>
+        </nav>
+      </aside>
 
-    <section class="section section--alt" id="demarrage">
-      <div class="container">
-        <h2>Démarrage</h2>
-        <ol class="steps">
-          <li class="step"><h3>Compte marchand</h3><p>Créez votre compte sur <a href="https://merchant.c-pay.global/register">merchant.c-pay.global/register</a>. Un compte de niveau 0 suffit pour intégrer.</p></li>
-          <li class="step"><h3>Clé API</h3><p>Portail marchand → <strong>Clés API</strong> → créez une clé avec les permissions voulues (<code>collect</code>, <code>disburse</code>, <code>pay_links</code>, <code>transactions</code>). Le secret n'est affiché qu'une fois.</p></li>
-          <li class="step"><h3>Premier appel</h3><p>Ajoutez l'en-tête <code>X-API-Key</code> et appelez <code>POST /merchant/public/collect</code> avec un montant et un numéro de téléphone.</p></li>
-        </ol>
-        <div class="card mt-5">
-          <h3>Environnement de test (sandbox)</h3>
-          <p>Un environnement sandbox est disponible <strong>sur demande</strong> : il n'est pas encore en libre-service. Écrivez à <a href="mailto:developers@c-pay.global?subject=Acc%C3%A8s%20sandbox%20C-Pay">developers@c-pay.global</a> en précisant votre cas d'usage, le pays visé et le type d'intégration ; nous revenons vers vous avec des identifiants et les numéros de test.</p>
-        </div>
-      </div>
-    </section>
+      <div class="devdoc-main doc">
 
-    <section class="section" id="auth">
-      <div class="container doc">
-        <h2>Authentification et conventions</h2>
-        <dl class="kv">
-          <dt>Base URL</dt><dd><code>https://api.c-pay.global/api/v1</code></dd>
-          <dt>Authentification</dt><dd>En-tête <code>X-API-Key: sk_live_…</code> sur toutes les routes <code>/merchant/public/*</code>. Les clés créées récemment ont aussi un secret : ajoutez alors <code>X-API-Secret</code>.</dd>
-          <dt>Idempotence</dt><dd>En-tête <code>Idempotency-Key</code> (8 à 128 caractères, par exemple un UUID) sur les requêtes qui créent une transaction. Rejouer la même clé avec le même corps renvoie la réponse initiale ; la même clé avec un corps différent renvoie <code>409 IDEMPOTENCY_CONFLICT</code>.</dd>
-          <dt>Format</dt><dd>JSON en entrée et en sortie (<code>Content-Type: application/json</code>). Montants en unité de la devise, sans décimales pour XOF, XAF et CDF.</dd>
-          <dt>Erreurs</dt><dd>Corps <code>{ "error": "…", "code": "…" }</code>. Codes HTTP : <code>401</code> clé invalide, <code>403</code> permission manquante, <code>422</code> paramètres invalides, <code>429</code> limite de débit.</dd>
-          <dt>Détection publique</dt><dd><code>POST /detect/phone</code> avec <code>{ "phone": "+237670123456" }</code>, sans clé, limité à 30 requêtes par minute : renvoie le pays, la devise et l'opérateur. Utile pour pré-afficher l'opérateur côté client.</dd>
-        </dl>
-      </div>
-    </section>
+        <section class="docsec" id="demarrage" aria-labelledby="demarrage-title">
+          <h2 id="demarrage-title">Démarrage rapide</h2>
+          <p>Trois étapes séparent votre compte de votre premier lien de paiement. Un compte de niveau 0 suffit pour intégrer ; la vérification KYB n'est nécessaire que pour relever vos limites.</p>
+          <ol class="steps steps--compact">
+            <li class="step"><h3>Créez un compte marchand</h3><p>Sur <a href="https://merchant.c-pay.global/register">merchant.c-pay.global/register</a>. Le portail marchand est aussi l'endroit où vous suivez les paiements reçus par l'API.</p></li>
+            <li class="step"><h3>Créez une clé API dans le portail</h3><p>Portail marchand → <strong>Clés API</strong> → nouvelle clé avec les permissions voulues (<code>pay_links</code>, <code>transactions</code>). La clé et son secret ne sont affichés qu'une fois : stockez-les côté serveur, jamais dans un navigateur ou une application mobile.</p></li>
+            <li class="step"><h3>Créez votre premier lien de paiement</h3><p>Trois appels cURL ci-dessous : vérifier la clé, créer le lien, retrouver le paiement dans vos transactions.</p></li>
+          </ol>
 
-    <section class="section section--alt" id="endpoints">
-      <div class="container doc">
-        <h2>Endpoints</h2>
-        <p class="note">Les champs ci-dessous correspondent à l'API en production. La référence Swagger fait foi en cas d'écart : <a href="https://api.c-pay.global/api/v1/docs/" rel="noopener">api.c-pay.global/api/v1/docs/</a>.</p>
+          <h3>Votre premier lien de paiement en trois appels</h3>
+          <pre><code># 1. Vérifier la clé : la liste (vide ou non) de vos transactions répond 200
+curl https://api.c-pay.global/api/v1/merchant/public/transactions?limit=1 \
+  -H "X-API-Key: $CPAY_API_KEY" \
+  -H "X-API-Secret: $CPAY_API_SECRET"
 
-        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/merchant/public/collect</span> <span class="badge">bientôt</span>
-          <p>Encaissement Mobile Money direct par API. Corps prévu : <code>amount</code>, <code>customerPhone</code> (format international), <code>currency</code> (déduite du pays si absente), <code>description</code>, <code>reference</code>. Cet endpoint répond actuellement <code>410 FEATURE_DISABLED</code> : il est ouvert pays par pays au fil de l'activation des opérateurs. En attendant, utilisez les liens de paiement ci-dessous, qui couvrent le même besoin.</p></div>
-        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/merchant/public/pay-links</span>
-          <p>Crée un lien de paiement partageable. Corps : <code>amount</code> (obligatoire), <code>currency</code> (défaut XAF), <code>description</code>, <code>expiresIn</code> (1 à 720 heures, défaut 24). Réponse <code>201</code> : <code>pay_link_id</code>, <code>short_id</code>, <code>short_url</code> (<code>https://pay.c-pay.global/…</code>), <code>expires_at</code>. Permission <code>pay_links</code>.</p></div>
-        <div class="endpoint"><span class="badge badge--get">GET</span><span class="path">/merchant/public/transactions</span>
-          <p>Historique paginé de vos transactions (<code>limit</code>, <code>offset</code>, <code>status</code>). Permission <code>transactions</code>.</p></div>
-        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/detect/phone</span>
-          <p>Public, sans clé. Corps : <code>{ "phone" }</code>. Réponse : <code>country</code>, <code>countryName</code>, <code>currency</code>, <code>operator</code>, <code>brand</code> et, le cas échéant, <code>alternatives</code> (services choisis par le client, comme Wave ou Express Union).</p></div>
-      </div>
-    </section>
+# 2. Créer un lien de paiement de 25 000 XOF valable 48 h
+curl -X POST https://api.c-pay.global/api/v1/merchant/public/pay-links \
+  -H "X-API-Key: $CPAY_API_KEY" \
+  -H "X-API-Secret: $CPAY_API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 25000, "currency": "XOF", "description": "Facture INV-001", "expiresIn": 48 }'
+# → 201 { "short_url": "https://pay.c-pay.global/AB12CD", "expires_at": "…", … }
+#   Envoyez short_url à votre client (SMS, WhatsApp, e-mail) ou affichez-le en QR.
 
-    <section class="section" id="caisse-api">
-      <div class="container doc">
-        <h2>API Caisse (session marchand)</h2>
-        <p>Ces endpoints portent les opérations de caisse du portail marchand et de l'application Android : <strong>encaisser, retirer, transférer, journal</strong>. Ils sont authentifiés par la <strong>session du marchand</strong> (jeton d'accès obtenu via <code>POST /merchant/auth/login</code>, en-tête <code>Authorization: Bearer &lt;access&gt;</code>, valable 15 minutes et renouvelé par <code>/merchant/auth/refresh</code>), <strong>pas par clé API</strong>. Les endpoints publics <code>/merchant/public/*</code> à clé API ci-dessus restent inchangés. Toute requête qui crée un mouvement exige l'en-tête <code>Idempotency-Key</code>.</p>
-        <p class="note">Base : <code>https://api.c-pay.global/api/v1</code>. Montants en unité de la devise (entiers pour XOF, XAF, CDF). Erreurs : <code>{ "error", "code", "details?" }</code>.</p>
+# 3. Retrouver le paiement une fois le client passé par la page
+curl "https://api.c-pay.global/api/v1/merchant/public/transactions?status=authorized&amp;limit=5" \
+  -H "X-API-Key: $CPAY_API_KEY" \
+  -H "X-API-Secret: $CPAY_API_SECRET"</code></pre>
+          <p class="note">Pour être prévenu sans interroger l'API, configurez un <a href="#webhooks">webhook</a> : C-Pay appelle votre serveur à chaque paiement confirmé ou échoué.</p>
+        </section>
 
-        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/merchant/cash/collect</span> <span class="badge badge--session">session</span>
-          <p>Encaisser. Corps : <code>amount</code>, <code>method</code> (<code>mobile_money</code> ou <code>card</code>), <code>customerPhone</code> (requis en Mobile Money ; l'opérateur est détecté, <code>operator</code> ne sert qu'à forcer un service au choix du client comme Wave ou Express Union), <code>currency</code>, <code>description</code>, <code>reference</code>. Mobile Money : <code>201</code> avec <code>txnId</code>, <code>status: "pending"</code>, <code>operator</code>, <code>operatorLabel</code>, <code>country</code>, <code>currency</code>, <code>amount</code>, <code>fee</code>, <code>net</code>, <code>statusUrl</code>. Carte : <code>201</code> avec <code>payLink { shortId, shortUrl, expiresAt }</code> (page hébergée pay.c-pay.global) si une passerelle carte est configurée pour le pays, sinon <code>410 FEATURE_DISABLED</code>. Autres codes : <code>422 CURRENCY_MISMATCH</code>, <code>422 VALIDATION_ERROR</code>, <code>403 MERCHANT_INACTIVE</code>, <code>429</code>.</p></div>
-        <div class="endpoint"><span class="badge badge--get">GET</span><span class="path">/merchant/cash/collect/:txnId</span> <span class="badge badge--session">session</span>
-          <p>Statut d'un encaissement : <code>status</code> (<code>pending</code>, <code>authorized</code>, <code>failed</code>, <code>expired</code>), <code>amount</code>, <code>fee</code>, <code>net</code>, <code>operator</code>, <code>customerPhone</code>, <code>createdAt</code>, <code>finalizedAt</code>, <code>receiptUrl</code> (si disponible). Interrogez toutes les 3 secondes pendant 90 secondes, puis affichez « en attente de confirmation ».</p></div>
-        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/merchant/cash/withdraw</span> <span class="badge badge--session">session</span>
-          <p>Retirer du solde disponible vers le wallet enregistré du marchand (<code>GET</code>/<code>PUT /merchant/cash/wallet</code>). Corps : <code>amount</code>, <code>description</code>, <code>confirm</code> (voir ci-dessous). Réponse <code>201</code> : <code>transferId</code>, <code>reference</code> (<code>PAY-XXXXXX</code>), <code>status</code> (<code>pending</code> ou <code>processing</code>), <code>amount</code>, <code>fee</code>, <code>net</code>, <code>wallet { operator, phone }</code>. Erreurs : <code>422 INSUFFICIENT_BALANCE { available }</code>, <code>422 WALLET_MISSING</code>, <code>422 DAILY_LIMIT_EXCEEDED</code>, <code>428 STEP_UP_REQUIRED</code>, <code>410 FEATURE_DISABLED</code> si l'opérateur du wallet n'a pas de rail sortant configuré.</p></div>
-        <div class="endpoint"><span class="badge badge--post">POST</span><span class="path">/merchant/cash/transfers</span> <span class="badge badge--session">session</span>
-          <p>Transférer. Corps : <code>direction</code> (<code>wallet_to_bank</code> ou <code>bank_to_wallet</code>), <code>accountId</code> (compte bancaire vérifié du marchand, voir <code>/merchant/bank-accounts</code>), <code>amount</code>, <code>description</code>, <code>confirm</code>. <code>wallet_to_bank</code> : <code>201</code> avec <code>reference</code> <code>TRF-XXXXXX</code>, <code>status</code> <code>processing</code> (rail bancaire configuré) ou <code>pending_manual</code> (exécuté par les opérations C-Pay, J+1 ouvré), <code>fee</code>, <code>net</code>, <code>bankAccount { bankName, accountMasked }</code>. <code>bank_to_wallet</code> : crée un ordre d'approvisionnement, <code>201</code> avec <code>reference</code> <code>FND-XXXXXX</code>, <code>status: "awaiting_funds"</code> et <code>instructions { bankName, accountName, accountNumber, iban?, swift?, reference, expiresAt }</code> ; le marchand vire le montant en indiquant la référence, les opérations confirment la réception et le solde est crédité. Sans compte de collecte pour la devise : <code>409 FUNDING_UNAVAILABLE</code>. Statuts : <code>pending</code>, <code>processing</code>, <code>pending_manual</code>, <code>awaiting_funds</code>, <code>completed</code>, <code>failed</code>, <code>cancelled</code>, <code>rejected</code>. Compléments : <code>GET /merchant/cash/transfers?direction&amp;status&amp;limit&amp;offset</code>, <code>GET /merchant/cash/transfers/:id</code>, <code>POST /merchant/cash/transfers/:id/cancel</code> (uniquement <code>awaiting_funds</code> et <code>pending_manual</code>).</p></div>
-        <div class="endpoint"><span class="badge badge--get">GET</span><span class="path">/merchant/cash/history</span> <span class="badge badge--session">session</span>
-          <p>Journal unifié. Paramètres : <code>from</code>, <code>to</code>, <code>type</code> (<code>collect</code>, <code>withdraw</code>, <code>transfer_out</code>, <code>transfer_in</code>), <code>limit</code>, <code>offset</code>. Réponse : <code>data[]</code> (<code>id</code>, <code>type</code>, <code>reference</code>, <code>amount</code>, <code>fee</code>, <code>net</code>, <code>status</code>, <code>counterparty</code>, <code>method</code>, <code>createdAt</code>), <code>total</code>, <code>totals { in, out }</code>. Export : <code>GET /merchant/cash/history/export.csv?from&amp;to</code> (CSV UTF-8, séparateur <code>;</code>). Le solde et le résumé du jour sont donnés par <code>GET /merchant/cash/summary</code>.</p></div>
+        <section class="docsec" id="auth" aria-labelledby="auth-title">
+          <h2 id="auth-title">Authentification et conventions</h2>
+          <p>Les endpoints <code>/merchant/public/*</code> s'authentifient par clé API. Les endpoints de l'<a href="#caisse-api">API Caisse</a> utilisent la session du marchand (jeton Bearer). Toutes les requêtes et réponses sont en JSON.</p>
+          <div class="table-wrap">
+            <table class="ref-table">
+              <caption class="visually-hidden">En-têtes HTTP attendus</caption>
+              <thead><tr><th scope="col">En-tête</th><th scope="col">Obligatoire</th><th scope="col">Rôle</th></tr></thead>
+              <tbody>
+                <tr><td><code>X-API-Key</code></td><td>oui (routes publiques)</td><td>Clé créée dans le portail marchand. Absente ou inconnue : <code>401 API_KEY_REQUIRED</code> / <code>401 INVALID_API_KEY</code>.</td></tr>
+                <tr><td><code>X-API-Secret</code></td><td>oui pour les clés récentes</td><td>Secret remis avec la clé. Les clés d'ancienne génération n'en ont pas ; les nouvelles le vérifient (<code>401 INVALID_API_SECRET</code>).</td></tr>
+                <tr><td><code>Idempotency-Key</code></td><td>recommandé sur tout POST, obligatoire sur les opérations de caisse</td><td>8 à 128 caractères, par exemple un UUID v4. Rejouer la même clé avec le même corps renvoie la réponse initiale ; la même clé avec un corps différent renvoie <code>409 IDEMPOTENCY_CONFLICT</code> ; une requête identique encore en cours renvoie <code>409 IDEMPOTENCY_IN_PROGRESS</code>. Longueur invalide : <code>400 INVALID_IDEMPOTENCY_KEY</code>. Les clés sont conservées 24 h.</td></tr>
+                <tr><td><code>Content-Type</code></td><td>oui sur POST</td><td><code>application/json</code>.</td></tr>
+                <tr><td><code>Authorization</code></td><td>API Caisse uniquement</td><td><code>Bearer &lt;access&gt;</code>, jeton de 15 minutes obtenu par <code>POST /merchant/auth/login</code> et renouvelé par <code>/merchant/auth/refresh</code>.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <dl class="kv">
+            <dt>Base URL</dt><dd><code>https://api.c-pay.global/api/v1</code></dd>
+            <dt>Montants</dt><dd>Entiers en unité de la devise : XOF, XAF et CDF n'ont pas de décimales. Aucune conversion de change : la devise du client doit être celle du marchand.</dd>
+            <dt>Erreurs</dt><dd>Corps <code>{ "error": "message lisible", "code": "CODE_STABLE", "details?": … }</code>. Codez sur <code>code</code>, pas sur <code>error</code>. Liste dans <a href="#erreurs">Codes d'erreur</a>.</dd>
+            <dt>Permissions</dt><dd>Chaque clé porte ses permissions (<code>pay_links</code>, <code>transactions</code>, <code>collect</code>, <code>disburse</code>). Permission manquante : <code>403</code>.</dd>
+            <dt>Limites de débit</dt><dd>Les points d'entrée publics sont limités en débit ; <code>429</code> avec les en-têtes <code>RateLimit-*</code> standard. <code>POST /detect/phone</code> : 30 requêtes par minute et par adresse.</dd>
+            <dt>Sécurité</dt><dd>N'appelez l'API que depuis votre serveur. Une clé exposée dans un navigateur ou une application mobile doit être révoquée immédiatement dans le portail.</dd>
+          </dl>
+        </section>
 
-        <h3>Confirmation forte : l'objet <code>confirm</code></h3>
-        <p>Les retraits, les transferts et l'enregistrement du wallet (<code>PUT /merchant/cash/wallet</code>) exigent un objet <code>confirm</code> dans le corps :</p>
-        <table class="confirm-table">
-          <caption class="visually-hidden">Contenu de l'objet confirm selon la configuration du compte</caption>
-          <thead><tr><th scope="col">Compte</th><th scope="col">Corps attendu</th></tr></thead>
-          <tbody>
-            <tr><td>Double authentification (TOTP) activée</td><td><code>"confirm": { "code": "123456" }</code> — code à 6 chiffres de l'application d'authentification</td></tr>
-            <tr><td>Sans double authentification</td><td><code>"confirm": { "password": "…" }</code> — mot de passe du compte</td></tr>
-          </tbody>
-        </table>
-        <p class="note mt-3">Objet absent ou invalide : <code>428 STEP_UP_REQUIRED { "methods": ["totp"] }</code> ou <code>["password"]</code>, qui indique la méthode à présenter. Cinq échecs en 15 minutes : <code>429</code>.</p>
-<pre><code># Retrait de 50 000 vers le wallet enregistré (session marchand, compte avec 2FA)
+        <section class="docsec" id="endpoints" aria-labelledby="endpoints-title">
+          <h2 id="endpoints-title">Référence des endpoints publics</h2>
+          <p class="note">Seuls les endpoints réellement en production figurent ici. La <a href="https://api.c-pay.global/api/v1/docs/" rel="noopener">référence Swagger</a> fait foi en cas d'écart.</p>
+
+          <article class="endpoint-ref" id="ep-pay-links">
+            <h3><span class="badge badge--post">POST</span> <span class="path">/merchant/public/pay-links</span></h3>
+            <p>Crée un lien de paiement hébergé sur <code>pay.c-pay.global</code>, partageable par SMS, WhatsApp, e-mail ou QR. Le client paie par Mobile Money ou par carte (si une passerelle carte est active dans votre pays) sans installer d'application. Permission <code>pay_links</code>.</p>
+            <div class="table-wrap">
+              <table class="ref-table">
+                <caption class="visually-hidden">Paramètres du corps</caption>
+                <thead><tr><th scope="col">Champ</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
+                <tbody>
+                  <tr><td><code>amount</code></td><td>nombre, requis</td><td>Montant strictement positif en unité de la devise.</td></tr>
+                  <tr><td><code>currency</code></td><td>chaîne</td><td><code>XOF</code>, <code>XAF</code> ou <code>CDF</code>. Défaut <code>XAF</code>.</td></tr>
+                  <tr><td><code>description</code></td><td>chaîne</td><td>Libellé affiché au client sur la page de paiement.</td></tr>
+                  <tr><td><code>expiresIn</code></td><td>nombre</td><td>Durée de validité en heures, de 1 à 720. Défaut 24. Hors plage : <code>422 INVALID_EXPIRES_IN</code>.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="code-tabs">
+              <div class="tabs" role="tablist" aria-label="Langage de l'exemple : créer un lien de paiement">
+                <button class="tab" role="tab" id="t-pl-curl" data-lang="curl" aria-controls="p-pl-curl" aria-selected="true" type="button">cURL</button>
+                <button class="tab" role="tab" id="t-pl-node" data-lang="node" aria-controls="p-pl-node" aria-selected="false" tabindex="-1" type="button">Node</button>
+                <button class="tab" role="tab" id="t-pl-php" data-lang="php" aria-controls="p-pl-php" aria-selected="false" tabindex="-1" type="button">PHP</button>
+                <button class="tab" role="tab" id="t-pl-py" data-lang="python" aria-controls="p-pl-py" aria-selected="false" tabindex="-1" type="button">Python</button>
+              </div>
+              <div class="tab-panel" id="p-pl-curl" role="tabpanel" aria-labelledby="t-pl-curl">
+<pre><code>curl -X POST https://api.c-pay.global/api/v1/merchant/public/pay-links \
+  -H "X-API-Key: $CPAY_API_KEY" \
+  -H "X-API-Secret: $CPAY_API_SECRET" \
+  -H "Idempotency-Key: 0b4e8d2a-11aa-4f4b-8c3e-9d2f1e0a5b6c" \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 25000, "currency": "XOF", "description": "Facture INV-001", "expiresIn": 48 }'</code></pre>
+              </div>
+              <div class="tab-panel" id="p-pl-node" role="tabpanel" aria-labelledby="t-pl-node" hidden>
+<pre><code>// Node.js 18+ — côté serveur uniquement
+const res = await fetch('https://api.c-pay.global/api/v1/merchant/public/pay-links', {
+  method: 'POST',
+  headers: {
+    'X-API-Key': process.env.CPAY_API_KEY,
+    'X-API-Secret': process.env.CPAY_API_SECRET,
+    'Idempotency-Key': crypto.randomUUID(),
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({ amount: 25000, currency: 'XOF', description: 'Facture INV-001', expiresIn: 48 })
+});
+const link = await res.json();
+if (!res.ok) throw new Error(`${link.code}: ${link.error}`);
+console.log(link.short_url); // https://pay.c-pay.global/AB12CD</code></pre>
+              </div>
+              <div class="tab-panel" id="p-pl-php" role="tabpanel" aria-labelledby="t-pl-php" hidden>
+<pre><code>&lt;?php
+// PHP 8+, cURL natif
+$ch = curl_init('https://api.c-pay.global/api/v1/merchant/public/pay-links');
+curl_setopt_array($ch, [
+    CURLOPT_POST => true,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => [
+        'X-API-Key: ' . getenv('CPAY_API_KEY'),
+        'X-API-Secret: ' . getenv('CPAY_API_SECRET'),
+        'Idempotency-Key: ' . bin2hex(random_bytes(16)),
+        'Content-Type: application/json',
+    ],
+    CURLOPT_POSTFIELDS => json_encode([
+        'amount' => 25000, 'currency' => 'XOF', 'description' => 'Facture INV-001', 'expiresIn' => 48,
+    ]),
+]);
+$link = json_decode(curl_exec($ch), true);
+$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+curl_close($ch);
+if ($status >= 400) throw new RuntimeException(($link['code'] ?? $status) . ': ' . ($link['error'] ?? 'erreur'));
+echo $link['short_url'];</code></pre>
+              </div>
+              <div class="tab-panel" id="p-pl-py" role="tabpanel" aria-labelledby="t-pl-py" hidden>
+<pre><code># Python 3.9+, bibliothèque standard
+import json, os, uuid, urllib.request
+
+req = urllib.request.Request(
+    "https://api.c-pay.global/api/v1/merchant/public/pay-links",
+    data=json.dumps({"amount": 25000, "currency": "XOF", "description": "Facture INV-001", "expiresIn": 48}).encode(),
+    headers={
+        "X-API-Key": os.environ["CPAY_API_KEY"],
+        "X-API-Secret": os.environ["CPAY_API_SECRET"],
+        "Idempotency-Key": str(uuid.uuid4()),
+        "Content-Type": "application/json",
+    },
+    method="POST",
+)
+with urllib.request.urlopen(req, timeout=15) as r:
+    link = json.load(r)
+print(link["short_url"])</code></pre>
+              </div>
+            </div>
+            <h4>Réponse <code>201 Created</code></h4>
+            <pre><code>{
+  "success": true,
+  "pay_link_id": "7f1c2b9e-3d44-4c0a-9a7e-2a1b5c6d7e8f",
+  "short_id": "AB12CD",
+  "short_url": "https://pay.c-pay.global/AB12CD",
+  "amount": 25000,
+  "currency": "XOF",
+  "expires_at": "2026-10-18T10:00:00.000Z"
+}</code></pre>
+            <p class="note">Le statut public d'un lien est lisible sans clé par le client : <code>GET https://pay.c-pay.global/&lt;short_id&gt;/status</code> → <code>{ "status": "paid|pending|failed|expired|cancelled" }</code>.</p>
+          </article>
+
+          <article class="endpoint-ref" id="ep-transactions">
+            <h3><span class="badge badge--get">GET</span> <span class="path">/merchant/public/transactions</span></h3>
+            <p>Historique paginé de vos transactions, les plus récentes d'abord. Permission <code>transactions</code>.</p>
+            <div class="table-wrap">
+              <table class="ref-table">
+                <caption class="visually-hidden">Paramètres de requête</caption>
+                <thead><tr><th scope="col">Paramètre</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
+                <tbody>
+                  <tr><td><code>status</code></td><td>chaîne</td><td>Filtre sur le statut : <code>pending</code>, <code>authorized</code>, <code>failed</code>, <code>expired</code>.</td></tr>
+                  <tr><td><code>page</code></td><td>entier</td><td>Page à partir de 1. Défaut 1.</td></tr>
+                  <tr><td><code>limit</code></td><td>entier</td><td>Taille de page, de 1 à 100. Défaut 20.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="code-tabs">
+              <div class="tabs" role="tablist" aria-label="Langage de l'exemple : lister les transactions">
+                <button class="tab" role="tab" id="t-tx-curl" data-lang="curl" aria-controls="p-tx-curl" aria-selected="true" type="button">cURL</button>
+                <button class="tab" role="tab" id="t-tx-node" data-lang="node" aria-controls="p-tx-node" aria-selected="false" tabindex="-1" type="button">Node</button>
+                <button class="tab" role="tab" id="t-tx-php" data-lang="php" aria-controls="p-tx-php" aria-selected="false" tabindex="-1" type="button">PHP</button>
+                <button class="tab" role="tab" id="t-tx-py" data-lang="python" aria-controls="p-tx-py" aria-selected="false" tabindex="-1" type="button">Python</button>
+              </div>
+              <div class="tab-panel" id="p-tx-curl" role="tabpanel" aria-labelledby="t-tx-curl">
+<pre><code>curl "https://api.c-pay.global/api/v1/merchant/public/transactions?status=authorized&amp;page=1&amp;limit=20" \
+  -H "X-API-Key: $CPAY_API_KEY" \
+  -H "X-API-Secret: $CPAY_API_SECRET"</code></pre>
+              </div>
+              <div class="tab-panel" id="p-tx-node" role="tabpanel" aria-labelledby="t-tx-node" hidden>
+<pre><code>const url = new URL('https://api.c-pay.global/api/v1/merchant/public/transactions');
+url.searchParams.set('status', 'authorized');
+url.searchParams.set('limit', '20');
+const res = await fetch(url, {
+  headers: { 'X-API-Key': process.env.CPAY_API_KEY, 'X-API-Secret': process.env.CPAY_API_SECRET }
+});
+const { data, total } = await res.json();
+console.log(total, data[0]?.reference);</code></pre>
+              </div>
+              <div class="tab-panel" id="p-tx-php" role="tabpanel" aria-labelledby="t-tx-php" hidden>
+<pre><code>&lt;?php
+$ch = curl_init('https://api.c-pay.global/api/v1/merchant/public/transactions?' . http_build_query([
+    'status' => 'authorized', 'limit' => 20,
+]));
+curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => [
+        'X-API-Key: ' . getenv('CPAY_API_KEY'),
+        'X-API-Secret: ' . getenv('CPAY_API_SECRET'),
+    ],
+]);
+$page = json_decode(curl_exec($ch), true);
+curl_close($ch);
+echo $page['total'];</code></pre>
+              </div>
+              <div class="tab-panel" id="p-tx-py" role="tabpanel" aria-labelledby="t-tx-py" hidden>
+<pre><code>import json, os, urllib.parse, urllib.request
+
+qs = urllib.parse.urlencode({"status": "authorized", "limit": 20})
+req = urllib.request.Request(
+    "https://api.c-pay.global/api/v1/merchant/public/transactions?" + qs,
+    headers={"X-API-Key": os.environ["CPAY_API_KEY"], "X-API-Secret": os.environ["CPAY_API_SECRET"]},
+)
+with urllib.request.urlopen(req, timeout=15) as r:
+    page = json.load(r)
+print(page["total"])</code></pre>
+              </div>
+            </div>
+            <h4>Réponse <code>200 OK</code></h4>
+            <pre><code>{
+  "data": [
+    {
+      "transaction_id": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "collect",
+      "amount": 25000,
+      "currency": "XOF",
+      "status": "authorized",
+      "payment_method": "mobile_money",
+      "auth_code": "FT123456",
+      "reference": "INV-001",
+      "initiated_at": "2026-10-16T09:12:33.120Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 20
+}</code></pre>
+          </article>
+
+          <article class="endpoint-ref" id="ep-detect">
+            <h3><span class="badge badge--post">POST</span> <span class="path">/detect/phone</span> <span class="badge badge--muted">public, sans clé</span></h3>
+            <p>Déduit le pays, la devise et l'opérateur Mobile Money d'un numéro au format international. Utile pour pré-afficher l'opérateur dans votre interface. Limité à 30 requêtes par minute et par adresse ; aucune transaction n'est créée.</p>
+            <div class="code-tabs">
+              <div class="tabs" role="tablist" aria-label="Langage de l'exemple : détecter un opérateur">
+                <button class="tab" role="tab" id="t-dt-curl" data-lang="curl" aria-controls="p-dt-curl" aria-selected="true" type="button">cURL</button>
+                <button class="tab" role="tab" id="t-dt-node" data-lang="node" aria-controls="p-dt-node" aria-selected="false" tabindex="-1" type="button">Node</button>
+                <button class="tab" role="tab" id="t-dt-php" data-lang="php" aria-controls="p-dt-php" aria-selected="false" tabindex="-1" type="button">PHP</button>
+                <button class="tab" role="tab" id="t-dt-py" data-lang="python" aria-controls="p-dt-py" aria-selected="false" tabindex="-1" type="button">Python</button>
+              </div>
+              <div class="tab-panel" id="p-dt-curl" role="tabpanel" aria-labelledby="t-dt-curl">
+<pre><code>curl -X POST https://api.c-pay.global/api/v1/detect/phone \
+  -H "Content-Type: application/json" \
+  -d '{ "phone": "+237670123456" }'</code></pre>
+              </div>
+              <div class="tab-panel" id="p-dt-node" role="tabpanel" aria-labelledby="t-dt-node" hidden>
+<pre><code>const res = await fetch('https://api.c-pay.global/api/v1/detect/phone', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ phone: '+237670123456' })
+});
+const d = await res.json();
+if (d.success) console.log(d.countryName, d.currency, d.brand); // Cameroun XAF MTN Mobile Money</code></pre>
+              </div>
+              <div class="tab-panel" id="p-dt-php" role="tabpanel" aria-labelledby="t-dt-php" hidden>
+<pre><code>&lt;?php
+$ch = curl_init('https://api.c-pay.global/api/v1/detect/phone');
+curl_setopt_array($ch, [
+    CURLOPT_POST => true,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+    CURLOPT_POSTFIELDS => json_encode(['phone' => '+237670123456']),
+]);
+$d = json_decode(curl_exec($ch), true);
+curl_close($ch);
+if ($d['success']) echo $d['countryName'], ' ', $d['currency'], ' ', $d['brand'];</code></pre>
+              </div>
+              <div class="tab-panel" id="p-dt-py" role="tabpanel" aria-labelledby="t-dt-py" hidden>
+<pre><code>import json, urllib.request
+
+req = urllib.request.Request(
+    "https://api.c-pay.global/api/v1/detect/phone",
+    data=json.dumps({"phone": "+237670123456"}).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(req, timeout=10) as r:
+    d = json.load(r)
+if d["success"]:
+    print(d["countryName"], d["currency"], d["brand"])</code></pre>
+              </div>
+            </div>
+            <h4>Réponse <code>200 OK</code></h4>
+            <pre><code>{
+  "success": true,
+  "phone": "+237670123456",
+  "country": "CM",
+  "countryName": "Cameroun",
+  "currency": "XAF",
+  "region": "CEMAC",
+  "operator": "mtn_momo",
+  "brand": "MTN Mobile Money",
+  "alternatives": [ { "operator": "express_union", "brand": "Express Union" } ]
+}</code></pre>
+            <p class="note">Numéro non reconnu : <code>200</code> avec <code>success: false</code> et un <code>code</code> (<code>PHONE_INVALID</code>, <code>COUNTRY_UNSUPPORTED</code>, <code>PHONE_LENGTH</code>, <code>OPERATOR_UNKNOWN</code>, <code>OPERATOR_NO_WALLET</code>). Corps sans <code>phone</code> : <code>400 PHONE_REQUIRED</code>. <code>alternatives</code> liste les services que le client choisit lui-même (Wave, Express Union).</p>
+          </article>
+
+          <article class="endpoint-ref endpoint-ref--soon" id="ep-collect">
+            <h3><span class="badge badge--post">POST</span> <span class="path">/merchant/public/collect</span> <span class="badge badge--soon">bientôt</span></h3>
+            <p>Encaissement Mobile Money direct par clé API (demande de paiement poussée sur le téléphone du client). Corps prévu : <code>amount</code>, <code>customerPhone</code>, <code>currency</code>, <code>description</code>, <code>reference</code>. <strong>Cet endpoint répond aujourd'hui <code>410 FEATURE_DISABLED</code></strong> : il sera ouvert pays par pays au fil de l'activation des opérateurs. En attendant, les liens de paiement couvrent le même besoin, et l'<a href="#caisse-api">API Caisse</a> offre l'encaissement direct en session marchand.</p>
+          </article>
+        </section>
+
+        <section class="docsec" id="caisse-api" aria-labelledby="caisse-api-title">
+          <h2 id="caisse-api-title">API Caisse <span class="badge badge--session">session marchand</span></h2>
+          <p>Ces endpoints portent les opérations de caisse du portail marchand et de l'application Android : <strong>encaisser, retirer, transférer, suivre</strong>. Ils sont authentifiés par la <strong>session du marchand</strong> (<code>Authorization: Bearer &lt;access&gt;</code> obtenu via <code>POST /merchant/auth/login</code>, 15 minutes, renouvelé par <code>/merchant/auth/refresh</code>), <strong>pas par clé API</strong>. Ils conviennent à vos propres outils de caisse ; pour une intégration serveur, préférez les endpoints publics ci-dessus. Toute requête qui crée un mouvement exige <code>Idempotency-Key</code>.</p>
+          <div class="table-wrap">
+            <table class="ref-table ref-table--endpoints">
+              <caption class="visually-hidden">Endpoints de l'API Caisse</caption>
+              <thead><tr><th scope="col">Endpoint</th><th scope="col">Rôle</th></tr></thead>
+              <tbody>
+                <tr><td><span class="badge badge--get">GET</span> <code>/merchant/cash/summary</code></td><td>Solde (<code>available</code>, <code>pending</code>, <code>reserved</code>), totaux du jour, limites et profil (niveau KYB, wallet, comptes bancaires).</td></tr>
+                <tr><td><span class="badge badge--post">POST</span> <code>/merchant/cash/collect</code></td><td>Encaisser. <code>amount</code>, <code>method</code> (<code>mobile_money</code> ou <code>card</code>), <code>customerPhone</code> (requis en Mobile Money, opérateur détecté ; <code>operator</code> seulement pour forcer Wave ou Express Union), <code>currency</code>, <code>description</code>, <code>reference</code>. Mobile Money : <code>201</code> avec <code>txnId</code>, <code>status: "pending"</code>, <code>operator</code>, <code>fee</code>, <code>net</code>, <code>statusUrl</code>. Carte : <code>201</code> avec <code>payLink { shortId, shortUrl, expiresAt }</code> si une passerelle carte est configurée, sinon <code>410 FEATURE_DISABLED</code>.</td></tr>
+                <tr><td><span class="badge badge--get">GET</span> <code>/merchant/cash/collect/:txnId</code></td><td>Statut d'un encaissement : <code>pending</code>, <code>authorized</code>, <code>failed</code>, <code>expired</code>, avec <code>amount</code>, <code>fee</code>, <code>net</code>, <code>receiptUrl</code> si disponible. Interrogez toutes les 3 secondes pendant 90 secondes, puis affichez « en attente de confirmation ».</td></tr>
+                <tr><td><span class="badge badge--get">GET</span> / <span class="badge badge--post">PUT</span> <code>/merchant/cash/wallet</code></td><td>Wallet Mobile Money de destination des retraits (<code>operator</code>, <code>phone</code>, <code>verifiedAt</code>). L'enregistrement exige <code>confirm</code>.</td></tr>
+                <tr><td><span class="badge badge--post">POST</span> <code>/merchant/cash/withdraw</code></td><td>Retirer vers le wallet enregistré. <code>amount</code>, <code>description</code>, <code>confirm</code>. <code>201</code> : <code>reference</code> <code>PAY-XXXXXX</code>, <code>status</code>, <code>fee</code>, <code>net</code>. Erreurs : <code>422 INSUFFICIENT_BALANCE</code>, <code>422 WALLET_MISSING</code>, <code>422 DAILY_LIMIT_EXCEEDED</code>, <code>428 STEP_UP_REQUIRED</code>, <code>410 FEATURE_DISABLED</code>.</td></tr>
+                <tr><td><span class="badge badge--post">POST</span> <code>/merchant/cash/transfers</code></td><td>Transférer. <code>direction</code> <code>wallet_to_bank</code> (compte bancaire vérifié, <code>confirm</code> requis, référence <code>TRF-XXXXXX</code>, statut <code>processing</code> ou <code>pending_manual</code>) ou <code>bank_to_wallet</code> (ordre d'approvisionnement <code>FND-XXXXXX</code>, statut <code>awaiting_funds</code>, <code>instructions</code> de virement ; <code>409 FUNDING_UNAVAILABLE</code> sans compte de collecte). Compléments : <code>GET /merchant/cash/transfers</code>, <code>GET …/transfers/:id</code>, <code>POST …/transfers/:id/cancel</code>.</td></tr>
+                <tr><td><span class="badge badge--get">GET</span> <code>/merchant/cash/history</code></td><td>Journal unifié (<code>from</code>, <code>to</code>, <code>type</code> ∈ <code>collect</code>, <code>withdraw</code>, <code>transfer_out</code>, <code>transfer_in</code>, <code>limit</code>, <code>offset</code>) avec <code>totals { in, out }</code>. Export : <code>GET /merchant/cash/history/export.csv?from&amp;to</code>.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Confirmation forte : l'objet <code>confirm</code></h3>
+          <p>Les retraits, les transferts <code>wallet_to_bank</code> et l'enregistrement du wallet exigent un objet <code>confirm</code> dans le corps. Son contenu dépend de la configuration du compte :</p>
+          <div class="table-wrap">
+            <table class="ref-table">
+              <caption class="visually-hidden">Contenu de l'objet confirm</caption>
+              <thead><tr><th scope="col">Compte</th><th scope="col">Corps attendu</th></tr></thead>
+              <tbody>
+                <tr><td>Double authentification (TOTP) activée</td><td><code>"confirm": { "code": "123456" }</code> — code à 6 chiffres de l'application d'authentification</td></tr>
+                <tr><td>Sans double authentification</td><td><code>"confirm": { "password": "…" }</code> — mot de passe du compte</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">Objet absent ou invalide : <code>428 STEP_UP_REQUIRED { "methods": ["totp"] }</code> ou <code>["password"]</code>, qui indique la méthode à présenter. Cinq échecs en 15 minutes : <code>429</code>. Un ordre <code>bank_to_wallet</code> n'exige pas de confirmation : aucun fonds ne quitte le compte.</p>
+          <pre><code># Retrait de 50 000 vers le wallet enregistré (compte avec 2FA)
 curl -X POST https://api.c-pay.global/api/v1/merchant/cash/withdraw \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Idempotency-Key: 2c1f6a1e-5e0b-4f7c-9a3d-8b2e4c6d1f0a" \
   -H "Content-Type: application/json" \
   -d '{ "amount": 50000, "description": "Caisse du soir", "confirm": { "code": "123456" } }'
 
-# Ordre d'approvisionnement banque -> wallet (compte sans 2FA)
+# Transfert wallet -> banque (compte sans 2FA)
 curl -X POST https://api.c-pay.global/api/v1/merchant/cash/transfers \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Idempotency-Key: 9d7e5c3a-1b2f-4e6d-8a0c-3f5b7d9e1a2c" \
   -H "Content-Type: application/json" \
-  -d '{ "direction": "bank_to_wallet", "accountId": "&lt;account_id&gt;", "amount": 200000, "confirm": { "password": "…" } }'</code></pre>
-      </div>
-    </section>
+  -d '{ "direction": "wallet_to_bank", "accountId": "&lt;account_id&gt;", "amount": 200000, "confirm": { "password": "…" } }'</code></pre>
+        </section>
 
-    <section class="section section--alt" id="exemples">
-      <div class="container doc">
-        <h2>Exemples</h2>
-        <div class="tabs" role="tablist" aria-label="Langage des exemples">
-          <button class="tab" role="tab" id="tab-curl" aria-controls="panel-curl" aria-selected="true" type="button">cURL</button>
-          <button class="tab" role="tab" id="tab-js" aria-controls="panel-js" aria-selected="false" tabindex="-1" type="button">JavaScript</button>
-          <button class="tab" role="tab" id="tab-php" aria-controls="panel-php" aria-selected="false" tabindex="-1" type="button">PHP</button>
-          <button class="tab" role="tab" id="tab-py" aria-controls="panel-py" aria-selected="false" tabindex="-1" type="button">Python</button>
-        </div>
-        <div class="tab-panel" id="panel-curl" role="tabpanel" aria-labelledby="tab-curl">
-<pre><code># Encaissement Mobile Money — l'opérateur est détecté à partir du numéro
-curl -X POST https://api.c-pay.global/api/v1/merchant/public/collect \
-  -H "X-API-Key: sk_live_votre_cle" \
-  -H "Idempotency-Key: 7f1c2b9e-3d44-4c0a-9a7e-2a1b5c6d7e8f" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "amount": 5000,
-    "customerPhone": "+237670123456",
-    "description": "Commande 001",
-    "reference": "CMD-2026-001"
-  }'
-
-# Lien de paiement
-curl -X POST https://api.c-pay.global/api/v1/merchant/public/pay-links \
-  -H "X-API-Key: sk_live_votre_cle" \
-  -H "Idempotency-Key: 0b4e8d2a-11aa-4f4b-8c3e-9d2f1e0a5b6c" \
-  -H "Content-Type: application/json" \
-  -d '{ "amount": 25000, "currency": "XOF", "description": "Facture INV-001", "expiresIn": 48 }'</code></pre>
-        </div>
-        <div class="tab-panel" id="panel-js" role="tabpanel" aria-labelledby="tab-js" hidden>
-<pre><code>// Node.js 18+ ou navigateur côté serveur uniquement (ne jamais exposer la clé côté client)
-const BASE = 'https://api.c-pay.global/api/v1/merchant/public';
-const headers = (idempotencyKey) =&gt; ({
-  'X-API-Key': process.env.CPAY_API_KEY,
-  'Idempotency-Key': idempotencyKey,
-  'Content-Type': 'application/json'
-});
-
-async function collect(customerPhone, amount, reference) {
-  const res = await fetch(`${BASE}/collect`, {
-    method: 'POST',
-    headers: headers(crypto.randomUUID()),
-    body: JSON.stringify({ amount, customerPhone, reference })
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`${data.code}: ${data.error}`);
-  return data; // { txnId, reference, status: 'pending' }
-}
-
-async function createPayLink(amount, description) {
-  const res = await fetch(`${BASE}/pay-links`, {
-    method: 'POST',
-    headers: headers(crypto.randomUUID()),
-    body: JSON.stringify({ amount, currency: 'XAF', description })
-  });
-  return res.json(); // { short_url, pay_link_id, expires_at }
-}</code></pre>
-        </div>
-        <div class="tab-panel" id="panel-php" role="tabpanel" aria-labelledby="tab-php" hidden>
-<pre><code>&lt;?php
-// PHP 8+, cURL natif, sans dépendance
-function cpay(string $path, array $body): array {
-    $ch = curl_init('https://api.c-pay.global/api/v1/merchant/public' . $path);
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER => [
-            'X-API-Key: ' . getenv('CPAY_API_KEY'),
-            'Idempotency-Key: ' . bin2hex(random_bytes(16)),
-            'Content-Type: application/json',
-        ],
-        CURLOPT_POSTFIELDS => json_encode($body),
-    ]);
-    $raw = curl_exec($ch);
-    $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    curl_close($ch);
-    $data = json_decode($raw, true) ?? [];
-    if ($status >= 400) throw new RuntimeException(($data['code'] ?? $status) . ': ' . ($data['error'] ?? 'erreur'));
-    return $data;
-}
-
-$txn  = cpay('/collect',   ['amount' => 5000, 'customerPhone' => '+221771234567', 'reference' => 'CMD-001']);
-$link = cpay('/pay-links', ['amount' => 25000, 'currency' => 'XOF', 'description' => 'Facture INV-001']);
-echo $link['short_url'];</code></pre>
-        </div>
-        <div class="tab-panel" id="panel-py" role="tabpanel" aria-labelledby="tab-py" hidden>
-<pre><code># Python 3.9+, bibliothèque standard uniquement
-import json, os, uuid, urllib.request
-
-BASE = "https://api.c-pay.global/api/v1/merchant/public"
-
-def cpay(path: str, body: dict) -> dict:
-    req = urllib.request.Request(
-        BASE + path,
-        data=json.dumps(body).encode(),
-        headers={
-            "X-API-Key": os.environ["CPAY_API_KEY"],
-            "Idempotency-Key": str(uuid.uuid4()),
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.load(r)
-
-txn = cpay("/collect", {"amount": 5000, "customerPhone": "+243811234567", "reference": "CMD-001"})
-link = cpay("/pay-links", {"amount": 25000, "currency": "CDF", "description": "Facture INV-001"})
-print(txn["status"], link["short_url"])</code></pre>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="webhooks">
-      <div class="container doc">
-        <h2>Webhooks</h2>
-        <p>Configurez une URL HTTPS dans le portail marchand (rubrique <strong>Webhooks</strong>). À chaque changement de statut, C-Pay envoie un <code>POST</code> JSON signé en HMAC-SHA256 avec le secret affiché lors de la configuration. Le nom de l'en-tête de signature et le secret sont indiqués dans le portail ; le secret n'est plus réaffiché ensuite. Les adresses privées ou non HTTPS sont refusées.</p>
-<pre><code>{
+        <section class="docsec" id="webhooks" aria-labelledby="webhooks-title">
+          <h2 id="webhooks-title">Webhooks sortants</h2>
+          <p>Déclarez une URL <code>https://</code> dans le portail marchand (rubrique <strong>Webhooks</strong>) ; le secret de signature est affiché une seule fois à la création. À chaque changement de statut, C-Pay envoie un <code>POST</code> JSON signé en HMAC-SHA256. Les adresses privées ou non HTTPS sont refusées, les redirections ne sont pas suivies, le délai maximal est de 10 secondes et une réponse <code>5xx</code> ou une erreur réseau déclenche jusqu'à 3 nouvelles tentatives (5 s puis 10 s).</p>
+          <h3>En-têtes envoyés</h3>
+          <pre><code>Content-Type:      application/json
+User-Agent:        CPay-Webhooks/1.0
+X-CPay-Event:      payment.completed
+X-CPay-Signature:  sha256=3f1a…c9        ← à vérifier
+X-CPay-Timestamp:  2026-10-16T09:12:33.120Z   (informatif, non signé)
+X-CPlus-Event:     payment.completed       (transition, sera retiré)
+X-CPlus-Signature: sha256=3f1a…c9        (transition, sera retiré)</code></pre>
+          <p class="note">Les en-têtes <code>X-CPlus-*</code> sont conservés provisoirement pour les consommateurs existants et seront retirés au plus tôt 90 jours après annonce sur cette page. <strong>Nouvelles intégrations : n'utilisez que <code>X-CPay-Signature</code>.</strong></p>
+          <h3>Événements et corps</h3>
+          <p>Événements du webhook marchand : <code>payment.completed</code>, <code>payment.failed</code>, <code>webhook.test</code> (même forme, <code>txnId</code> préfixé <code>test-</code>, envoyé par le bouton « Tester » du portail).</p>
+          <pre><code>{
   "event": "payment.completed",
   "txnId": "550e8400-e29b-41d4-a716-446655440000",
-  "reference": "CMD-2026-001",
-  "amount": 5000,
-  "currency": "XAF",
+  "reference": "INV-001",
+  "amount": 25000,
+  "currency": "XOF",
   "status": "authorized",
-  "operator": "MTN_MOMO",
-  "timestamp": "2026-10-15T10:00:00Z"
+  "method": "mobile_money",
+  "authCode": "FT123456",
+  "timestamp": "2026-10-16T09:12:33.120Z"
 }</code></pre>
-        <p>Vérification côté serveur (Node.js) :</p>
-<pre><code>const crypto = require('crypto');
-function verify(rawBody, signatureHeader, secret) {
-  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  return expected.length === signatureHeader.length
-      &amp;&amp; crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
-}</code></pre>
-        <p class="note">Répondez <code>2xx</code> rapidement et traitez le paiement de façon asynchrone ; un même événement peut être livré plusieurs fois, utilisez <code>txnId</code> pour dédupliquer.</p>
-      </div>
-    </section>
-
-    <section class="section section--alt" id="sdk">
-      <div class="container doc">
-        <h2>SDK Android et extension WooCommerce</h2>
-        <p class="note">Les archives ci-dessous sont celles de la version 2.7.0. Vérifiez l'empreinte SHA-256 après téléchargement (<code>sha256sum fichier.zip</code>).</p>
-
-        <div class="card mb-4">
-          <div class="dl-card">
-            <div>
-              <h3>Extension WooCommerce</h3>
-              <p>Ajoute C-Pay comme moyen de paiement dans WooCommerce 6.0+ (PHP 7.4+). Encaissement Mobile Money et lien de paiement ; configuration avec votre clé API et votre secret.</p>
-              <p class="note m-0">SHA-256 : <code>b71c8c66bdbc834dbb90fb56a60c0533e48448b07bc7f613d12abac272f5b89e</code></p>
+          <h3>Vérifier la signature</h3>
+          <p><code>signature = "sha256=" + hex(HMAC-SHA256(secret, corps brut))</code>. Calculez sur le corps <strong>exactement tel qu'il est reçu</strong> (octets, pas une re-sérialisation JSON), comparez en temps constant, répondez <code>2xx</code> rapidement puis traitez en asynchrone. Un même événement peut être livré plusieurs fois : dédupliquez sur <code>txnId</code>.</p>
+          <div class="code-tabs">
+            <div class="tabs" role="tablist" aria-label="Langage de l'exemple : vérifier un webhook">
+              <button class="tab" role="tab" id="t-wh-node" data-lang="node" aria-controls="p-wh-node" aria-selected="true" type="button">Node</button>
+              <button class="tab" role="tab" id="t-wh-php" data-lang="php" aria-controls="p-wh-php" aria-selected="false" tabindex="-1" type="button">PHP</button>
+              <button class="tab" role="tab" id="t-wh-py" data-lang="python" aria-controls="p-wh-py" aria-selected="false" tabindex="-1" type="button">Python</button>
             </div>
-            <a class="btn btn--primary" href="/downloads/cpay-payment-gateway-v2.7.0.zip">Télécharger (83 Ko)</a>
+            <div class="tab-panel" id="p-wh-node" role="tabpanel" aria-labelledby="t-wh-node">
+<pre><code>const crypto = require('crypto');
+app.post('/cpay/webhook', express.raw({ type: 'application/json' }), (req, res) =&gt; {
+  const given = String(req.get('X-CPay-Signature') || '').replace(/^sha256=/, '');
+  const expected = crypto.createHmac('sha256', process.env.CPAY_WEBHOOK_SECRET).update(req.body).digest('hex');
+  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {
+    return res.status(401).end();
+  }
+  const event = JSON.parse(req.body);   // { event, txnId, reference, amount, currency, status, method, authCode, timestamp }
+  res.status(200).end();                // puis traitement asynchrone, idempotent sur event.txnId
+});</code></pre>
+            </div>
+            <div class="tab-panel" id="p-wh-php" role="tabpanel" aria-labelledby="t-wh-php" hidden>
+<pre><code>&lt;?php
+$raw = file_get_contents('php://input');
+$given = preg_replace('/^sha256=/', '', $_SERVER['HTTP_X_CPAY_SIGNATURE'] ?? '');
+$expected = hash_hmac('sha256', $raw, $secret);
+if (!hash_equals($expected, $given)) { http_response_code(401); exit; }
+$event = json_decode($raw, true);
+http_response_code(200);
+// puis traitement asynchrone, idempotent sur $event['txnId']</code></pre>
+            </div>
+            <div class="tab-panel" id="p-wh-py" role="tabpanel" aria-labelledby="t-wh-py" hidden>
+<pre><code>import hmac, hashlib
+
+expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+given = request.headers.get("X-CPay-Signature", "").removeprefix("sha256=")
+if not hmac.compare_digest(expected, given):
+    abort(401)
+event = json.loads(raw_body)
+# répondre 200, puis traiter en asynchrone, idempotent sur event["txnId"]</code></pre>
+            </div>
           </div>
-          <pre class="mt-4"><code>1. WordPress → Extensions → Ajouter → Téléverser l'archive
+        </section>
+
+        <section class="docsec" id="sdk" aria-labelledby="sdk-title">
+          <h2 id="sdk-title">SDK &amp; plugin</h2>
+          <p>Les SDK encapsulent l'authentification, l'idempotence et la vérification des webhooks. Ils sont facultatifs : l'API s'utilise avec n'importe quel client HTTP.</p>
+          <div class="grid grid--2 sdk-grid">
+            <article class="card">
+              <h3>SDK JavaScript / Node.js <span class="badge badge--muted">@c-pay/sdk 1.1.0</span></h3>
+              <p>Pour Node.js 18+, côté serveur uniquement. Fournit <code>CPayClient</code> (liens de paiement, transactions) et <code>CPayClient.verifyWebhook()</code>, qui choisit le bon en-tête de signature pendant la transition.</p>
+              <pre><code>npm install @c-pay/sdk
+
+const { CPayClient } = require('@c-pay/sdk');
+const cpay = new CPayClient({ apiKey: process.env.CPAY_API_KEY, currency: 'XOF' });
+const link = await cpay.collection.payLink({ amount: 25000, description: 'Facture INV-001' });
+console.log(link.short_url);</code></pre>
+            </article>
+            <article class="card">
+              <h3>SDK PHP <span class="badge badge--muted">calculus-plus/cpay-sdk 1.1.0</span></h3>
+              <p>PHP 7.4+, extensions cURL et JSON. Classe <code>CPay\CPayClient</code> (<code>createPayLink</code>, <code>listTransactions</code>, <code>getTransaction</code>) et exceptions <code>CPayException</code> portant le <code>code</code> de l'API.</p>
+              <pre><code>composer require calculus-plus/cpay-sdk
+
+use CPay\CPayClient;
+$cpay = new CPayClient(getenv('CPAY_API_KEY'), ['currency' => 'XOF']);
+$link = $cpay->createPayLink(25000, ['description' => 'Facture INV-001']);
+echo $link['short_url'];</code></pre>
+            </article>
+          </div>
+          <p class="note">Les SDK 1.1.0 envoient <code>X-API-Key</code> mais pas encore <code>X-API-Secret</code> : utilisez-les avec une clé d'ancienne génération (sans secret) ou appelez l'API directement comme ci-dessus. Les sources sont remises par <a href="mailto:developers@c-pay.global">developers@c-pay.global</a> si votre gestionnaire de paquets ne trouve pas encore le paquet.</p>
+
+          <h3>Archives à télécharger</h3>
+          <p class="note">Version 2.7.0. Vérifiez l'empreinte SHA-256 après téléchargement (<code>sha256sum fichier.zip</code>).</p>
+          <div class="card mb-4">
+            <div class="dl-card">
+              <div>
+                <h4>Extension WooCommerce 2.7.0</h4>
+                <p>Ajoute C-Pay comme moyen de paiement dans WooCommerce 6.0+ (PHP 7.4+). Encaissement Mobile Money et lien de paiement ; configuration avec votre clé API et votre secret ; webhook signé vérifié par l'extension.</p>
+                <p class="note m-0">SHA-256 : <code class="hash">b71c8c66bdbc834dbb90fb56a60c0533e48448b07bc7f613d12abac272f5b89e</code></p>
+              </div>
+              <a class="btn btn--primary" href="/downloads/cpay-payment-gateway-v2.7.0.zip">Télécharger (83 Ko)</a>
+            </div>
+            <pre class="mt-4"><code>1. WordPress → Extensions → Ajouter → Téléverser l'archive
 2. Activer, puis WooCommerce → Réglages → Paiements → C-Pay
 3. Renseigner la clé API et le secret (portail marchand → Clés API)
-4. Déclarer l'URL de webhook affichée par l'extension dans le portail marchand</code></pre>
-        </div>
-
-        <div class="card">
-          <div class="dl-card">
-            <div>
-              <h3>SDK Android</h3>
-              <p>Bibliothèque Kotlin/Java (AAR, Android 5.0+ / API 21) pour encaisser depuis une application marchande.</p>
-              <p class="note m-0">SHA-256 : <code>52bbf97dc8d7f73ec7ea3f0c4d449dd690897abf2878877a0ad046d9a62a8c77</code></p>
-            </div>
-            <a class="btn btn--primary" href="/downloads/cpay-android-sdk-v2.7.0.zip">Télécharger (13 Ko)</a>
+4. Déclarer l'URL de webhook affichée par l'extension dans le portail marchand (rubrique Webhooks)</code></pre>
           </div>
-          <pre class="mt-4"><code>// Initialisation — les identifiants doivent être fournis par votre backend, jamais embarqués dans l'APK
+          <div class="card">
+            <div class="dl-card">
+              <div>
+                <h4>SDK Android 2.7.0</h4>
+                <p>Bibliothèque Kotlin/Java (AAR, Android 5.0+ / API 21) pour encaisser depuis une application marchande. Les identifiants doivent venir de votre backend, jamais être embarqués dans l'APK.</p>
+                <p class="note m-0">SHA-256 : <code class="hash">52bbf97dc8d7f73ec7ea3f0c4d449dd690897abf2878877a0ad046d9a62a8c77</code></p>
+              </div>
+              <a class="btn btn--primary" href="/downloads/cpay-android-sdk-v2.7.0.zip">Télécharger (13 Ko)</a>
+            </div>
+            <pre class="mt-4"><code>// Initialisation — identifiants fournis par votre serveur
 CPay.init(context, CPayConfig(apiKey = cleFournieParVotreServeur, env = CPayEnv.PRODUCTION))
 
 // Encaissement : montant + numéro, l'opérateur est détecté
 CPay.collect(activity, amount = 5000.0, customerPhone = "+237670123456", reference = "CMD-001",
-    onSuccess = { txn -> confirmerCommande(txn.txnId) },
-    onError   = { err -> afficherErreur(err.message) })</code></pre>
-        </div>
-      </div>
-    </section>
+    onSuccess = { txn -&gt; confirmerCommande(txn.txnId) },
+    onError   = { err -&gt; afficherErreur(err.message) })</code></pre>
+          </div>
+        </section>
 
-    <section class="section" id="support">
-      <div class="container">
-        <h2>Support développeurs</h2>
-        <div class="grid grid--3">
-          <article class="card"><h3>Référence API</h3><p>Documentation interactive Swagger avec tous les endpoints et les schémas.</p><p><a href="https://api.c-pay.global/api/v1/docs/" rel="noopener">api.c-pay.global/api/v1/docs/</a></p></article>
-          <article class="card"><h3>E-mail</h3><p>Questions d'intégration, accès sandbox, passage en production.</p><p><a href="mailto:developers@c-pay.global">developers@c-pay.global</a></p></article>
-          <article class="card"><h3>Sécurité</h3><p>Signalement responsable de vulnérabilité.</p><p><a href="mailto:security@c-pay.global">security@c-pay.global</a> · <a href="/.well-known/security.txt">security.txt</a></p></article>
-        </div>
+        <section class="docsec" id="sandbox" aria-labelledby="sandbox-title">
+          <h2 id="sandbox-title">Sandbox</h2>
+          <div class="card">
+            <p>Un environnement de test est disponible <strong>sur demande</strong> : il n'est pas encore en libre-service. Écrivez à <a href="mailto:developers@c-pay.global?subject=Acc%C3%A8s%20sandbox%20C-Pay">developers@c-pay.global</a> en précisant votre cas d'usage, le pays visé et le type d'intégration (API, WooCommerce, Android). Nous revenons vers vous avec une clé de test, l'URL de base du bac à sable et les numéros de téléphone de test qui simulent un paiement confirmé, refusé ou expiré.</p>
+            <p class="mb-0">En production, le bouton <strong>Tester</strong> de la rubrique Webhooks du portail envoie un événement <code>webhook.test</code> signé à votre URL.</p>
+          </div>
+        </section>
+
+        <section class="docsec" id="erreurs" aria-labelledby="erreurs-title">
+          <h2 id="erreurs-title">Codes d'erreur</h2>
+          <p>Toute erreur renvoie <code>{ "error", "code", "details?" }</code>. Les codes ci-dessous sont stables ; le message <code>error</code> peut changer.</p>
+          <div class="table-wrap">
+            <table class="ref-table">
+              <caption class="visually-hidden">Codes d'erreur de l'API</caption>
+              <thead><tr><th scope="col">HTTP</th><th scope="col">Code</th><th scope="col">Signification</th></tr></thead>
+              <tbody>
+                <tr><td>400</td><td><code>PHONE_REQUIRED</code></td><td>Corps de <code>/detect/phone</code> sans <code>phone</code>.</td></tr>
+                <tr><td>400</td><td><code>INVALID_IDEMPOTENCY_KEY</code></td><td><code>Idempotency-Key</code> hors de 8 à 128 caractères.</td></tr>
+                <tr><td>401</td><td><code>API_KEY_REQUIRED</code></td><td>En-tête <code>X-API-Key</code> absent.</td></tr>
+                <tr><td>401</td><td><code>INVALID_API_KEY</code></td><td>Clé inconnue, désactivée ou expirée.</td></tr>
+                <tr><td>401</td><td><code>INVALID_API_SECRET</code></td><td><code>X-API-Secret</code> absent ou incorrect pour une clé qui en possède un.</td></tr>
+                <tr><td>403</td><td><code>MERCHANT_INACTIVE</code></td><td>Compte marchand suspendu ou non activé.</td></tr>
+                <tr><td>403</td><td>—</td><td>Permission manquante sur la clé (<code>pay_links</code>, <code>transactions</code>…).</td></tr>
+                <tr><td>409</td><td><code>IDEMPOTENCY_CONFLICT</code></td><td>Même <code>Idempotency-Key</code> avec un corps différent.</td></tr>
+                <tr><td>409</td><td><code>IDEMPOTENCY_IN_PROGRESS</code></td><td>Requête identique encore en cours de traitement.</td></tr>
+                <tr><td>409</td><td><code>FUNDING_UNAVAILABLE</code></td><td>Aucun compte de collecte C-Pay pour la devise (ordre d'approvisionnement).</td></tr>
+                <tr><td>409</td><td><code>TRANSFER_NOT_CANCELLABLE</code></td><td>Le transfert n'est plus dans un statut annulable.</td></tr>
+                <tr><td>410</td><td><code>FEATURE_DISABLED</code></td><td>Fonction non activée : encaissement direct par clé API, carte sans passerelle, Tap-to-Phone, rail sortant absent.</td></tr>
+                <tr><td>422</td><td><code>VALIDATION_ERROR</code></td><td>Paramètres invalides (<code>details</code> précise le champ).</td></tr>
+                <tr><td>422</td><td><code>INVALID_EXPIRES_IN</code></td><td><code>expiresIn</code> hors de 1 à 720 heures.</td></tr>
+                <tr><td>422</td><td><code>CURRENCY_MISMATCH</code></td><td>La devise du numéro du client n'est pas celle du marchand.</td></tr>
+                <tr><td>422</td><td><code>INSUFFICIENT_BALANCE</code></td><td>Solde disponible insuffisant (<code>details.available</code>).</td></tr>
+                <tr><td>422</td><td><code>WALLET_MISSING</code></td><td>Aucun wallet enregistré pour le retrait.</td></tr>
+                <tr><td>422</td><td><code>DAILY_LIMIT_EXCEEDED</code></td><td>Limite journalière de retrait du niveau KYB atteinte.</td></tr>
+                <tr><td>428</td><td><code>STEP_UP_REQUIRED</code></td><td>Objet <code>confirm</code> absent ou invalide ; <code>methods</code> indique <code>totp</code> ou <code>password</code>.</td></tr>
+                <tr><td>429</td><td>—</td><td>Limite de débit atteinte (en-têtes <code>RateLimit-*</code>), ou cinq confirmations erronées en 15 minutes.</td></tr>
+                <tr><td>503</td><td><code>IDEMPOTENCY_UNAVAILABLE</code></td><td>Contrôle d'idempotence momentanément indisponible ; réessayez avec la même clé.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="grid grid--3 mt-5">
+            <article class="card"><h3>Référence Swagger</h3><p>Tous les endpoints et les schémas, interactifs.</p><p><a href="https://api.c-pay.global/api/v1/docs/" rel="noopener">api.c-pay.global/api/v1/docs/</a></p></article>
+            <article class="card"><h3>Support développeurs</h3><p>Intégration, sandbox, passage en production.</p><p><a href="mailto:developers@c-pay.global">developers@c-pay.global</a></p></article>
+            <article class="card"><h3>Sécurité</h3><p>Signalement responsable de vulnérabilité.</p><p><a href="mailto:security@c-pay.global">security@c-pay.global</a> · <a href="/.well-known/security.txt">security.txt</a></p></article>
+          </div>
+        </section>
+
       </div>
-    </section>
+    </div>
   </main>
 
   <footer class="site-footer">
@@ -360,8 +643,8 @@ CPay.collect(activity, amount = 5000.0, customerPhone = "+237670123456", referen
           <img src="/logo-calculus.png" alt="Calculus Plus" width="119" height="34">
           <p>C-Pay est un produit de Calculus Plus SAS.</p>
         </div>
-        <div><h3>Produit</h3><ul><li><a href="/#produits">Produits</a></li><li><a href="/#tarifs">Tarifs</a></li><li><a href="/#pays">Pays couverts</a></li></ul></div>
-        <div><h3>Accès</h3><ul><li><a href="https://merchant.c-pay.global">Portail marchand</a></li><li><a href="https://merchant.c-pay.global/register">Ouvrir un compte</a></li><li><a href="/#contact">Contact</a></li></ul></div>
+        <div><h3>Solution</h3><ul><li><a href="/#caisse">Votre caisse</a></li><li><a href="/#pourquoi">Pourquoi C-Pay</a></li><li><a href="/#pays">Pays &amp; opérateurs</a></li><li><a href="/developers.html">Développeurs</a></li></ul></div>
+        <div><h3>Accès</h3><ul><li><a href="https://merchant.c-pay.global">Portail marchand</a></li><li><a href="https://merchant.c-pay.global/register">Ouvrir un compte</a></li><li><a href="/#contact">Contact</a></li><li><a href="/reclamation.html">Réclamation</a></li></ul></div>
         <div><h3>Légal</h3><ul><li><a href="/legal/mentions-legales.html">Mentions légales</a></li><li><a href="/legal/cgu.html">CGU</a></li><li><a href="/legal/confidentialite.html">Confidentialité</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
       </div>
       <div class="footer-bottom">© 2026 Calculus Plus SAS — Tous droits réservés.</div>

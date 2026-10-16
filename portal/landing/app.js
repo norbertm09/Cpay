@@ -1,4 +1,4 @@
-/* C-Pay — scripts de la vitrine (démo détection, simulateur, formulaires, navigation).
+/* C-Pay — scripts de la vitrine (démo détection, formulaires, navigation, documentation développeurs).
    Vanilla JS, aucune dépendance. Tous les appels réseau ciblent l'API publique
    dont la base est lue dans <meta name="cpay-api">. */
 (function () {
@@ -228,33 +228,6 @@
     }
   })();
 
-  /* ── Simulateur de frais ────────────────────────────────── */
-  (function simulator() {
-    var form = $('sim-form');
-    if (!form) return;
-    var RATES = { mobile_money: [1.5, 1.2, 1.0], card: [2.5, 2.0, 1.8] };
-    var amount = $('sim-amount'), currency = $('sim-currency'), method = $('sim-method'), level = $('sim-level');
-    var outNet = $('sim-net'), outGross = $('sim-gross'), outRate = $('sim-rate'), outFee = $('sim-fee');
-    var nf = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
-    var pf = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-
-    function money(v, cur) { return nf.format(Math.round(v)) + ' ' + cur; }
-    function update() {
-      var a = parseFloat(amount.value);
-      if (!isFinite(a) || a < 0) a = 0;
-      var cur = currency.value;
-      var rate = RATES[method.value][parseInt(level.value, 10) || 0];
-      var fee = Math.round(a * rate) / 100;
-      outGross.textContent = money(a, cur);
-      outRate.textContent = pf.format(rate) + ' %';
-      outFee.textContent = money(fee, cur);
-      outNet.textContent = money(a - fee, cur);
-    }
-    ['input', 'change'].forEach(function (evt) { form.addEventListener(evt, update); });
-    form.addEventListener('submit', function (e) { e.preventDefault(); update(); });
-    update();
-  })();
-
   /* ── Formulaires contact (lead) et réclamation (claim) ──── */
   function bindForm(opts) {
     var form = $(opts.formId);
@@ -375,34 +348,153 @@
     }
   });
 
-  /* ── Onglets (page développeurs) ────────────────────────── */
+  /* ── Onglets de code (page développeurs) ────────────────
+     Les onglets portant data-lang sont synchronisés : choisir « PHP » dans un
+     bloc bascule tous les blocs qui proposent PHP. */
   (function tabs() {
     var lists = document.querySelectorAll('[role="tablist"]');
+    if (!lists.length) return;
+    var groups = [];
+
+    function activate(group, tab) {
+      for (var j = 0; j < group.tabs.length; j++) {
+        var t = group.tabs[j];
+        var sel = t === tab;
+        t.setAttribute('aria-selected', sel ? 'true' : 'false');
+        t.tabIndex = sel ? 0 : -1;
+        var panel = document.getElementById(t.getAttribute('aria-controls'));
+        if (panel) panel.hidden = !sel;
+      }
+    }
+    function syncLang(lang) {
+      if (!lang) return;
+      for (var g = 0; g < groups.length; g++) {
+        for (var j = 0; j < groups[g].tabs.length; j++) {
+          if (groups[g].tabs[j].getAttribute('data-lang') === lang) { activate(groups[g], groups[g].tabs[j]); break; }
+        }
+      }
+    }
+
     for (var i = 0; i < lists.length; i++) {
       (function (list) {
-        var tabs = list.querySelectorAll('[role="tab"]');
-        function activate(tab) {
-          for (var j = 0; j < tabs.length; j++) {
-            var t = tabs[j];
-            var sel = t === tab;
-            t.setAttribute('aria-selected', sel ? 'true' : 'false');
-            t.tabIndex = sel ? 0 : -1;
-            var panel = document.getElementById(t.getAttribute('aria-controls'));
-            if (panel) panel.hidden = !sel;
-          }
-        }
-        for (var j = 0; j < tabs.length; j++) {
-          tabs[j].addEventListener('click', function () { activate(this); });
-          tabs[j].addEventListener('keydown', function (e) {
-            var idx = Array.prototype.indexOf.call(tabs, this);
+        var group = { tabs: list.querySelectorAll('[role="tab"]') };
+        groups.push(group);
+        for (var j = 0; j < group.tabs.length; j++) {
+          group.tabs[j].addEventListener('click', function () {
+            activate(group, this);
+            syncLang(this.getAttribute('data-lang'));
+          });
+          group.tabs[j].addEventListener('keydown', function (e) {
+            var idx = Array.prototype.indexOf.call(group.tabs, this);
             if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
               e.preventDefault();
-              var n = tabs[(idx + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
-              activate(n); n.focus();
+              var n = group.tabs[(idx + (e.key === 'ArrowRight' ? 1 : group.tabs.length - 1)) % group.tabs.length];
+              activate(group, n); syncLang(n.getAttribute('data-lang')); n.focus();
             }
           });
         }
       })(lists[i]);
     }
+  })();
+
+  /* ── Boutons « Copier » sur les blocs de code ───────────── */
+  (function copyButtons() {
+    var pres = document.querySelectorAll('.devdoc pre');
+    if (!pres.length) return;
+    var canCopy = !!(navigator.clipboard && navigator.clipboard.writeText) || !!document.execCommand;
+    if (!canCopy) return;
+
+    function fallbackCopy(text) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.className = 'visually-hidden';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok ? Promise.resolve() : Promise.reject(new Error('copy'));
+    }
+    function copy(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).catch(function () { return fallbackCopy(text); });
+      }
+      return fallbackCopy(text);
+    }
+
+    for (var i = 0; i < pres.length; i++) {
+      (function (pre) {
+        var wrap = el('div', 'codeblock');
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(pre);
+        var btn = el('button', 'copy-btn', 'Copier');
+        btn.type = 'button';
+        btn.setAttribute('aria-label', 'Copier le code');
+        wrap.appendChild(btn);
+        var timer = null;
+        btn.addEventListener('click', function () {
+          var code = pre.querySelector('code');
+          copy((code || pre).textContent).then(function () {
+            btn.textContent = 'Copié !'; btn.classList.add('is-done');
+          }, function () {
+            btn.textContent = 'Échec';
+          }).then(function () {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(function () { btn.textContent = 'Copier'; btn.classList.remove('is-done'); }, 1600);
+          });
+        });
+      })(pres[i]);
+    }
+  })();
+
+  /* ── Sommaire de la documentation (repli mobile, section active) ── */
+  (function toc() {
+    var toc = $('toc');
+    var toggle = $('toc-toggle');
+    if (!toc) return;
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        var open = toc.classList.toggle('is-open');
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      toc.addEventListener('click', function (e) {
+        if (e.target.tagName === 'A' && toc.classList.contains('is-open')) {
+          toc.classList.remove('is-open');
+          toggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+    var links = toc.querySelectorAll('.toc-nav a[href^="#"]');
+    if (!links.length) return;
+    var items = [];
+    for (var i = 0; i < links.length; i++) {
+      var target = document.getElementById(links[i].getAttribute('href').slice(1));
+      if (target) items.push({ link: links[i], target: target, parent: links[i].parentNode.parentNode.parentNode.querySelector(':scope > a') });
+    }
+    var headerH = ($('site-header') || {}).offsetHeight || 68;
+    var current = null, ticking = false;
+    function update() {
+      ticking = false;
+      var limit = headerH + 32;
+      var active = items[0] || null;
+      for (var k = 0; k < items.length; k++) {
+        if (items[k].target.getBoundingClientRect().top <= limit) active = items[k];
+      }
+      if (window.innerHeight + window.pageYOffset >= document.documentElement.scrollHeight - 2) active = items[items.length - 1];
+      if (!active || active === current) return;
+      for (var m = 0; m < items.length; m++) items[m].link.classList.remove('is-active');
+      active.link.classList.add('is-active');
+      if (active.parent && active.parent.getAttribute('href') !== active.link.getAttribute('href')) active.parent.classList.add('is-active');
+      current = active;
+    }
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(update);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    update();
   })();
 })();
