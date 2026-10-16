@@ -10,6 +10,11 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <meta name="description" content="C-Pay — Espace Partenaires. Plateforme de paiement éditée par Calculus Plus SAS." />
   <meta name="application-name" content="C-Pay" />
+  <link rel="preload" href="%PUBLIC_URL%/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <style>
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('%PUBLIC_URL%/fonts/inter-latin.woff2') format('woff2-variations'); }
+    body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+  </style>
 </head>
 <body>
   <div id="root"></div>

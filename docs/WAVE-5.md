@@ -47,3 +47,10 @@ d'écran mobile et bureau, corrigées avant livraison.
 - Portail porteur : `emailVerified` absent de `/auth/me`, pas de gel par `cardId`, pas de filtre date sur `/transactions`.
 - Portail marchand : pas de liste/révocation de sessions, secret de connecteur jamais affiché, `GET /settlements/:id/transactions` absent.
 - Android : `GET /pay/:shortId/status` à ajouter à `ApiService` pour suivre les liens carte.
+
+## 6. Typographie unifiée
+Une seule police pour toute la plateforme : **Inter** (variable 100–900, sous-ensemble latin, 48 Ko, auto-hébergée dans
+`fonts/inter-latin.woff2` de la vitrine et de chaque portail, aucun appel à un service externe). Pile de repli :
+system-ui, Segoe UI, Roboto, Arial. Jost et les dossiers de polices résiduels (`portal/_fonts*`) sont supprimés.
+Portails CRA : `@font-face` déclaré dans `public/index.html` (CRA ne résout pas les URL absolues dans le CSS) ;
+vitrine : déclaré en tête de `style.css`. L'app Android garde la police système (Roboto), cohérente avec Material 3.
