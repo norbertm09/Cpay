@@ -642,7 +642,17 @@ data class CashLimits(
     @SerializedName("withdrawDailyMax")       val withdrawDailyMax: Double? = null,
     @SerializedName("withdrawDailyRemaining") val withdrawDailyRemaining: Double? = null,
     @SerializedName("transferMin")            val transferMin: Double? = null,
-)
+    @SerializedName("withdrawFeePercent")     val withdrawFeePercent: Double? = null,
+    @SerializedName("withdrawFeeFixed")       val withdrawFeeFixed: Double? = null,
+    @SerializedName("withdrawFeeMin")         val withdrawFeeMin: Double? = null,
+) {
+    /** Estimation locale des frais de retrait (regle plateforme : % + fixe, minimum). */
+    fun estimateWithdrawFee(amount: Double): Double? {
+        if (withdrawFeePercent == null && withdrawFeeFixed == null) return null
+        val fee = amount * (withdrawFeePercent ?: 0.0) / 100.0 + (withdrawFeeFixed ?: 0.0)
+        return maxOf(fee, withdrawFeeMin ?: 0.0)
+    }
+}
 
 data class CashWallet(
     @SerializedName("operator")   val operator: String? = null,

@@ -1,100 +1,158 @@
 package global.cpay.app.merchant
 
+import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.launch
 import global.cpay.app.R
+import global.cpay.app.common.ApiClient
+import global.cpay.app.common.CheckRequest
+import global.cpay.app.common.SessionManager
+import global.cpay.app.common.ui.UiPrefs
 import global.cpay.app.databinding.ActivityMerchantMainBinding
-import global.cpay.app.merchant.fragments.*
+import global.cpay.app.merchant.fragments.CaisseHomeFragment
+import global.cpay.app.merchant.fragments.CashJournalFragment
+import global.cpay.app.merchant.fragments.CollectAmountFragment
+import global.cpay.app.merchant.fragments.DisburseFragment
+import global.cpay.app.merchant.fragments.KybDocumentsFragment
+import global.cpay.app.merchant.fragments.MerchProfileFragment
+import global.cpay.app.merchant.fragments.MerchTransactionsFragment
+import global.cpay.app.merchant.fragments.MerchTransferFragment
+import global.cpay.app.merchant.fragments.MoreFragment
+import global.cpay.app.merchant.fragments.PayLinksFragment
+import global.cpay.app.merchant.fragments.SettlementsFragment
+import global.cpay.app.merchant.fragments.SupportFragment
+import global.cpay.app.merchant.fragments.TerminalsFragment
+import global.cpay.app.merchant.fragments.TransfersFragment
+import global.cpay.app.merchant.fragments.WithdrawFragment
+import kotlinx.coroutines.launch
 
 /**
- * Ecran principal marchand (WAVE-4 : caisse).
- * Navigation basse : Caisse · Encaisser · Retirer · Transférer · Journal.
- * Profil, règlements, terminaux, liens, KYB, comptes bancaires et l'ancien
- * décaissement restent accessibles depuis l'accueil Caisse (menu « Autres »).
+ * Ecran principal marchand (WAVE-5).
+ *
+ * Barre basse a 4 onglets : Caisse · Encaisser · Journal · Plus. Les onglets sont des
+ * ecrans racines (sans pile) ; les autres ecrans (Retirer, Transferer, Liens, Terminaux,
+ * Reglements, Profil, Support, etapes de l'encaissement…) sont empiles avec [push] et
+ * fermes par le bouton Retour. Re-toucher l'onglet courant revient a sa racine.
  */
 class MerchantMainActivity : AppCompatActivity() {
 
     private lateinit var b: ActivityMerchantMainBinding
+    private val fm: FragmentManager get() = supportFragmentManager
 
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
 
-        // Si pas encore appaire a un terminal, montrer l'ecran d'appairage
-        if (global.cpay.app.common.SessionManager.isPaired) {
-            showDashboard(); return
+        // Appairage terminal : optionnel (« Continuer sans terminal » memorise le choix).
+        if (SessionManager.isPaired || UiPrefs.pairingSkipped) {
+            showMain(s); return
         }
-        val androidId = android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ANDROID_ID)
+        val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         lifecycleScope.launch {
             try {
-                val r = global.cpay.app.common.ApiClient.api.terminalCheck(global.cpay.app.common.CheckRequest(androidId = androidId))
+                val r = ApiClient.api.terminalCheck(CheckRequest(androidId = androidId))
                 val body = r.body()
                 if (r.isSuccessful && body != null && body.paired && !body.terminalId.isNullOrEmpty()) {
-                    global.cpay.app.common.SessionManager.terminalId   = body.terminalId
-                    global.cpay.app.common.SessionManager.terminalName = body.terminalName
-                    global.cpay.app.common.SessionManager.terminalSite = body.siteName
-                    showDashboard()
+                    SessionManager.terminalId   = body.terminalId
+                    SessionManager.terminalName = body.terminalName
+                    SessionManager.terminalSite = body.siteName
+                    showMain(null)
                 } else goToPairing()
             } catch (e: Exception) { goToPairing() }
         }
     }
+
     private fun goToPairing() {
-        startActivity(android.content.Intent(this, PairingActivity::class.java)); finish()
+        startActivity(Intent(this, PairingActivity::class.java)); finish()
     }
-    private fun showDashboard() {
+
+    private fun showMain(saved: Bundle?) {
         b = ActivityMerchantMainBinding.inflate(layoutInflater)
         setContentView(b.root)
 
-        load(MerchDashboardFragment())
+        if (saved == null) fm.beginTransaction().replace(R.id.fragment_container, CaisseHomeFragment()).commit()
 
-        b.bottomNav.setOnItemSelectedListener { item ->
-            load(when (item.itemId) {
-                R.id.nav_dashboard -> MerchDashboardFragment()
-                R.id.nav_collect   -> CollectFragment()
-                R.id.nav_withdraw  -> WithdrawFragment()
-                R.id.nav_transfers -> TransfersFragment()
-                R.id.nav_journal   -> CashJournalFragment()
-                else               -> MerchDashboardFragment()
-            })
-            true
-        }
-        b.bottomNav.setOnItemReselectedListener { /* pas de rechargement */ }
+        b.bottomNav.setOnItemSelectedListener { item -> switchTab(item.itemId); true }
+        b.bottomNav.setOnItemReselectedListener { popToRoot() }
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    fm.backStackEntryCount > 0 -> fm.popBackStack()
+                    b.bottomNav.selectedItemId != R.id.nav_dashboard -> b.bottomNav.selectedItemId = R.id.nav_dashboard
+                    else -> finish()
+                }
+            }
+        })
     }
 
-    /** Selectionne un onglet de la barre basse (declenche le chargement du fragment). */
+    private fun rootFor(itemId: Int): Fragment = when (itemId) {
+        R.id.nav_collect -> CollectAmountFragment()
+        R.id.nav_journal -> CashJournalFragment()
+        R.id.nav_more    -> MoreFragment()
+        else             -> CaisseHomeFragment()
+    }
+
+    private fun switchTab(itemId: Int) {
+        if (!::b.isInitialized) return
+        popToRoot()
+        fm.beginTransaction()
+            .setReorderingAllowed(true)
+            .replace(R.id.fragment_container, rootFor(itemId))
+            .commitAllowingStateLoss()
+    }
+
+    /** Vide la pile d'ecrans secondaires (retour a la racine de l'onglet). */
+    fun popToRoot() {
+        if (fm.backStackEntryCount > 0) fm.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
+    }
+
+    /** Empile un ecran secondaire au-dessus de l'onglet courant. */
+    fun push(f: Fragment, tag: String? = null) {
+        if (!::b.isInitialized) return
+        fm.beginTransaction()
+            .setReorderingAllowed(true)
+            .setCustomAnimations(R.anim.cpay_slide_in, R.anim.cpay_fade_out, R.anim.cpay_fade_in, R.anim.cpay_slide_out)
+            .replace(R.id.fragment_container, f, tag)
+            .addToBackStack(tag)
+            .commitAllowingStateLoss()
+    }
+
+    /** Depile jusqu'a l'ecran [tag] (inclus). */
+    fun popTo(tag: String, inclusive: Boolean = true) {
+        fm.popBackStack(tag, if (inclusive) FragmentManager.POP_BACK_STACK_INCLUSIVE else 0)
+    }
+
+    fun pop() { if (fm.backStackEntryCount > 0) fm.popBackStack() else b.bottomNav.selectedItemId = R.id.nav_dashboard }
+
+    /** Selectionne un onglet (declenche le chargement de sa racine). */
     fun selectTab(itemId: Int) {
         if (!::b.isInitialized) return
-        if (b.bottomNav.selectedItemId == itemId) {
-            load(when (itemId) {
-                R.id.nav_collect   -> CollectFragment()
-                R.id.nav_withdraw  -> WithdrawFragment()
-                R.id.nav_transfers -> TransfersFragment()
-                R.id.nav_journal   -> CashJournalFragment()
-                else               -> MerchDashboardFragment()
-            })
-        } else b.bottomNav.selectedItemId = itemId
+        if (b.bottomNav.selectedItemId == itemId) switchTab(itemId) else b.bottomNav.selectedItemId = itemId
     }
 
-    fun openCollect()      = selectTab(R.id.nav_collect)
-    fun openWithdraw()     = selectTab(R.id.nav_withdraw)
-    fun openTransfers()    = selectTab(R.id.nav_transfers)
-    fun openJournal()      = selectTab(R.id.nav_journal)
+    // ─── Onglets ──────────────────────────────────────────────────────
+    fun openHome()    = selectTab(R.id.nav_dashboard)
+    fun openCollect() = selectTab(R.id.nav_collect)
+    fun openJournal() = selectTab(R.id.nav_journal)
+    fun openMore()    = selectTab(R.id.nav_more)
 
-    fun openProfile()      = load(MerchProfileFragment())
-    fun openSettlements()  = load(SettlementsFragment())
-    fun openTerminals()    = load(TerminalsFragment())
-    fun openPayLinks()     = load(PayLinksFragment())
-    fun openKyb()          = load(KybDocumentsFragment())
-    fun openTransactions() = load(MerchTransactionsFragment())
+    // ─── Ecrans secondaires ───────────────────────────────────────────
+    fun openWithdraw()     = push(WithdrawFragment(), "withdraw")
+    fun openTransfers()    = push(TransfersFragment(), "transfers")
+    fun openProfile()      = push(MerchProfileFragment(), "profile")
+    fun openSettlements()  = push(SettlementsFragment(), "settlements")
+    fun openTerminals()    = push(TerminalsFragment(), "terminals")
+    fun openPayLinks()     = push(PayLinksFragment(), "paylinks")
+    fun openKyb()          = push(KybDocumentsFragment(), "kyb")
+    fun openTransactions() = push(MerchTransactionsFragment(), "transactions")
+    fun openSupport()      = push(SupportFragment(), "support")
     /** Gestion des comptes bancaires (ancien ecran retraits/transferts). */
-    fun openBankAccounts() = load(MerchTransferFragment())
+    fun openBankAccounts() = push(MerchTransferFragment(), "bank_accounts")
     /** Ancien decaissement vers un client (conserve, hors barre basse). */
-    fun openDisburse()     = load(DisburseFragment())
-
-    private fun load(f: Fragment) {
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.fragment_container, f).commitAllowingStateLoss()
-    }
+    fun openDisburse()     = push(DisburseFragment(), "disburse")
 }

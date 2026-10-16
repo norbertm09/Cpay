@@ -1,64 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@color/bg">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:padding="24dp" android:gravity="center">
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/bg_balance_card"
-            android:padding="32dp" android:gravity="center"
-            android:layout_marginTop="24dp" android:layout_marginBottom="32dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="CPay" android:textColor="#FFFFFF" android:textSize="36sp"
-                android:textStyle="bold"/>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="Choisissez votre profil" android:textColor="#CCF0F4F8"
-                android:textSize="14sp" android:layout_marginTop="8dp"/>
-        </LinearLayout>
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/surface_dim" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp" android:gravity="center_horizontal">
+        <ImageView android:layout_width="260dp" android:layout_height="wrap_content" android:adjustViewBounds="true"
+            android:src="@drawable/logo_cpay" android:layout_marginTop="40dp" android:contentDescription="@string/cd_logo"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_title"
+            android:textAppearance="@style/TextAppearance.CPay.Display" android:textSize="30sp" android:textColor="@color/brand_navy" android:layout_marginTop="32dp"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_subtitle"
+            android:textAppearance="@style/TextAppearance.CPay.Secondary" android:layout_marginTop="4dp" android:layout_marginBottom="28dp"/>
 
-        <LinearLayout android:id="@+id/btn_cardholder"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:padding="20dp"
-            android:background="@drawable/bg_card" android:layout_marginBottom="12dp"
-            android:gravity="center_vertical" android:clickable="true" android:focusable="true">
-            <TextView android:layout_width="48dp" android:layout_height="48dp"
-                android:text="💳" android:textSize="28sp" android:gravity="center"/>
-            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1" android:orientation="vertical" android:layout_marginStart="12dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Porteur de carte" android:textSize="17sp" android:textStyle="bold"
-                    android:textColor="@color/primary_dark"/>
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Payer, consulter solde et transactions"
-                    android:textColor="@color/text_secondary" android:textSize="13sp" android:layout_marginTop="2dp"/>
+        <com.google.android.material.card.MaterialCardView android:id="@+id/btn_merchant" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:clickable="true" android:focusable="true" app:rippleColor="@color/accent_container" app:strokeColor="@color/brand_accent" app:strokeWidth="1.5dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:padding="20dp">
+                <ImageView android:layout_width="56dp" android:layout_height="56dp" android:padding="14dp" android:background="@drawable/bg_circle"
+                    android:backgroundTint="@color/brand_accent" android:src="@drawable/ic_store" app:tint="@color/white" android:contentDescription="@null"/>
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="16dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_merchant" android:textAppearance="@style/TextAppearance.CPay.Title" android:textSize="20sp"/>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_merchant_sub" android:textAppearance="@style/TextAppearance.CPay.Secondary" android:layout_marginTop="2dp"/>
+                </LinearLayout>
+                <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/ic_chevron_right" app:tint="@color/brand_accent" android:contentDescription="@null"/>
             </LinearLayout>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="→" android:textSize="20sp" android:textColor="@color/primary"/>
-        </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <LinearLayout android:id="@+id/btn_merchant"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:padding="20dp"
-            android:background="@drawable/bg_card" android:layout_marginBottom="32dp"
-            android:gravity="center_vertical" android:clickable="true" android:focusable="true">
-            <TextView android:layout_width="48dp" android:layout_height="48dp"
-                android:text="🏪" android:textSize="28sp" android:gravity="center"/>
-            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1" android:orientation="vertical" android:layout_marginStart="12dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Marchand" android:textSize="17sp" android:textStyle="bold"
-                    android:textColor="@color/primary"/>
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Encaisser et gérer mes transactions"
-                    android:textColor="@color/text_secondary" android:textSize="13sp" android:layout_marginTop="2dp"/>
+        <com.google.android.material.card.MaterialCardView android:id="@+id/btn_cardholder" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:clickable="true" android:focusable="true" app:rippleColor="@color/primary_container">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:padding="20dp">
+                <ImageView android:layout_width="56dp" android:layout_height="56dp" android:padding="14dp" android:background="@drawable/bg_circle"
+                    android:src="@drawable/ic_card" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="16dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_cardholder" android:textAppearance="@style/TextAppearance.CPay.Title" android:textSize="20sp"/>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_cardholder_sub" android:textAppearance="@style/TextAppearance.CPay.Secondary" android:layout_marginTop="2dp"/>
+                </LinearLayout>
+                <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/ic_chevron_right" app:tint="@color/brand_primary" android:contentDescription="@null"/>
             </LinearLayout>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="→" android:textSize="20sp" android:textColor="@color/primary"/>
-        </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="© 2026 Calculus Plus SAS — Zone CEMAC"
-            android:textColor="@color/text_secondary" android:textSize="11sp"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_footer"
+            android:textAppearance="@style/TextAppearance.CPay.Secondary" android:textSize="11sp" android:layout_marginTop="40dp"/>
     </LinearLayout>
 </ScrollView>

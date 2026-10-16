@@ -191,7 +191,7 @@ class TransferFragment : Fragment() {
 
     private fun setDirection(d: String) {
         direction = d
-        val on = Color.parseColor("#12b6c7"); val off = Color.parseColor("#5a6677")
+        val on = Color.parseColor("#1d4f92"); val off = Color.parseColor("#5a6677")
         val isTo = d == "to_bank"
         b.btnDirTo.setTextColor(if (isTo) on else off)
         b.btnDirTo.setTypeface(null, if (isTo) Typeface.BOLD else Typeface.NORMAL)
@@ -239,7 +239,7 @@ class TransferFragment : Fragment() {
     }
 
     private fun selOperator(op: String) {
-        val on = Color.parseColor("#12b6c7"); val off = Color.parseColor("#5a6677")
+        val on = Color.parseColor("#1d4f92"); val off = Color.parseColor("#5a6677")
         b.btnOpMtn.setTextColor(if (op == "mtn") on else off)
         b.btnOpMtn.setTypeface(null, if (op == "mtn") Typeface.BOLD else Typeface.NORMAL)
         b.btnOpAirtel.setTextColor(if (op == "airtel") on else off)
@@ -251,7 +251,7 @@ class TransferFragment : Fragment() {
 
     private fun selCountry(c: String) {
         country = c
-        val on = Color.parseColor("#12b6c7"); val off = Color.parseColor("#5a6677")
+        val on = Color.parseColor("#1d4f92"); val off = Color.parseColor("#5a6677")
         b.btnCountryCg.setTextColor(if (c == "CG") on else off)
         b.btnCountryCg.setTypeface(null, if (c == "CG") Typeface.BOLD else Typeface.NORMAL)
         b.btnCountryCm.setTextColor(if (c == "CM") on else off)

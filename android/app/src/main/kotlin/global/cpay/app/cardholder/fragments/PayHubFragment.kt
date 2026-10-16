@@ -27,7 +27,7 @@ class PayHubFragment : Fragment() {
     }
 
     private fun switch(isPay: Boolean) {
-        val on  = Color.parseColor("#12b6c7")
+        val on  = Color.parseColor("#1d4f92")
         val off = Color.parseColor("#5a6677")
 
         b.tabPay.setTextColor(if (isPay) on else off)

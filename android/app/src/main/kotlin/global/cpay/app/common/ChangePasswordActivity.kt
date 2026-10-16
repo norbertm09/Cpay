@@ -40,7 +40,7 @@ class ChangePasswordActivity : AppCompatActivity() {
         val btnSubmit  = findViewById<TextView>(R.id.btn_submit)
 
         if (forced) {
-            tvSubtitle.text = "Votre mot de passe est temporaire : choisissez-en un nouveau pour continuer."
+            tvSubtitle.setText(R.string.pwd_subtitle_forced)
         }
         tvLogout.setOnClickListener { logoutToLogin() }
         btnSubmit.setOnClickListener { submit() }
@@ -70,7 +70,7 @@ class ChangePasswordActivity : AppCompatActivity() {
                     // Le serveur a revoque toutes les sessions : nouvelle connexion requise.
                     SessionManager.clearSession()
                     AuthFlow.toLogin(this@ChangePasswordActivity, userType,
-                        "Mot de passe modifié ✅ — reconnectez-vous")
+                        getString(R.string.pwd_changed))
                     finish()
                 } else {
                     val err = ApiErrors.of(r)
@@ -80,7 +80,7 @@ class ChangePasswordActivity : AppCompatActivity() {
                     })
                 }
             } catch (e: Exception) {
-                showError("Erreur réseau — ${e.message}")
+                showError(getString(R.string.network_error))
             } finally { setLoading(false) }
         }
     }

@@ -49,8 +49,8 @@ class MerchTransactionsFragment : Fragment() {
         binding.btnDateTo.setOnClickListener   { pickDate(false) }
         binding.btnClearDates.setOnClickListener {
             dateFrom = null; dateTo = null
-            binding.btnDateFrom.text = "📅 Du"
-            binding.btnDateTo.text   = "📅 Au"
+            binding.btnDateFrom.text = "Du"
+            binding.btnDateTo.text   = "Au"
             binding.btnClearDates.visibility = View.GONE
             loadFromApi()
         }
@@ -103,8 +103,8 @@ class MerchTransactionsFragment : Fragment() {
         val cal = Calendar.getInstance()
         DatePickerDialog(requireContext(), { _, y, m, d ->
             val date = String.format("%04d-%02d-%02d", y, m+1, d)
-            if (isFrom) { dateFrom = date; binding.btnDateFrom.text = "📅 $date" }
-            else        { dateTo   = date; binding.btnDateTo.text   = "📅 $date" }
+            if (isFrom) { dateFrom = date; binding.btnDateFrom.text = date }
+            else        { dateTo   = date; binding.btnDateTo.text   = date }
             binding.btnClearDates.visibility = View.VISIBLE
             loadFromApi()
         }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()

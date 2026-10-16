@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import global.cpay.app.R
 import global.cpay.app.common.ApiClient
 import global.cpay.app.databinding.ActivityForgotPasswordBinding
 import kotlinx.coroutines.launch
@@ -53,18 +54,17 @@ class ForgotPasswordActivity : AppCompatActivity() {
                     // Masquer le champ de saisie du token (plus necessaire)
                     b.etCode.visibility = View.GONE
 
-                    b.tvCodeSent.text = "📧 Un lien de réinitialisation a été envoyé à $e"
-                    b.tvStepDesc.text = "Ouvrez l'email et cliquez sur le lien pour choisir " +
-                        "un nouveau mot de passe. Revenez ensuite ici pour vous connecter."
+                    b.tvCodeSent.text = getString(R.string.forgot_sent_fmt, e)
+                    b.tvStepDesc.setText(R.string.forgot_sent_desc)
 
-                    b.btnVerifyCode.text = "Ouvrir ma messagerie"
+                    b.btnVerifyCode.setText(R.string.forgot_open_mail)
                     b.tvError.visibility = View.GONE
                     Toast.makeText(this@ForgotPasswordActivity,
-                        "Email envoyé ✅", Toast.LENGTH_SHORT).show()
+                        getString(R.string.forgot_sent_fmt, e), Toast.LENGTH_SHORT).show()
                 } else if (r.code() == 404) {
                     err("Aucun compte associé à cet email")
                 } else err("Impossible d'envoyer l'email pour le moment")
-            } catch (ex: Exception) { err("Erreur réseau") }
+            } catch (ex: Exception) { err(getString(R.string.network_error)) }
             finally { loading(false) }
         }
     }

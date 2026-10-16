@@ -112,7 +112,7 @@ class PayLinksFragment : Fragment() {
                 if (desc.isNotEmpty()) body["description"] = desc
                 val r = ApiClient.api.merchantCreatePayLink(body)
                 if (r.isSuccessful) {
-                    Toast.makeText(requireContext(), "Lien créé ✅", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Lien créé", Toast.LENGTH_SHORT).show()
                     load()
                 } else Toast.makeText(requireContext(), "Erreur création", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {

@@ -1,6 +1,7 @@
 package global.cpay.app.db
 
 import android.content.Context
+import com.google.gson.Gson
 import global.cpay.app.common.Transaction
 import java.text.SimpleDateFormat
 import java.util.*
@@ -60,4 +61,31 @@ object CacheManager {
         customerPhone = e.customerPhone,
         description   = e.description,
     )
+
+    // ─── WAVE-5 : cache JSON generique (resume de caisse, journal) ───
+    private val gson = Gson()
+
+    const val KEY_CASH_SUMMARY = "cash_summary"
+    fun keyHistory(type: String?) = "cash_history_" + (type ?: "all")
+
+    /** Valeur en cache + date d'enregistrement (epoch ms), ou null. */
+    class Cached<T>(val value: T, val savedAt: Long)
+
+    suspend fun <T> putJson(context: Context, key: String, value: T) {
+        try {
+            AppDatabase.get(context).cacheDao().put(CacheEntryEntity(key, gson.toJson(value)))
+        } catch (_: Exception) { }
+    }
+
+    suspend fun <T> getJson(context: Context, key: String, type: Class<T>): Cached<T>? {
+        return try {
+            val e = AppDatabase.get(context).cacheDao().get(key) ?: return null
+            val v = gson.fromJson(e.json, type) ?: return null
+            Cached(v, e.savedAt)
+        } catch (_: Exception) { null }
+    }
+
+    suspend fun clearJson(context: Context) {
+        try { AppDatabase.get(context).cacheDao().clear() } catch (_: Exception) { }
+    }
 }

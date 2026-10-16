@@ -64,12 +64,12 @@ class TwoFAActivity : AppCompatActivity() {
                     val data = r.body()
                     val enabled = data?.get("mfaEnabled") as? Boolean ?: false
                     if (enabled) {
-                        tvStatus.text = "✅ 2FA est activé sur votre compte"
-                        tvStatus.setTextColor(Color.parseColor("#00c896"))
+                        tvStatus.setText(R.string.twofa_enabled)
+                        tvStatus.setTextColor(androidx.core.content.ContextCompat.getColor(this@TwoFAActivity, R.color.success_main))
                         btnSetup.visibility = View.GONE
                     } else {
-                        tvStatus.text = "⚠️ 2FA non activé — Sécurisez votre compte"
-                        tvStatus.setTextColor(Color.parseColor("#ff9500"))
+                        tvStatus.setText(R.string.twofa_disabled)
+                        tvStatus.setTextColor(androidx.core.content.ContextCompat.getColor(this@TwoFAActivity, R.color.warn_main))
                     }
                 }
             } catch(e: Exception) { }
@@ -84,7 +84,7 @@ class TwoFAActivity : AppCompatActivity() {
                         val data = r.body()!!
                         val otpUri = data["otpUri"] as? String ?: ""
                         val secret = data["secret"] as? String ?: ""
-                        tvSecret.text = "Clé secrète: $secret"
+                        tvSecret.text = getString(R.string.twofa_secret_fmt, secret)
                         // Générer QR Code
                         if (otpUri.isNotEmpty()) {
                             val qr = generateQR(otpUri, 400)
@@ -95,26 +95,27 @@ class TwoFAActivity : AppCompatActivity() {
                         btnSetup.visibility = View.GONE
                     }
                 } catch(e: Exception) {
-                    Toast.makeText(this@TwoFAActivity, "Erreur setup 2FA", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@TwoFAActivity, R.string.twofa_setup_error, Toast.LENGTH_SHORT).show()
                 } finally { progress.visibility = View.GONE }
             }
         }
 
         btnVerify.setOnClickListener {
             val code = etCode.text.toString().trim()
-            if (code.length != 6) { Toast.makeText(this, "Code 6 chiffres requis", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            if (code.length != 6) { Toast.makeText(this, R.string.twofa_code_required, Toast.LENGTH_SHORT).show(); return@setOnClickListener }
             progress.visibility = View.VISIBLE
             lifecycleScope.launch {
                 try {
                     val r = if (isMerchant) ApiClient.api.merchant2FAVerify(mapOf("code" to code)) else ApiClient.api.cardholder2FAVerify(mapOf("code" to code))
                     if (r.isSuccessful) {
-                        Toast.makeText(this@TwoFAActivity, "2FA activé avec succès ✅", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@TwoFAActivity, R.string.twofa_activated, Toast.LENGTH_LONG).show()
+                        global.cpay.app.merchant.StepUp.mfaEnabled = true
                         finish()
                     } else {
-                        Toast.makeText(this@TwoFAActivity, "Code invalide", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@TwoFAActivity, R.string.twofa_invalid, Toast.LENGTH_SHORT).show()
                     }
                 } catch(e: Exception) {
-                    Toast.makeText(this@TwoFAActivity, "Erreur réseau", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@TwoFAActivity, R.string.network_error, Toast.LENGTH_SHORT).show()
                 } finally { progress.visibility = View.GONE }
             }
         }
@@ -129,24 +130,24 @@ class TwoFAActivity : AppCompatActivity() {
         val mfaToken   = intent.getStringExtra(EXTRA_MFA_TOKEN) ?: ""
         val identifier = intent.getStringExtra(EXTRA_IDENTIFIER) ?: ""
 
-        findViewById<TextView>(R.id.tv_2fa_title).text    = "🔐 Vérification en deux étapes"
-        findViewById<TextView>(R.id.tv_2fa_subtitle).text = "Saisissez le code généré par votre application d'authentification"
-        findViewById<TextView>(R.id.tv_verify_label).text = "Code à 6 chiffres"
+        findViewById<TextView>(R.id.tv_2fa_title).setText(R.string.twofa_login_title)
+        findViewById<TextView>(R.id.tv_2fa_subtitle).setText(R.string.twofa_login_subtitle)
+        findViewById<TextView>(R.id.tv_verify_label).setText(R.string.twofa_code_label)
         tvStatus.visibility     = View.GONE
         btnSetup.visibility     = View.GONE
         layoutSetup.visibility  = View.GONE
         layoutVerify.visibility = View.VISIBLE
-        btnVerify.text = "✅ Valider"
+        btnVerify.setText(R.string.twofa_validate_button)
         etCode.requestFocus()
 
         if (mfaToken.isEmpty()) {
-            Toast.makeText(this, "Session 2FA invalide — reconnectez-vous", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, R.string.twofa_session_invalid, Toast.LENGTH_LONG).show()
             finish(); return
         }
 
         btnVerify.setOnClickListener {
             val code = etCode.text.toString().trim()
-            if (code.length != 6) { Toast.makeText(this, "Code 6 chiffres requis", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            if (code.length != 6) { Toast.makeText(this, R.string.twofa_code_required, Toast.LENGTH_SHORT).show(); return@setOnClickListener }
             progress.visibility = View.VISIBLE
             btnVerify.isEnabled = false
             lifecycleScope.launch {
@@ -157,21 +158,21 @@ class TwoFAActivity : AppCompatActivity() {
                     val auth = r.body()
                     if (r.isSuccessful && auth != null) {
                         if (!AuthFlow.saveAndEnter(this@TwoFAActivity, auth, userType, identifier)) {
-                            Toast.makeText(this@TwoFAActivity, "Réponse inattendue du serveur", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@TwoFAActivity, R.string.login_error_generic, Toast.LENGTH_LONG).show()
                         }
                     } else {
                         val err = ApiErrors.of(r)
                         when (err.code) {
-                            "INVALID_TOTP" -> Toast.makeText(this@TwoFAActivity, "Code invalide", Toast.LENGTH_SHORT).show()
+                            "INVALID_TOTP" -> Toast.makeText(this@TwoFAActivity, R.string.twofa_invalid, Toast.LENGTH_SHORT).show()
                             "INVALID_MFA_TOKEN" -> {
-                                Toast.makeText(this@TwoFAActivity, "Délai dépassé — reconnectez-vous", Toast.LENGTH_LONG).show()
+                                Toast.makeText(this@TwoFAActivity, R.string.twofa_expired, Toast.LENGTH_LONG).show()
                                 finish()
                             }
                             else -> Toast.makeText(this@TwoFAActivity, err.error ?: "Erreur (${r.code()})", Toast.LENGTH_LONG).show()
                         }
                     }
                 } catch(e: Exception) {
-                    Toast.makeText(this@TwoFAActivity, "Erreur réseau", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@TwoFAActivity, R.string.network_error, Toast.LENGTH_SHORT).show()
                 } finally {
                     progress.visibility = View.GONE
                     btnVerify.isEnabled = true

@@ -9,7 +9,11 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import global.cpay.app.BuildConfig
-import global.cpay.app.common.*
+import global.cpay.app.R
+import global.cpay.app.common.ApiClient
+import global.cpay.app.common.PairRequest
+import global.cpay.app.common.SessionManager
+import global.cpay.app.common.ui.UiPrefs
 import global.cpay.app.databinding.ActivityPairingBinding
 import kotlinx.coroutines.launch
 
@@ -23,11 +27,13 @@ class PairingActivity : AppCompatActivity() {
         b = ActivityPairingBinding.inflate(layoutInflater)
         setContentView(b.root)
 
-        b.tvMerchant.text = SessionManager.userName ?: "Marchand"
+        b.tvMerchant.text = SessionManager.userName ?: getString(R.string.profile_merchant)
 
         b.btnPair.setOnClickListener { doPair() }
         b.btnSkip.setOnClickListener {
-            // Permettre d'utiliser l'app sans terminal (mode simple)
+            // Utiliser l'app sans terminal (mode simple) : le choix est memorise pour ne pas
+            // revenir en boucle sur cet ecran.
+            UiPrefs.pairingSkipped = true
             startActivity(Intent(this, MerchantMainActivity::class.java))
             finish()
         }
@@ -37,7 +43,7 @@ class PairingActivity : AppCompatActivity() {
     private fun doPair() {
         val code = b.etCode.text.toString().trim()
         if (code.length != 6) {
-            b.tvError.text = "Le code doit comporter 6 chiffres"
+            b.tvError.setText(R.string.pairing_error_len)
             b.tvError.visibility = View.VISIBLE
             return
         }
@@ -61,10 +67,10 @@ class PairingActivity : AppCompatActivity() {
                     SessionManager.terminalId   = d.terminalId
                     SessionManager.terminalName = d.terminalName
                     SessionManager.terminalSite = d.siteName
+                    UiPrefs.pairingSkipped = false
 
-                    val msg = if (d.alreadyPaired)
-                        "Appareil déjà lié à ${d.terminalName}"
-                    else "Terminal ${d.terminalName} appairé ✅"
+                    val msg = if (d.alreadyPaired) getString(R.string.pairing_already_fmt, d.terminalName)
+                              else getString(R.string.pairing_done_fmt, d.terminalName)
                     Toast.makeText(this@PairingActivity, msg, Toast.LENGTH_LONG).show()
 
                     startActivity(Intent(this@PairingActivity, MerchantMainActivity::class.java))
@@ -72,14 +78,14 @@ class PairingActivity : AppCompatActivity() {
                 } else {
                     val err = r.errorBody()?.string() ?: ""
                     b.tvError.text = when {
-                        err.contains("INVALID_PAIRING") -> "Code invalide ou déjà utilisé"
-                        err.contains("deja lie")        -> "Cet appareil est déjà lié à un autre terminal"
-                        else -> "Échec de l'appairage"
+                        err.contains("INVALID_PAIRING") -> getString(R.string.pairing_error_invalid)
+                        err.contains("deja lie")        -> getString(R.string.pairing_error_other_device)
+                        else -> getString(R.string.pairing_error_generic)
                     }
                     b.tvError.visibility = View.VISIBLE
                 }
             } catch (e: Exception) {
-                b.tvError.text = "Erreur réseau — vérifiez la connexion"
+                b.tvError.setText(R.string.network_error)
                 b.tvError.visibility = View.VISIBLE
             } finally {
                 b.btnPair.isEnabled = true

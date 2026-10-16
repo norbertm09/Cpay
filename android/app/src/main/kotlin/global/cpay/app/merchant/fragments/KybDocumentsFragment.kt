@@ -59,7 +59,7 @@ class KybDocumentsFragment : Fragment() {
                     pickedName = name
                     val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                     pickedBase64 = "data:$pickedMime;base64,$b64"
-                    b.tvSelectedFile.text = "✓ $name (${pickedSize / 1024} Ko)"
+                    b.tvSelectedFile.text = "$name (${pickedSize / 1024} Ko)"
                 } catch (e: Exception) {
                     Toast.makeText(requireContext(), "Erreur lecture fichier", Toast.LENGTH_SHORT).show()
                 }
@@ -120,7 +120,7 @@ class KybDocumentsFragment : Fragment() {
                     docType = docType, docLabel = docLabel, fileUrl = b64,
                     fileName = pickedName, fileSize = pickedSize, mimeType = pickedMime))
                 if (r.isSuccessful) {
-                    Toast.makeText(requireContext(), "Document envoyé ✅", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Document envoyé", Toast.LENGTH_SHORT).show()
                     pickedBase64 = null
                     b.tvSelectedFile.text = ""
                     loadDocs()

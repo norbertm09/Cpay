@@ -61,16 +61,16 @@ class DisburseFragment : Fragment() {
     }
 
     private fun switchTab(isDis: Boolean) {
-        b.tabDisburse.setTextColor(Color.parseColor(if (isDis) "#12b6c7" else "#5a6677"))
+        b.tabDisburse.setTextColor(Color.parseColor(if (isDis) "#1d4f92" else "#5a6677"))
         b.tabDisburse.setTypeface(null, if (isDis) Typeface.BOLD else Typeface.NORMAL)
-        b.tabWithdraw.setTextColor(Color.parseColor(if (!isDis) "#12b6c7" else "#5a6677"))
+        b.tabWithdraw.setTextColor(Color.parseColor(if (!isDis) "#1d4f92" else "#5a6677"))
         b.tabWithdraw.setTypeface(null, if (!isDis) Typeface.BOLD else Typeface.NORMAL)
         b.layoutDisburse.visibility = if (isDis) View.VISIBLE else View.GONE
         b.layoutWithdraw.visibility = if (!isDis) View.VISIBLE else View.GONE
     }
 
     private fun selOp(isDis: Boolean, op: String) {
-        val on = Color.parseColor("#12b6c7"); val off = Color.parseColor("#5a6677")
+        val on = Color.parseColor("#1d4f92"); val off = Color.parseColor("#5a6677")
         if (isDis) {
             disburseOp = op
             val a = op == "airtel_money"
@@ -106,7 +106,7 @@ class DisburseFragment : Fragment() {
                     amount = amt!!, recipientPhone = phone, method = disburseOp, description = ref))
                 if (r.isSuccessful && r.body() != null) {
                     val d = r.body()!!
-                    Toast.makeText(requireContext(), "✅ ${fmt.format(amt)} XAF décaissés", Toast.LENGTH_LONG).show()
+                    Toast.makeText(requireContext(), "${fmt.format(amt)} XAF décaissés", Toast.LENGTH_LONG).show()
                     startActivity(Intent(requireContext(), ReceiptActivity::class.java).apply {
                         putExtra("amount", d.amount ?: amt)
                         putExtra("reference", d.reference ?: ref)
@@ -142,7 +142,7 @@ class DisburseFragment : Fragment() {
                     amount = amt!!, phone = phone, operator = withdrawOp, description = ref))
                 if (r.isSuccessful && r.body() != null) {
                     val d = r.body()!!
-                    Toast.makeText(requireContext(), "✅ Retrait ${fmt.format(amt)} XAF", Toast.LENGTH_LONG).show()
+                    Toast.makeText(requireContext(), "Retrait de ${fmt.format(amt)} XAF demandé", Toast.LENGTH_LONG).show()
                     startActivity(Intent(requireContext(), ReceiptActivity::class.java).apply {
                         putExtra("amount", d.amount ?: amt)
                         putExtra("reference", d.reference ?: ref)

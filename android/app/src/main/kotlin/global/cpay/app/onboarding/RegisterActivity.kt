@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import global.cpay.app.R
 import global.cpay.app.common.ApiClient
 import global.cpay.app.common.ApiErrors
 import global.cpay.app.common.AuthFlow
@@ -22,8 +23,8 @@ class RegisterActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         userType = intent.getStringExtra("user_type") ?: "cardholder"
-        binding.tvTitle.text = if (userType == "merchant") "Créer un compte Marchand" else "Créer un compte Porteur"
-        binding.tvSubtitle.text = if (userType == "merchant") "Acceptez des paiements Mobile Money" else "Paiements digitaux Zone CEMAC"
+        binding.tvTitle.setText(if (userType == "merchant") R.string.register_title_merchant else R.string.register_title_cardholder)
+        binding.tvSubtitle.setText(if (userType == "merchant") R.string.register_subtitle_merchant else R.string.register_subtitle_cardholder)
 
         binding.tvBack.setOnClickListener { finish() }
         binding.btnRegister.setOnClickListener { doRegister() }
@@ -64,7 +65,7 @@ class RegisterActivity : AppCompatActivity() {
                 } else {
                     showError(ApiErrors.message(response, "Erreur inscription"))
                 }
-            } catch(e: Exception) { showError("Erreur réseau: ${e.message}") }
+            } catch(e: Exception) { showError(getString(R.string.network_error)) }
             finally { setLoading(false) }
         }
     }

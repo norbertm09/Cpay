@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@+id/nav_dashboard" android:title="@string/nav_caisse"    android:icon="@drawable/ic_dashboard"/>
-    <item android:id="@+id/nav_collect"   android:title="@string/nav_collect"   android:icon="@drawable/ic_collect"/>
-    <item android:id="@+id/nav_withdraw"  android:title="@string/nav_withdraw"  android:icon="@drawable/ic_disburse"/>
-    <item android:id="@+id/nav_transfers" android:title="@string/nav_transfers" android:icon="@drawable/ic_transfer"/>
-    <item android:id="@+id/nav_journal"   android:title="@string/nav_journal"   android:icon="@drawable/ic_transactions"/>
+    <item android:id="@+id/nav_dashboard" android:title="@string/nav_caisse"  android:icon="@drawable/ic_home"/>
+    <item android:id="@+id/nav_collect"   android:title="@string/nav_collect" android:icon="@drawable/ic_collect"/>
+    <item android:id="@+id/nav_journal"   android:title="@string/nav_journal" android:icon="@drawable/ic_journal"/>
+    <item android:id="@+id/nav_more"      android:title="@string/nav_more"    android:icon="@drawable/ic_more"/>
 </menu>

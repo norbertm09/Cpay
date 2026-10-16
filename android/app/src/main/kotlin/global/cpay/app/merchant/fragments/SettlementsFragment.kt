@@ -79,7 +79,7 @@ class SettlementsFragment : Fragment() {
             h.date.text   = s.settlementDate?.take(10) ?: "—"
             h.amount.text = "${fmt.format(s.amount)} ${s.currency}"
             h.count.text  = "${s.txnCount} transactions"
-            h.status.text = if (s.settled) "✅ Réglé" else "⏳ En attente"
+            h.status.text = if (s.settled) "Réglé" else "En attente"
             h.status.setTextColor(Color.parseColor(if (s.settled) "#007a5a" else "#c47000"))
         }
 
