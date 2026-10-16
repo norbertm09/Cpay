@@ -178,7 +178,7 @@ export const financeApi = {
   batches: (params) => api.get('/finance/settlements', { params, ...quiet }),
   validateBatch: (id, data) => api.patch(`/finance/settlements/${id}/validate`, data),
   rejectBatch: (id, reason) => api.patch(`/finance/settlements/${id}/reject`, { reason }),
-  exportUrl: () => `${apiBaseUrl}/api/v1/admin/finance/settlements/export`,
+  exportCsv: () => api.get('/finance/settlements/export', { responseType: 'blob' }),
   runSettlement: () => api.post('/settlement/run'),
   payouts: (status = 'pending_settlement') => api.get('/settlements', { params: { status }, ...quiet }),
   payoutsSummary: () => api.get('/settlements/summary', quiet),

@@ -1356,7 +1356,7 @@ router.get('/merchants/:id/kyb', adminAuth, async (req, res) => {
 });
 
 // POST /admin/merchants/:id/kyb/documents — Ajouter un document manuellement
-router.post('/merchants/:id/kyb/documents', adminAuth, async (req, res) => {
+router.post('/merchants/:id/kyb/documents', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { docType, docLabel, fileUrl, fileName, fileSize, mimeType } = req.body;
   if (!docType || !fileUrl) return res.status(422).json({error:'docType et fileUrl requis'});
   try {
@@ -1370,7 +1370,7 @@ router.post('/merchants/:id/kyb/documents', adminAuth, async (req, res) => {
 });
 
 // PATCH /admin/merchants/:id/kyb/documents/:docId — Approuver/Rejeter
-router.patch('/merchants/:id/kyb/documents/:docId', adminAuth, async (req, res) => {
+router.patch('/merchants/:id/kyb/documents/:docId', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { status, rejectionReason } = req.body;
   if (!['approved','rejected','pending'].includes(status)) return res.status(422).json({error:'Statut invalide'});
   try {
@@ -1529,34 +1529,36 @@ router.get('/finance/settlements', requireRole('super_admin', 'finance_admin'), 
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-// Valider un règlement (Finance)
-router.patch('/finance/settlements/:id/validate', requireRole('super_admin', 'finance_admin'), async (req, res) => {
-  const { reference, notes } = req.body;
+// Transitions financières : état source contrôlé et audit dans le même COMMIT.
+const transitionBatch = async (req, res, nextStatus) => {
+  const reference = String(req.body.reference || '').trim();
+  const reason = String(req.body.reason || '').trim();
+  if (nextStatus === 'completed' && !reference) return res.status(422).json({ error: 'Référence de virement requise', code: 'VALIDATION_ERROR' });
+  if (nextStatus === 'failed' && reason.length < 3) return res.status(422).json({ error: 'Motif requis', code: 'VALIDATION_ERROR' });
   try {
-    await query(
-      `UPDATE settlement_batches SET status='completed', completed_at=NOW() WHERE batch_id=$1`,
-      [req.params.id]
-    );
-    await query(
-      `INSERT INTO pci_audit_logs (admin_user_id, action, resource_type, resource_id, metadata)
-       VALUES ($1,'VALIDATE_SETTLEMENT','settlement',$2,$3)`,
-      [req.user?.sub, req.params.id, JSON.stringify({reference, notes})]
-    ).catch(()=>{});
-    res.json({success:true});
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
-
-// Rejeter un règlement (Finance)
-router.patch('/finance/settlements/:id/reject', requireRole('super_admin', 'finance_admin'), async (req, res) => {
-  const { reason } = req.body;
-  try {
-    await query(
-      `UPDATE settlement_batches SET status='failed' WHERE batch_id=$1`,
-      [req.params.id]
-    );
-    res.json({success:true});
-  } catch(err){ res.status(500).json({error:err.message}); }
-});
+    const result = await withTransaction(async client => {
+      const r = await client.query('SELECT status FROM settlement_batches WHERE batch_id=$1 FOR UPDATE', [req.params.id]);
+      if (!r.rows.length) return { status: 404, error: 'Lot introuvable' };
+      // Un lot soumis à un opérateur ne peut pas être rejeté manuellement : résultat encore incertain.
+      const allowed = nextStatus === 'completed' ? ['pending', 'submitted'] : ['pending'];
+      if (!allowed.includes(r.rows[0].status)) return { status: 409, error: 'Transition de règlement interdite' };
+      await client.query(
+        `UPDATE settlement_batches SET status=$1, completed_at=CASE WHEN $1='completed' THEN NOW() ELSE NULL END,
+         payout_ref=COALESCE($2,payout_ref), failure_reason=$3 WHERE batch_id=$4`,
+        [nextStatus, reference || null, nextStatus === 'failed' ? reason : null, req.params.id]);
+      await client.query(
+        `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, new_values, ip_address)
+         VALUES ('admin',$1,$2,$3,'settlement',$4,$5,$6)`,
+        [req.user.sub, req.user.email, nextStatus === 'completed' ? 'VALIDATE_SETTLEMENT' : 'REJECT_SETTLEMENT',
+         req.params.id, JSON.stringify({ reference, reason, notes: req.body.notes || null, from: r.rows[0].status, to: nextStatus }), req.ip]);
+      return { status: 200 };
+    });
+    if (result.error) return res.status(result.status).json({ error: result.error, code: result.status === 404 ? 'NOT_FOUND' : 'INVALID_TRANSITION' });
+    res.json({ success: true });
+  } catch (err) { logger.error('Batch transition failed', { err: err.message }); res.status(500).json({ error: 'Erreur de validation du règlement' }); }
+};
+router.patch('/finance/settlements/:id/validate', requireRole('super_admin', 'finance_admin'), (req,res) => transitionBatch(req,res,'completed'));
+router.patch('/finance/settlements/:id/reject', requireRole('super_admin', 'finance_admin'), (req,res) => transitionBatch(req,res,'failed'));
 
 // Export CSV règlements
 router.get('/finance/settlements/export', requireRole('super_admin', 'finance_admin'), async (req, res) => {
@@ -1650,7 +1652,7 @@ router.post('/support/tickets/:id/escalate', adminAuth, async (req, res) => {
 });
 
 // ─── REVIEW KYC CARDHOLDER ───────────────────────────────────────
-router.patch('/cardholders/:id/kyc/documents/:docId', adminAuth, async (req, res) => {
+router.patch('/cardholders/:id/kyc/documents/:docId', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { status, rejectionReason } = req.body;
   if (!['approved','rejected','pending'].includes(status)) return res.status(422).json({error:'Statut invalide'});
   try {
@@ -1740,7 +1742,7 @@ router.get('/notification-configs', adminAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
-router.post('/notification-configs', adminAuth, async (req, res) => {
+router.post('/notification-configs', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { section, ...allParams } = req.body;
   if (!section) return res.status(422).json({error:'section requis'});
   try {
@@ -1779,7 +1781,7 @@ router.post('/notification-configs', adminAuth, async (req, res) => {
 });
 
 // ─── TEST NOTIFICATION CONFIGS ────────────────────────────────────
-router.post('/notification-configs/test', adminAuth, async (req, res) => {
+router.post('/notification-configs/test', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { section } = req.body;
   try {
     const r = await query(`SELECT extra_params FROM api_configurations WHERE provider_key=$1`, [`notif_${section}`]);
@@ -1823,7 +1825,7 @@ router.post('/notification-configs/test', adminAuth, async (req, res) => {
 });
 
 // ─── SEND TEST MESSAGE ────────────────────────────────────────────
-router.post('/notification-configs/send-test', adminAuth, async (req, res) => {
+router.post('/notification-configs/send-test', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const { section, to } = req.body;
   if (!to) return res.status(422).json({error:'Destinataire requis'});
   try {

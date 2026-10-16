@@ -487,7 +487,9 @@ const applyMerchantPspResult = async ({ provider, orderId, isAuthorized, authCod
     `UPDATE transactions SET
        status=$1, auth_code=COALESCE($2, auth_code),
        response_code=$3,
-       completed_at=CASE WHEN $1='authorized' THEN NOW() ELSE completed_at END
+       completed_at=CASE WHEN $1='authorized' THEN NOW() ELSE completed_at END,
+       fee_amount=CASE WHEN $1='authorized' THEN COALESCE(fee_amount,cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text)) ELSE fee_amount END,
+       net_amount=CASE WHEN $1='authorized' THEN COALESCE(net_amount,amount-COALESCE(fee_amount,cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text))) ELSE net_amount END
      WHERE transaction_id=$4 AND status='pending'
      RETURNING transaction_id, merchant_id`,
     [newStatus, authCode || null, responseCode != null ? String(responseCode).slice(0, 8) : null, txn.transaction_id]

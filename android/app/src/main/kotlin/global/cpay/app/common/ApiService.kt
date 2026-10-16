@@ -310,10 +310,10 @@ interface ApiService {
 
     // ═══════════ CARDHOLDER — PAIEMENT ═══════════
     @POST("cardholder/payment")
-    suspend fun cardholderPay(@Body body: Map<String, Any>): Response<PaymentResponse>
+    suspend fun cardholderPay(@Body body: Map<String, Any>, @Header("Idempotency-Key") idempotencyKey: String): Response<PaymentResponse>
 
     @POST("cardholder/payment/tokenized")
-    suspend fun cardholderPayTokenized(@Body body: Map<String, Any>): Response<PaymentResponse>
+    suspend fun cardholderPayTokenized(@Body body: Map<String, Any>, @Header("Idempotency-Key") idempotencyKey: String): Response<PaymentResponse>
 
     // ═══════════ CARDHOLDER — PROFIL ═══════════
     @PATCH("cardholder/profile")

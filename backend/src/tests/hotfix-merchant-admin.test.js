@@ -128,6 +128,7 @@ describe('2. Privileges admin (requireRole)', () => {
   });
 
   test('finance_admin PATCH /admin/finance/settlements/:id/validate → 200', async () => {
+    mockTxQuery.mockImplementation(async sql => sql.startsWith('SELECT status') ? rows([{status:'pending'}]) : rows([]));
     const res = await request(app).patch('/admin/finance/settlements/1/validate')
       .set(bearer(adminToken('finance_admin'))).send({ reference: 'R1' });
     expect(res.status).toBe(200);
@@ -380,7 +381,7 @@ describe('7. Double depense /transfer/payout (solde sous verrou, insertion avant
   const txMock = ({ collected, withdrawn = 0, disbursed = 0 }) => mockTxQuery.mockImplementation(async (sql) => {
     if (sql.includes('pg_advisory_xact_lock')) return rows([{ ok: true }]);
     if (sql.includes('FOR UPDATE')) return rows([{ merchant_id: MERCHANT_ID, merchant_status: 'active' }]);
-    if (sql.includes("type='collect'")) return rows([{ collected, pending: 0, nb: 1 }]);
+    if (sql.includes("type IN ('collect','qr_payment','pay_link')")) return rows([{ collected, pending: 0, nb: 1 }]);
     if (sql.includes('FROM merchant_transfers')) return rows([{ withdrawn }]);
     if (sql.includes("type='payout'")) return rows([{ disbursed }]);
     if (sql.includes('FROM bank_accounts ba')) return rows([{ account_id: 'ba1', inst_name: 'BankX', account_number: '12345678', account_name: 'Shop' }]);
@@ -416,7 +417,7 @@ describe('7. Double depense /transfer/payout (solde sous verrou, insertion avant
 
   test('GET /merchant/balance utilise la meme formule (transfers + payouts deduits)', async () => {
     mockDbQuery.mockImplementation(async (sql) => {
-      if (sql.includes("type='collect'")) return rows([{ collected: 10000, pending: 500, nb: 4 }]);
+      if (sql.includes("type IN ('collect','qr_payment','pay_link')")) return rows([{ collected: 10000, pending: 500, nb: 4 }]);
       if (sql.includes('FROM merchant_transfers')) return rows([{ withdrawn: 2000 }]);
       if (sql.includes("type='payout'")) return rows([{ disbursed: 1500 }]);
       return rows([]);

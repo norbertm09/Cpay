@@ -12,28 +12,8 @@
 
 'use strict';
 
-const { query, withTransaction } = require('../../config/database');
+const { query, withTransaction, pool } = require('../../config/database');
 const logger = require('../../config/logger');
-
-// ─── Taux de commission par méthode et niveau ─────────────────────
-
-const COMMISSION_RATES = {
-  mobile_money: {
-    default: 0.015,   // 1.5%
-    level1:  0.012,   // 1.2% si KYB validé
-    level2:  0.010,   // 1.0% si contrat
-  },
-  card_nfc: {
-    default: 0.025,   // 2.5%
-    level1:  0.020,
-    level2:  0.018,
-  },
-  qr: {
-    default: 0.015,
-    level1:  0.012,
-    level2:  0.010,
-  },
-};
 
 // ─── Queue de settlement ──────────────────────────────────────────
 
@@ -58,21 +38,27 @@ const round = (n, currency) => ZERO_DECIMAL.has(currency) ? Math.round(n) : Math
  */
 const runSettlement = async (cutoffDate = null) => {
   const cutoff = (cutoffDate && /^\d{4}-\d{2}-\d{2}$/.test(cutoffDate)) ? cutoffDate : new Date().toISOString().slice(0, 10);
-  const lock = await query(`SELECT pg_try_advisory_lock(hashtext('cpay_settlement_run')) AS ok`);
-  if (!lock.rows[0].ok) { logger.warn('Settlement: déjà en cours, exécution ignorée'); return { skipped: true, reason: 'already_running', cutoff }; }
+  const connection = await pool.connect();
+  let acquired = false;
+  let discard = false;
   try {
+    const lock = await connection.query(`SELECT pg_try_advisory_lock(hashtext('cpay_settlement_run')) AS ok`);
+    acquired = lock.rows[0].ok;
+    if (!acquired) return { skipped: true, reason: 'already_running', cutoff };
     logger.info(`Settlement: running, cutoff ${cutoff}`);
-    const groups = await query(
+    const groups = await connection.query(
       `SELECT sq.merchant_id, sq.currency, COUNT(*)::int AS n
        FROM settlement_queue sq JOIN transactions t ON t.transaction_id = sq.transaction_id
-       WHERE sq.settled = FALSE AND sq.queued_at < $1::date AND t.status = 'authorized' AND t.type = 'collect'
+       WHERE sq.settled = FALSE AND sq.queued_at < $1::date AND t.status = 'authorized' AND t.type IN ('collect','qr_payment','pay_link')
+         AND t.settlement_batch_id IS NULL AND COALESCE(t.settlement_status,'') NOT IN ('regle','soumis','en_cours','echec')
+         AND t.net_amount IS NOT NULL AND t.fee_amount IS NOT NULL
        GROUP BY sq.merchant_id, sq.currency ORDER BY sq.merchant_id`, [cutoff]);
     if (!groups.rows.length) { logger.info('Settlement: nothing to process'); return { batches: 0, settled: 0, errors: 0, cutoff }; }
 
     let settled = 0, errors = 0, batches = 0;
     for (const g of groups.rows) {
       try {
-        const n = await settleGroup(g.merchant_id, g.currency, cutoff);
+        const n = await settleGroup(g.merchant_id, g.currency, cutoff, connection);
         if (n > 0) { settled += n; batches++; }
       } catch (err) {
         errors++;
@@ -82,7 +68,11 @@ const runSettlement = async (cutoffDate = null) => {
     logger.info(`Settlement complete: ${batches} batches, ${settled} items, ${errors} errors`);
     return { batches, settled, errors, cutoff };
   } finally {
-    await query(`SELECT pg_advisory_unlock(hashtext('cpay_settlement_run'))`).catch(() => {});
+    if (acquired) {
+      try { await connection.query(`SELECT pg_advisory_unlock(hashtext('cpay_settlement_run'))`); }
+      catch (err) { discard = true; logger.error('Settlement unlock failed', { err: err.message }); }
+    }
+    connection.release(discard);
   }
 };
 
@@ -90,51 +80,66 @@ const runSettlement = async (cutoffDate = null) => {
  * 1) Transaction SQL : claim des items (FOR UPDATE SKIP LOCKED), batch 'pending', marquage settled — COMMIT.
  * 2) Hors transaction : virement, puis statut du batch selon le résultat réel.
  */
-const settleGroup = async (merchantId, currency, cutoff) => {
+const settleGroup = async (merchantId, currency, cutoff, connection) => {
   const claimed = await withTransaction(async (client) => {
+    // Same lock as cash withdrawals and mobile disbursements, before computing availability.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [String(merchantId)]);
+    const { computeAvailableBalance } = require('../cash/cash.service');
+    const balance = await computeAvailableBalance((sql, params) => client.query(sql, params), merchantId);
     const items = await client.query(
-      `SELECT sq.id, sq.transaction_id, sq.amount, t.payment_method,
+      `SELECT sq.id, sq.transaction_id, sq.amount, t.payment_method, t.fee_amount, t.net_amount,
               m.settlement_type, m.settlement_account, m.settlement_provider, m.kyb_level, m.country
        FROM settlement_queue sq
        JOIN transactions t ON t.transaction_id = sq.transaction_id
        JOIN merchants m    ON m.merchant_id = sq.merchant_id
        WHERE sq.merchant_id = $1 AND sq.currency = $2 AND sq.settled = FALSE AND sq.queued_at < $3::date
-         AND t.status = 'authorized' AND t.type = 'collect'
+         AND t.status = 'authorized' AND t.type IN ('collect','qr_payment','pay_link')
+         AND t.settlement_batch_id IS NULL AND COALESCE(t.settlement_status,'') NOT IN ('regle','soumis','en_cours','echec')
+         AND t.net_amount IS NOT NULL AND t.fee_amount IS NOT NULL AND m.currency=sq.currency AND m.merchant_status='active'
        FOR UPDATE OF sq SKIP LOCKED`, [merchantId, currency, cutoff]);
     if (!items.rows.length) return null;
     const head = items.rows[0];
-    const kybLevel = head.kyb_level || 0;
     let totalGross = 0, totalFees = 0;
     for (const it of items.rows) {
       const amount = Number(it.amount);
-      const fee = round(amount * getCommissionRate(it.payment_method, kybLevel), currency);
-      it._fee = fee; it._net = round(amount - fee, currency);
+      const fee = Number(it.fee_amount);
+      const net = Number(it.net_amount);
+      if (!Number.isFinite(fee) || !Number.isFinite(net) || fee < 0 || net < 0 || Math.abs(amount-fee-net) > 0.001) {
+        throw new Error('Montants de transaction incohérents : rapprochement requis');
+      }
+      it._fee = fee; it._net = net;
       totalGross += amount; totalFees += fee;
     }
     totalGross = round(totalGross, currency); totalFees = round(totalFees, currency);
-    const totalNet = round(totalGross - totalFees, currency);
+    const eligibleNet = round(totalGross - totalFees, currency);
+    const totalNet = round(Math.min(eligibleNet, balance.available), currency);
+    const cashOffset = round(eligibleNet - totalNet, currency);
 
     const b = await client.query(
       `INSERT INTO settlement_batches
          (merchant_id, batch_date, total_gross, total_fees, total_net, currency, txn_count,
-          settlement_type, settlement_account, settlement_provider, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending') RETURNING batch_id`,
+          settlement_type, settlement_account, settlement_provider, cash_offset_amount, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending') RETURNING batch_id`,
       [merchantId, cutoff, totalGross, totalFees, totalNet, currency, items.rows.length,
-       head.settlement_type, head.settlement_account, head.settlement_provider]);
+       head.settlement_type, head.settlement_account, head.settlement_provider, cashOffset]);
     const batchId = b.rows[0].batch_id;
     for (const it of items.rows) {
+      await client.query('UPDATE transactions SET settlement_batch_id=$1 WHERE transaction_id=$2', [batchId, it.transaction_id]);
       await client.query(
         `UPDATE settlement_queue SET settled = TRUE, batch_id = $1, settled_at = NOW(), fee_amount = $2, net_amount = $3 WHERE id = $4`,
         [batchId, it._fee, it._net, it.id]);
     }
     return { batchId, head, totalNet, count: items.rows.length };
-  });
+  }, connection);
   if (!claimed) return 0;
 
   const { batchId, head, totalNet, count } = claimed;
-  if (head.settlement_type === 'mobile_money' && head.settlement_account) {
+  if (totalNet === 0) {
+    // Already consumed by cash withdrawals: retain the allocation trail, never send again.
+    await connection.query("UPDATE settlement_batches SET status='completed', completed_at=NOW() WHERE batch_id=$1", [batchId]);
+  } else if (head.settlement_type === 'mobile_money' && head.settlement_account) {
     const r = await initiateMobileMoneyTransfer({ batchId, amount: totalNet, currency, phone: head.settlement_account, country: head.country });
-    await query(
+    await connection.query(
       `UPDATE settlement_batches SET status = $1, submitted_at = CASE WHEN $1 = 'submitted' THEN NOW() ELSE submitted_at END,
          failure_reason = $2, payout_ref = $3 WHERE batch_id = $4`,
       [r.ok ? 'submitted' : 'failed', r.ok ? null : r.reason, r.ref || null, batchId]).catch(err => logger.error('Settlement: batch status update failed', { batchId, err: err.message }));
@@ -161,13 +166,4 @@ const initiateMobileMoneyTransfer = async ({ batchId, amount, currency, phone, c
   return { ok: false, reason: r.declineReason || r.message || 'Virement Mobile Money refusé' };
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────
-
-const getCommissionRate = (paymentMethod, kybLevel) => {
-  const rates = COMMISSION_RATES[paymentMethod] || COMMISSION_RATES.mobile_money;
-  if (kybLevel >= 2) return rates.level2;
-  if (kybLevel >= 1) return rates.level1;
-  return rates.default;
-};
-
-module.exports = { enqueue, runSettlement, getCommissionRate, COMMISSION_RATES };
+module.exports = { enqueue, runSettlement };

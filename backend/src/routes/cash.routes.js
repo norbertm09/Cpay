@@ -130,7 +130,7 @@ router.post('/collect', merchantAuth, idempotency, async (req, res) => {
     merchantId, type: 'collect', amount, customerPhone: d.phone, description: desc || 'Encaissement caisse',
     deviceId: terminalId || deviceId || null, operatorOverride: d.overridden ? d.operator : undefined,
   });
-  if (!result.success) {
+  if (!result.success && !result.pending) {
     if (result.limitInfo) return fail(res, 429, result.error || 'Plafond atteint', 'LIMIT_EXCEEDED', { txnId: result.txnId || null, limit: result.limitInfo.limit, currentVolume: result.limitInfo.currentVolume });
     if (result.status === 'failed' || result.code === 'PAYMENT_DECLINED') return fail(res, 402, result.error || result.message || 'Paiement refusé', 'PAYMENT_DECLINED', { txnId: result.txnId || null });
     return fail(res, result.statusCode || 422, result.error || 'Encaissement impossible', result.code || 'VALIDATION_ERROR', { txnId: result.txnId || null });

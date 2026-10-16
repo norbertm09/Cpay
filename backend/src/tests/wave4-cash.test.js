@@ -91,14 +91,14 @@ const transitionRow = (base = {}) => (sql, params) => rows([{
 }]);
 const baseHandlers = (m = merchant(), u = userRow()) => [
   [/FROM merchants WHERE merchant_id=\$1$/m, [m]],
-  [/FROM merchants WHERE merchant_id=\$1/, [m]],
+  [/FROM merchants WHERE merchant_id=\$1(?: FOR UPDATE)?$/, [m]],
   [/FROM merchant_users WHERE user_id/, [u]],
   [/FROM merchant_fees/, []],
 ];
 const txHandlers = ({ collected = 100000, pending = 0, withdrawn = 0, reserved = 0, funded = 0, disbursed = 0, today = 0, m = merchant(), bank = null } = {}) => [
   [/pg_advisory_xact_lock/, [{ ok: true }]],
   [/FOR UPDATE/, [m]],
-  [/type='collect'/, [{ collected, pending, nb: 1 }]],
+  [/type IN \('collect','qr_payment','pay_link'\)/, [{ collected, pending, nb: 1 }]],
   [/withdrawn_today/, [{ withdrawn_today: today }]],
   [/FROM merchant_transfers/, [{ withdrawn, reserved, funded }]],
   [/type='payout'/, [{ disbursed }]],

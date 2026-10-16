@@ -99,6 +99,8 @@ const fakeQuery = async (sql, params = []) => {
     if (/cardholder_id=\$2/.test(sql) && t.cardholder_id !== params[1]) return { rows: [] };
     return { rows: [{ ...t }] };
   }
+  if (/INSERT INTO cardholder_payment_requests/i.test(sql)) return { rows: [{request_key:'test-key-123'}], rowCount:1 };
+  if (/FROM merchants/i.test(sql)) return { rows: [{business_name:'Shop',merchant_status:'active',currency:'XAF'}] };
   if (/INSERT INTO card_transactions/i.test(sql)) return { rows: [{ txn_id: 'txn-1', amount: params[3], fee_amount: params[4], status: 'completed', auth_code: params[6] }] };
   if (/SELECT COUNT\(\*\)/i.test(sql)) return { rows: [{ count: '0' }] };
   if (/FROM cardholders/i.test(sql)) return { rows: [{ phone: '242060000000', email: 'o@c-pay.test', first_name: 'O' }] };
@@ -137,26 +139,27 @@ describe('IDOR cartes virtuelles (cardholder.routes)', () => {
 
   test('POST /payment/tokenized (cas 1) avec la carte d un autre porteur → 404, aucun débit', async () => {
     const r = await request(app).post('/api/v1/cardholder/payment/tokenized')
-      .set('Authorization', chToken()).send({ cardId: CARD_OTHER, amount: 100, pin: '1234' });
+      .set('Authorization', chToken()).set('Idempotency-Key','test-key-123').send({ cardId: CARD_OTHER, merchantId: OWNER, amount: 100, pin: '1234' });
     expect(r.status).toBe(404);
     expect(sqlLog.some(q => /UPDATE virtual_cards SET balance/i.test(q.sql))).toBe(false);
   });
 
   test('POST /payment/tokenized (cas 1) : SELECT ... FOR UPDATE dans une transaction, débit conditionnel', async () => {
     const r = await request(app).post('/api/v1/cardholder/payment/tokenized')
-      .set('Authorization', chToken()).send({ cardId: CARD_OWNER, amount: 100, pin: '1234' });
+      .set('Authorization', chToken()).set('Idempotency-Key','test-key-123').send({ cardId: CARD_OWNER, merchantId: OWNER, amount: 100, pin: '1234' });
     expect(r.status).toBe(200);
     expect(r.body.paymentSource).toBe('created_card');
     expect(db.withTransaction).toHaveBeenCalledTimes(1);
     const sel = sqlLog.find(q => /FROM virtual_cards/i.test(q.sql));
     expect(sel.sql).toMatch(/FOR UPDATE/);
-    const upd = sqlLog.find(q => /UPDATE virtual_cards SET balance = balance - \$1/i.test(q.sql));
-    expect(upd.sql).toMatch(/balance >= \$1/);
+    const upd = sqlLog.find(q => /UPDATE virtual_cards SET balance=\$1/i.test(q.sql));
+    expect(upd.sql).toMatch(/cardholder_id=\$3/);
+    expect(sqlLog.some(q => /INSERT INTO transactions/.test(q.sql))).toBe(true);
   });
 
   test('POST /payment/tokenized (cas 1) : solde insuffisant → 422', async () => {
     const r = await request(app).post('/api/v1/cardholder/payment/tokenized')
-      .set('Authorization', chToken()).send({ cardId: CARD_OWNER, amount: 999999, pin: '1234' });
+      .set('Authorization', chToken()).set('Idempotency-Key','test-key-123').send({ cardId: CARD_OWNER, merchantId: OWNER, amount: 999999, pin: '1234' });
     expect(r.status).toBe(422);
   });
 

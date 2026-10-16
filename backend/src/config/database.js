@@ -26,8 +26,8 @@ pool.on('error', (err) => {
 });
 
 const query = (text, params) => pool.query(text, params);
-const withTransaction = async (fn) => {
-  const client = await pool.connect();
+const withTransaction = async (fn, connection = null) => {
+  const client = connection || await pool.connect();
   try {
     await client.query('BEGIN');
     const result = await fn(client);
@@ -37,7 +37,7 @@ const withTransaction = async (fn) => {
     await client.query('ROLLBACK');
     throw err;
   } finally {
-    client.release();
+    if (!connection) client.release();
   }
 };
 module.exports = { pool, query, withTransaction };

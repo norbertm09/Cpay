@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
@@ -50,6 +50,7 @@ export default function PayPage() {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [pin, setPin] = useState('');
+  const paymentKey = useRef(null);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
@@ -85,6 +86,7 @@ export default function PayPage() {
     const ai = amountIssue(amount, { min: 100 });
     if (ai) { setErrors({ amount: ai }); return; }
     if (total > balance) { setErrors({ amount: `Solde insuffisant (frais inclus : ${formatMoney(total, card?.currency)}).` }); return; }
+    paymentKey.current = crypto.randomUUID();
     setErrors({}); setStep(2);
   };
 
@@ -92,7 +94,7 @@ export default function PayPage() {
     if (!isPin(pin)) { setErrors({ pin: 'Saisissez votre code PIN à 4 chiffres.' }); return; }
     setBusy(true); setFormError(''); setErrors({});
     try {
-      const data = await ops.pay({ merchantId: target.merchantId, amount: amountNum, description: description || undefined, pin });
+      const data = await ops.pay({ merchantId: target.merchantId, amount: amountNum, description: description || undefined, pin, idempotencyKey: paymentKey.current });
       setResult(data);
       if (typeof data.newBalance === 'number') patchCard({ balance: data.newBalance });
       setPin('');

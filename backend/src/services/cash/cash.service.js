@@ -115,7 +115,8 @@ const computeFee = (amount, rate) => {
 };
 
 // ─── Solde disponible — formule UNIQUE (CAISSE-API.md §1) ─────────
-//   + encaissements 'collect' autorisés non encore réglés (net_amount)
+//   + encaissements autorisés (net_amount), hors sorties instantanées historiques
+//   − net réservé/versé par les lots J+1 (y compris les lots échoués à rapprocher)
 //   + approvisionnements (direction='funding') completed
 //   − merchant_transfers 'payout' non échoués (pending, processing, pending_settlement, pending_manual, completed)
 //   − transactions type='payout' (disburse app + retraits legacy) autorisées ou en cours
@@ -123,30 +124,34 @@ const computeFee = (amount, rate) => {
 async function computeAvailableBalance(exec, merchantId) {
   const r = await exec(
     `SELECT
-       COALESCE(SUM(net_amount) FILTER (WHERE status='authorized' AND settlement_batch_id IS NULL), 0) AS collected,
+       COALESCE(SUM(net_amount) FILTER (WHERE status='authorized'
+         AND (settlement_batch_id IS NOT NULL OR COALESCE(settlement_status,'') NOT IN ('regle','soumis','en_cours','echec'))), 0) AS collected,
+       (SELECT COALESCE(SUM(total_net),0) FROM settlement_batches WHERE merchant_id=$1 AND currency=(SELECT currency FROM merchants WHERE merchant_id=$1)) AS settled,
        COALESCE(SUM(net_amount) FILTER (WHERE status='pending'), 0) AS pending,
        COUNT(*) FILTER (WHERE status='authorized') AS nb
-     FROM transactions WHERE merchant_id=$1 AND type='collect'`, [merchantId]);
+     FROM transactions WHERE merchant_id=$1 AND currency=(SELECT currency FROM merchants WHERE merchant_id=$1) AND type IN ('collect','qr_payment','pay_link')`, [merchantId]);
   const t = await exec(
     `SELECT
        COALESCE(SUM(amount) FILTER (WHERE direction='payout' AND status = ANY($2::text[])), 0) AS withdrawn,
        COALESCE(SUM(amount) FILTER (WHERE direction='payout' AND status = ANY($3::text[])), 0) AS reserved,
        COALESCE(SUM(amount) FILTER (WHERE direction='funding' AND status='completed'), 0) AS funded
      FROM merchant_transfers
-     WHERE merchant_id=$1`, [merchantId, OUT_NOT_FAILED, OUT_INFLIGHT]);
+     WHERE merchant_id=$1 AND currency=(SELECT currency FROM merchants WHERE merchant_id=$1)`, [merchantId, OUT_NOT_FAILED, OUT_INFLIGHT]);
   const p = await exec(
     `SELECT COALESCE(SUM(amount),0) AS disbursed
      FROM transactions
-     WHERE merchant_id=$1 AND type='payout' AND status IN ('authorized','pending')`, [merchantId]);
+     WHERE merchant_id=$1 AND currency=(SELECT currency FROM merchants WHERE merchant_id=$1) AND type='payout' AND status IN ('authorized','pending')`, [merchantId]);
   const collected = num(r.rows[0]?.collected);
+  const settled = num(r.rows[0]?.settled);
   const funded    = num(t.rows[0]?.funded);
   const withdrawn = num(t.rows[0]?.withdrawn) + num(p.rows[0]?.disbursed);
   return {
-    available: Math.max(0, collected + funded - withdrawn),
+    available: Math.max(0, collected + funded - withdrawn - settled),
     pending: num(r.rows[0]?.pending),
     reserved: num(t.rows[0]?.reserved),
     totalCollected: collected,
     totalFunded: funded,
+    totalSettled: settled,
     totalWithdrawn: withdrawn,
     transactionCount: parseInt(r.rows[0]?.nb, 10) || 0,
   };
@@ -629,7 +634,7 @@ async function summary(merchantId) {
             COUNT(*) FILTER (WHERE status='authorized') AS n,
             COALESCE(SUM(net_amount) FILTER (WHERE status='authorized' AND payment_method='mobile_money'),0) AS mm,
             COALESCE(SUM(net_amount) FILTER (WHERE status='authorized' AND payment_method IN ('card_nfc','pay_link')),0) AS card
-     FROM transactions WHERE merchant_id=$1 AND type='collect' AND initiated_at::date = CURRENT_DATE`, [merchantId]);
+     FROM transactions WHERE merchant_id=$1 AND currency=(SELECT currency FROM merchants WHERE merchant_id=$1) AND type IN ('collect','qr_payment','pay_link') AND initiated_at::date = CURRENT_DATE`, [merchantId]);
   const moves = await query(
     `SELECT COALESCE(SUM(amount) FILTER (WHERE direction='payout' AND dest_type='wallet' AND status = ANY($2::text[])),0) AS withdrawn,
             COALESCE(SUM(amount) FILTER (WHERE direction='payout' AND dest_type='bank' AND status = ANY($2::text[])),0) AS transfers_out,

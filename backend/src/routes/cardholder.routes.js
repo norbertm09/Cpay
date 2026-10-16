@@ -440,59 +440,15 @@ router.get('/transactions', cardAuth, async (req, res) => {
 
 // ─── PAIEMENT MERCHANT ────────────────────────────────────────────
 router.post('/payment', cardAuth, async (req, res) => {
-  const { merchantId, amount, description, pin } = req.body;
-  if (!amount || amount <= 0) return res.status(422).json({ error: 'Montant invalide' });
-  if (!pin) return res.status(422).json({ error: 'PIN requis' });
-
   try {
-    // Réponse envoyée après COMMIT (withTransaction retourne le résultat)
-    const out = await withTransaction(async client => {
-      // Récupérer la carte (HOTFIX IDOR : scopée au porteur)
-      const cardRes = await client.query(`SELECT * FROM virtual_cards WHERE card_id=$1 AND cardholder_id=$2 FOR UPDATE`, [req.cardholder.cardId, req.cardholder.sub]);
-      const card = cardRes.rows[0];
-      if (!card) throw new Error("Carte introuvable");
-      if (card.status !== 'active') throw new Error(`Carte ${card.status === 'frozen' ? 'gelée' : 'inactive'}`);
-
-      // Vérifier PIN
-      const pinOk = card.pin_hash ? !!(await bcrypt.compare(pin, card.pin_hash)) : false;
-      await client.query(`INSERT INTO pin_attempts (card_id, ip_address, success) VALUES ($1,$2,$3)`, [card.card_id, req.ip, pinOk]);
-      if (!pinOk) throw new Error('PIN incorrect');
-
-      // Vérifier solde
-      if (parseFloat(card.balance) < amount) throw new Error('Solde insuffisant');
-
-      // Calculer frais (0.5%)
-      const fee = Math.round(amount * 0.005);
-      const total = amount + fee;
-      if (parseFloat(card.balance) < total) throw new Error('Solde insuffisant (frais inclus)');
-
-      // Récupérer info marchand
-      let merchantName = 'Marchand inconnu';
-      if (merchantId) {
-        const mRes = await client.query(`SELECT business_name FROM merchants WHERE merchant_id=$1`, [merchantId]);
-        if (mRes.rows.length) merchantName = mRes.rows[0].business_name;
-      }
-
-      const balBefore = parseFloat(card.balance);
-      const balAfter  = balBefore - total;
-      const authCode  = Math.random().toString(36).substr(2, 6).toUpperCase();
-
-      // Débiter la carte
-      await client.query(`UPDATE virtual_cards SET balance=$1, updated_at=NOW() WHERE card_id=$2`, [balAfter, card.card_id]);
-
-      // Enregistrer la transaction
-      const txnRes = await client.query(
-        `INSERT INTO card_transactions (txn_id, card_id, cardholder_id, type, amount, fee, net_amount, balance_before, balance_after, currency, status, description, merchant_name, merchant_id, auth_code, initiated_at, completed_at)
-         VALUES ($1,$2,$3,'payment',$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,NOW(),NOW()) RETURNING *`,
-        [uuidv4(), card.card_id, req.cardholder.sub, amount, fee, amount - fee, balBefore, balAfter, card.currency, description || null, merchantName, merchantId || null, authCode]
-      );
-
-      return { txn: txnRes.rows[0], newBalance: balAfter, authCode };
+    const result = await require('../services/cardholder-payment.service').pay({
+      cardholderId: req.cardholder.sub, cardId: req.cardholder.cardId,
+      merchantId: req.body.merchantId, amount: req.body.amount, pin: req.body.pin,
+      description: req.body.description, key: req.headers['idempotency-key'], ip: req.ip,
     });
-    res.json({ success: true, ...out });
+    res.json(result); // The debit, merchant credit and idempotency response have committed together.
   } catch (err) {
-    const status = ['PIN incorrect','Solde insuffisant','Carte gelée','Carte inactive','Carte introuvable'].some(m => err.message.includes(m)) ? 422 : 500;
-    res.status(status).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Erreur de paiement', code: err.code || 'PAYMENT_ERROR' });
   }
 });
 
@@ -886,66 +842,14 @@ router.post('/payment/tokenized', cardAuth, async (req, res) => {
 
     // ─── Cas 1: paiement depuis une CARTE CREEE (solde interne) ───
     if (cardId) {
-      // HOTFIX : débit atomique (SELECT ... FOR UPDATE dans une transaction),
-      // carte scopée au porteur (plus de `OR cardholder_id IS NULL`),
-      // refus si solde insuffisant, réponse après COMMIT.
-      const fail = (status, error) => { const e = new Error(error); e.statusCode = status; return e; };
-      let out;
       try {
-        out = await withTransaction(async client => {
-          const cardRes = await client.query(
-            `SELECT * FROM virtual_cards WHERE card_id=$1 AND cardholder_id=$2 FOR UPDATE`,
-            [cardId, chId]);
-          const card = cardRes.rows[0];
-          if (!card) throw fail(404, 'Carte introuvable');
-          if (card.status !== 'active')
-            throw fail(422, card.status === 'frozen' ? 'Carte gelee' : 'Carte inactive');
-
-          const pinOk = card.pin_hash ? await bcrypt.compare(pin, card.pin_hash) : false;
-          await client.query(`INSERT INTO pin_attempts (card_id, ip_address, success) VALUES ($1,$2,$3)`,
-            [card.card_id, req.ip, pinOk]).catch(() => {});
-          if (!pinOk) throw fail(401, 'PIN incorrect');
-
-          const bal = parseFloat(card.balance);
-          if (amt > bal) throw fail(422, `Solde insuffisant (${bal} XAF)`);
-
-          const fee = Math.round(amt * 0.01);
-          const total = amt + fee;
-          if (total > bal) throw fail(422, `Solde insuffisant avec frais (${total} XAF requis)`);
-
-          const ref = 'PAY-' + Date.now().toString(36).toUpperCase();
-          const authCode = 'AUTH' + crypto.randomBytes(4).toString('hex').toUpperCase();
-
-          const upd = await client.query(
-            `UPDATE virtual_cards SET balance = balance - $1, updated_at=NOW()
-             WHERE card_id=$2 AND cardholder_id=$3 AND balance >= $1 RETURNING balance`,
-            [total, cardId, chId]);
-          if (!upd.rows.length) throw fail(422, 'Solde insuffisant');
-
-          const txn = await client.query(
-            `INSERT INTO card_transactions (txn_id, card_id, cardholder_id, type, amount, currency,
-              fee_amount, net_amount, status, auth_code, description, merchant_id, initiated_at, completed_at)
-             VALUES ($1,$2,$3,'payment',$4,'XAF',$5,$6,'completed',$7,$8,$9,NOW(),NOW())
-             RETURNING txn_id, amount, fee_amount, status, auth_code`,
-            [uuidv4(), cardId, chId, amt, fee, amt, authCode,
-             description || 'Paiement C-Pay', merchantId || null]
-          );
-
-          return {
-            txnId: txn.rows[0].txn_id,
-            reference: ref,
-            authCode,
-            amount: amt,
-            fee,
-            newBalance: parseFloat(upd.rows[0].balance),
-          };
+        const out = await require('../services/cardholder-payment.service').pay({
+          cardholderId: chId, cardId, merchantId, amount, pin, description,
+          key: req.headers['idempotency-key'], ip: req.ip, feeRate: 0.01,
         });
-      } catch (e) {
-        if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
-        throw e;
-      }
-
-      return res.json({ success: true, ...out, status: 'completed', paymentSource: 'created_card' });
+        return res.json({ ...out, txnId: out.txn.txn_id, amount: out.txn.amount,
+          fee: out.txn.fee, status: 'completed', paymentSource: 'created_card' });
+      } catch (e) { return res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : 'Erreur de paiement', code: e.code || 'PAYMENT_ERROR' }); }
     }
 
     // ─── Cas 2: paiement depuis une CARTE ENROLEE (via PSP) ───

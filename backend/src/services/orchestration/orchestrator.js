@@ -239,7 +239,8 @@ const processTransaction = async (params) => {
   }).catch((err) => logger.warn('Integration event delivery skipped', { txnId, err: err.message }));
 
   return {
-    success:         gatewayResult.approved || gatewayResult.pending,
+    success:         gatewayResult.approved === true && !isPending,
+    pending:         isPending,
     txnId,
     status:          finalStatus,
     amount,
@@ -365,6 +366,10 @@ const checkMerchantLimits = async (merchantId, amount, currency) => {
     return { allowed: false, reason: 'Compte marchand inactif', merchantCurrency: merchant.currency };
   }
 
+  if (currency && String(currency).toUpperCase() !== String(merchant.currency).toUpperCase()) {
+    return { allowed: false, reason: 'Devise du paiement différente de celle du marchand', merchantCurrency: merchant.currency };
+  }
+
   const volumeResult = await query(
     `SELECT COALESCE(SUM(amount), 0)::numeric AS daily_volume
      FROM transactions
@@ -402,8 +407,10 @@ const createTransactionRecord = async (data) => {
       `INSERT INTO transactions
          (transaction_id, merchant_id, type, amount, currency,
           payment_method, detected_operator, detected_network,
-          detected_country, description, device_id, status, pay_link_id, initiated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())`,
+          detected_country, description, device_id, status, pay_link_id, fee_amount, net_amount, initiated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+         cpay_calculate_fee($2::uuid,$3::text,$7::text,$4::numeric,$6::text),
+         $4::numeric-cpay_calculate_fee($2::uuid,$3::text,$7::text,$4::numeric,$6::text),NOW())`,
       [
         data.txnId, data.merchantId, data.type, data.amount, data.currency,
         data.paymentMethod,
@@ -418,6 +425,9 @@ const createTransactionRecord = async (data) => {
     );
   } catch (err) {
     logger.error('createTransactionRecord failed', { txnId: data.txnId, error: err.message });
+    if (err.code === '23505' && err.constraint === 'idx_pay_link_one_active_attempt') {
+      err.statusCode = 409; err.code = 'PAYMENT_IN_PROGRESS'; err.message = 'Un paiement existe déjà pour ce lien';
+    }
     throw err;
   }
 };
@@ -431,6 +441,10 @@ const updateTransactionStatus = async (txnId, status, gatewayData) => {
          response_code = $3, response_message = $4,
          gateway_payment_id = $5,
          gateway_name = $6,
+         fee_amount = CASE WHEN $1 = 'authorized' THEN COALESCE(fee_amount,
+           cpay_calculate_fee(merchant_id, type::text, detected_operator, amount, payment_method::text)) ELSE fee_amount END,
+         net_amount = CASE WHEN $1 = 'authorized' THEN COALESCE(net_amount,
+           amount - COALESCE(fee_amount, cpay_calculate_fee(merchant_id, type::text, detected_operator, amount, payment_method::text))) ELSE net_amount END,
          completed_at = CASE WHEN $1 = 'authorized' THEN NOW() ELSE NULL END
        WHERE transaction_id = $7`,
       [

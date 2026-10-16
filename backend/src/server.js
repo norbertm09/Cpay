@@ -210,14 +210,14 @@ app.post('/api/v1/pay/:shortId', publicPayLimiter, asyncHandler(async (req, res)
     description:   link.description || 'Paiement C-Pay',
     payLinkId:     link.pay_link_id,
   });
-  if (result.success) {
+  if (result.status === 'authorized' && result.success && !result.pending) {
     await query(
       `UPDATE pay_links SET status='paid', paid_at=NOW(), paid_amount=$1 WHERE pay_link_id=$2 AND status='pending'`,
       [link.amount, link.pay_link_id]
     );
   }
   res.status(result.success || result.pending ? 200 : 402).json({
-    success: !!result.success, pending: !!result.pending, txnId: result.txnId, message: result.message, error: result.error || null,
+    success: result.status === 'authorized' && !result.pending, pending: result.pending === true || result.status === 'pending', txnId: result.txnId, message: result.message, error: result.error || null,
   });
 }));
 
