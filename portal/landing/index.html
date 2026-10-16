@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>C-Pay — La caisse digitale des commerçants : carte, Mobile Money, retraits, transferts</title>
-  <meta name="description" content="C-Pay, par Calculus Plus SAS : la caisse digitale des commerçants au Sénégal, en Côte d'Ivoire, au Cameroun, au Congo et en RDC. Encaissez par carte et Mobile Money (opérateur détecté automatiquement), retirez vers votre wallet, transférez entre wallet et banque, suivez tout dans un seul journal.">
+  <meta name="description" content="C-Pay : encaissement, retrait et transfert par cartes bancaires, monnaie mobile et réseau GIMAC. Périmètre de lancement : les six pays de la CEMAC et la RD Congo, selon les services activés dans chaque pays.">
   <link rel="canonical" href="https://c-pay.global/">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon.png">
@@ -16,14 +16,14 @@
   <meta property="og:site_name" content="C-Pay">
   <meta property="og:url" content="https://c-pay.global/">
   <meta property="og:title" content="C-Pay — La caisse digitale des commerçants">
-  <meta property="og:description" content="Encaissez par carte et Mobile Money dans 5 pays, retirez vers votre wallet, transférez entre wallet et banque : une seule caisse, un seul journal. Un produit de Calculus Plus SAS.">
+  <meta property="og:description" content="C-Pay : cartes bancaires, monnaie mobile et GIMAC pour encaisser, retirer et transférer. Lancement dans la CEMAC et en RD Congo, selon les services activés.">
   <meta property="og:image" content="https://c-pay.global/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:locale" content="fr_FR">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="C-Pay — La caisse digitale des commerçants">
-  <meta name="twitter:description" content="Encaissez par carte et Mobile Money dans 5 pays, retirez, transférez : une seule caisse, un seul journal.">
+  <meta name="twitter:description" content="C-Pay : cartes bancaires, monnaie mobile et GIMAC pour encaisser, retirer et transférer. Lancement dans la CEMAC et en RD Congo, selon les services activés.">
   <meta name="twitter:image" content="https://c-pay.global/og-image.png">
 </head>
 <body>
@@ -55,7 +55,7 @@
         <div>
           <span class="eyebrow eyebrow--light">C-Pay pour les commerçants</span>
           <h1 id="hero-title">La <em>caisse digitale</em> des commerçants</h1>
-          <p>Encaissez par carte et Mobile Money, retirez vos recettes vers votre wallet, transférez entre wallet et banque, et suivez chaque mouvement dans un seul journal. Vous saisissez un montant et un numéro : C-Pay reconnaît l'opérateur de votre client, vous n'avez rien à choisir.</p>
+          <p>Encaissez, retirez et transférez avec C-Pay. Notre périmètre de lancement couvre les six pays de la CEMAC et la RD Congo, avec trois familles de moyens de paiement : cartes bancaires, opérateurs de monnaie mobile et réseau GIMAC. Les opérations proposées dépendent des services activés dans votre pays.</p>
           <ul class="hero-ops" aria-label="Les quatre opérations de la caisse">
             <li>Encaisser</li>
             <li>Retirer</li>
@@ -72,12 +72,12 @@
           <h2 id="demo-title">Testez la détection d'opérateur</h2>
           <form class="demo-form" id="detect-form" novalidate>
             <label class="visually-hidden" for="detect-phone">Numéro de téléphone avec indicatif</label>
-            <input type="tel" id="detect-phone" name="phone" inputmode="tel" autocomplete="off" placeholder="+221 77 123 45 67" required>
+            <input type="tel" id="detect-phone" name="phone" inputmode="tel" autocomplete="off" placeholder="+237 6 70 12 34 56" required>
             <button class="btn btn--primary" type="submit" id="detect-btn">Détecter</button>
           </form>
           <div class="chips" aria-label="Exemples de numéros">
-            <button type="button" class="chip" data-phone="+221771234567">+221 Sénégal</button>
-            <button type="button" class="chip" data-phone="+2250701234567">+225 Côte d'Ivoire</button>
+
+
             <button type="button" class="chip" data-phone="+237670123456">+237 Cameroun</button>
             <button type="button" class="chip" data-phone="+242061234567">+242 Congo</button>
             <button type="button" class="chip" data-phone="+243811234567">+243 RDC</button>
@@ -107,19 +107,20 @@
           <li class="card op">
             <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="12" rx="2"/><path d="M3 11h18M7 15h3"/><path d="M12 3v4M9 5l3-2 3 2"/></svg></div>
             <div class="op-kicker">1 · Encaisser</div>
-            <h3>Carte et Mobile Money</h3>
+            <h3>Cartes, Mobile Money et GIMAC</h3>
             <ul>
-              <li><strong>Mobile Money</strong> : vous saisissez le montant et le numéro du client ; C-Pay détecte l'opérateur et envoie la demande de paiement. Wave et Express Union restent au choix du client.</li>
+              <li><strong>Mobile Money</strong> : vous saisissez le montant et le numéro du client ; C-Pay détecte l'opérateur et envoie la demande de paiement. Les services non déductibles du numéro restent au choix du client.</li>
               <li><strong>Carte</strong> via un lien ou un QR hébergé sur pay.c-pay.global, lorsqu'une passerelle carte est active dans votre pays. Tap-to-Phone <span class="badge badge--soon">bientôt</span>, après certification.</li>
+              <li><strong>GIMAC</strong> : paiements interopérables dans la CEMAC, après activation de la connexion et des participants concernés.</li>
               <li>Statut suivi en temps réel, puis « en attente de confirmation » si le client tarde.</li>
             </ul>
           </li>
           <li class="card op">
             <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/><path d="M12 7v7M9 11l3 3 3-3"/></svg></div>
             <div class="op-kicker">2 · Retirer</div>
-            <h3>Vers votre wallet</h3>
+            <h3>Vers un moyen pris en charge</h3>
             <ul>
-              <li>Du solde disponible vers le wallet Mobile Money enregistré sur votre compte — et uniquement celui-là.</li>
+              <li>Du solde disponible vers votre wallet Mobile Money enregistré ; les retraits par carte bancaire ou via GIMAC seront proposés selon les connexions et partenaires activés.</li>
               <li>Confirmation forte à chaque retrait : code à usage unique ou mot de passe.</li>
               <li>Limite journalière selon votre niveau de vérification ; frais et montant net affichés avant confirmation.</li>
             </ul>
@@ -127,10 +128,11 @@
           <li class="card op">
             <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V10M19 21V10M3 10l9-6 9 6"/><path d="M9 21v-6h6v6"/></svg></div>
             <div class="op-kicker">3 · Transférer</div>
-            <h3>Wallet ↔ banque</h3>
+            <h3>Entre moyens compatibles</h3>
             <ul>
-              <li><strong>Wallet → banque</strong> : vers un compte bancaire vérifié de votre entreprise, exécuté sous 1 jour ouvré en règle générale.</li>
+              <li><strong>Wallet → banque</strong> : vers un compte bancaire vérifié de votre entreprise, selon le service activé et son délai d'exécution.</li>
               <li><strong>Banque → wallet</strong> : vous créez un ordre d'approvisionnement, virez le montant avec la référence fournie ; votre solde est crédité à réception.</li>
+              <li><strong>Cartes et GIMAC</strong> : transferts proposés uniquement lorsque le service et le corridor concernés sont activés.</li>
               <li>Même confirmation forte que pour les retraits.</li>
             </ul>
           </li>
@@ -160,7 +162,7 @@
           <article class="card benefit">
             <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg></div>
             <h3>Aucun choix d'opérateur à faire</h3>
-            <p>Le pays, la devise et l'opérateur sont déduits du numéro du client. Un seul geste quel que soit son réseau ; seuls Wave et Express Union sont choisis par le client lui-même.</p>
+            <p>Le pays, la devise et l'opérateur sont déduits du numéro du client. Un seul geste quel que soit son réseau ; les services non déductibles du numéro sont choisis par le client lui-même.</p>
           </article>
           <article class="card benefit">
             <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></div>
@@ -218,23 +220,31 @@
     <section class="section" id="pays" aria-labelledby="countries-title">
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">Pays &amp; opérateurs</span>
-          <h2 id="countries-title">Cinq pays, trois devises</h2>
-          <p class="lead">Les opérateurs ci-dessous sont ceux que le moteur de détection reconnaît. Les opérateurs marqués « au choix du client » (Wave, Express Union) ne se déduisent pas du numéro : le client les sélectionne lui-même sur la page de paiement. L'activation effective de chaque opérateur dépend de nos accords locaux — demandez-nous la couverture exacte pour votre pays.</p>
+          <span class="eyebrow">Notre périmètre de lancement</span>
+          <h2 id="countries-title">Sept pays : la CEMAC et la RD Congo</h2>
+          <p class="lead">C-Pay se concentre pour le moment sur les six pays de la CEMAC et la République démocratique du Congo. Les services sont ouverts progressivement selon les accords et connexions disponibles dans chaque pays.</p>
         </div>
         <div class="countries">
           <table>
-            <caption class="visually-hidden">Pays, indicatifs, devises et opérateurs détectés</caption>
-            <thead><tr><th scope="col">Pays</th><th scope="col">Indicatif</th><th scope="col">Devise</th><th scope="col">Opérateurs</th></tr></thead>
+            <caption class="visually-hidden">Les sept pays du périmètre de lancement et leurs devises</caption>
+            <thead><tr><th scope="col">Pays</th><th scope="col">Indicatif</th><th scope="col">Devise</th><th scope="col">Zone</th></tr></thead>
             <tbody>
-              <tr><th scope="row">Sénégal</th><td>+221</td><td>XOF</td><td><div class="ops"><span>Orange Money</span><span>Free Money</span><span class="alt">Wave — au choix du client</span></div></td></tr>
-              <tr><th scope="row">Côte d'Ivoire</th><td>+225</td><td>XOF</td><td><div class="ops"><span>Orange Money</span><span>MTN Mobile Money</span><span>Moov Money</span><span class="alt">Wave — au choix du client</span></div></td></tr>
-              <tr><th scope="row">Cameroun</th><td>+237</td><td>XAF</td><td><div class="ops"><span>MTN Mobile Money</span><span>Orange Money</span><span>Moov Money</span><span class="alt">Express Union — au choix du client</span></div></td></tr>
-              <tr><th scope="row">Congo-Brazzaville</th><td>+242</td><td>XAF</td><td><div class="ops"><span>MTN Mobile Money</span><span>Airtel Money</span><span>Orange Money</span></div></td></tr>
-              <tr><th scope="row">RDC</th><td>+243</td><td>CDF</td><td><div class="ops"><span>Vodacom M-Pesa</span><span>Airtel Money</span><span>Orange Money</span><span>Africell Money</span></div></td></tr>
+              <tr><th scope="row">Cameroun</th><td>+237</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr><th scope="row">République centrafricaine</th><td>+236</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr><th scope="row">République du Congo</th><td>+242</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr><th scope="row">Gabon</th><td>+241</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr><th scope="row">Guinée équatoriale</th><td>+240</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr><th scope="row">Tchad</th><td>+235</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr><th scope="row">RD Congo</th><td>+243</td><td>CDF</td><td>RD Congo</td></tr>
             </tbody>
           </table>
         </div>
+        <div class="grid grid--3 mt-5" aria-label="Moyens de paiement du lancement">
+          <article class="card"><h3>Cartes bancaires</h3><p>Encaissement par carte. Retraits et transferts par carte selon les services et partenaires activés.</p></article>
+          <article class="card"><h3>Monnaie mobile</h3><p>Encaissement, retrait et transfert avec les opérateurs pris en charge dans le pays concerné.</p></article>
+          <article class="card"><h3>GIMAC / GIMACPAY</h3><p>Interopérabilité des paiements, retraits et transferts dans la CEMAC. Connexion C-Pay en cours d’intégration ; ouverture après validation des services et participants.</p></article>
+        </div>
+        <p class="note">Un pays dans ce périmètre ne signifie pas que toutes les opérations y sont déjà disponibles. La RD Congo ne fait pas partie de la CEMAC ; les éventuels corridors avec GIMAC dépendent des partenaires concernés. <a href="#contact">Vérifier les services disponibles pour mon activité</a>.</p>
       </div>
     </section>
 
@@ -263,7 +273,7 @@
         </div>
         <details>
           <summary>Dois-je choisir l'opérateur Mobile Money de mon client ?</summary>
-          <div class="faq-body"><p>Non. Vous saisissez le montant et le numéro de téléphone ; C-Pay déduit le pays, la devise et l'opérateur à partir de l'indicatif et du préfixe. Wave et Express Union ne sont pas liés à un préfixe : ils sont proposés sur la page de paiement et c'est le client qui les sélectionne.</p></div>
+          <div class="faq-body"><p>Non. Vous saisissez le montant et le numéro de téléphone ; C-Pay déduit le pays, la devise et l'opérateur à partir de l'indicatif et du préfixe. Un service qui ne peut pas être déduit du numéro est proposé au choix du client, s'il est activé dans le pays.</p></div>
         </details>
         <details>
           <summary>Combien coûte C-Pay ?</summary>
@@ -309,12 +319,14 @@
               <label for="lead-country">Pays d'activité</label>
               <select id="lead-country" name="country">
                 <option value="">— Choisir —</option>
-                <option value="SN">Sénégal</option>
-                <option value="CI">Côte d'Ivoire</option>
                 <option value="CM">Cameroun</option>
-                <option value="CG">Congo-Brazzaville</option>
-                <option value="CD">RDC</option>
-                <option value="OTHER">Autre</option>
+                <option value="CF">République centrafricaine</option>
+                <option value="CG">République du Congo</option>
+                <option value="GA">Gabon</option>
+                <option value="GQ">Guinée équatoriale</option>
+                <option value="TD">Tchad</option>
+                <option value="CD">RD Congo</option>
+                <option value="OTHER">Autre — hors périmètre de lancement</option>
               </select>
             </div>
             <div class="field"><label for="lead-message">Votre message <span class="req" aria-hidden="true">*</span></label><textarea id="lead-message" name="message" required minlength="10"></textarea></div>

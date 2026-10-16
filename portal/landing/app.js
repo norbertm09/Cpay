@@ -65,42 +65,28 @@
      Copie indicative de la table du moteur serveur. Le serveur fait foi. */
   var LOCAL = {
     countries: {
-      '221': { country: 'SN', name: 'Sénégal', currency: 'XOF', alternatives: ['Wave'] },
-      '225': { country: 'CI', name: "Côte d'Ivoire", currency: 'XOF', alternatives: ['Wave'] },
       '237': { country: 'CM', name: 'Cameroun', currency: 'XAF', alternatives: ['Express Union'] },
-      '242': { country: 'CG', name: 'Congo-Brazzaville', currency: 'XAF', alternatives: [] },
-      '243': { country: 'CD', name: 'RDC', currency: 'CDF', alternatives: [] }
+      '236': { country: 'CF', name: 'République centrafricaine', currency: 'XAF', alternatives: [] },
+      '242': { country: 'CG', name: 'République du Congo', currency: 'XAF', alternatives: [] },
+      '241': { country: 'GA', name: 'Gabon', currency: 'XAF', alternatives: [] },
+      '240': { country: 'GQ', name: 'Guinée équatoriale', currency: 'XAF', alternatives: [] },
+      '235': { country: 'TD', name: 'Tchad', currency: 'XAF', alternatives: [] },
+      '243': { country: 'CD', name: 'RD Congo', currency: 'CDF', alternatives: [] }
     },
+    // Only prefixes already documented by the server; never guess an operator.
     operators: {
-      SN: [
-        [/^221(76|77|78)\d{7}$/, 'Orange Money'],
-        [/^221(70|75)\d{7}$/, 'Free Money'],
-        [/^221\d{9}$/, 'Orange Money']
-      ],
-      CI: [
-        [/^225(07|08|09|77|78|79)\d{7,9}$/, 'Orange Money'],
-        [/^225(05|06|55|56|57|58)\d{7,9}$/, 'MTN Mobile Money'],
-        [/^225(01|02|03)\d{7,9}$/, 'Moov Money'],
-        [/^225\d{9,11}$/, 'Orange Money']
-      ],
       CM: [
-        [/^237(67|68)\d{6}$/, 'MTN Mobile Money'],
-        [/^237(69)\d{6}$/, 'Orange Money'],
-        [/^237(55|56|57)\d{6}$/, 'Moov Money'],
-        [/^237\d{9}$/, 'MTN Mobile Money']
+        [/^237(?:6[78]\d{7}|65[0-4]\d{6})$/, 'MTN Mobile Money'],
+        [/^237(?:69\d{7}|65[5-9]\d{6})$/, 'Orange Money']
       ],
       CG: [
-        [/^242(06)\d{6}$/, 'MTN Mobile Money'],
-        [/^242(05|55)\d{6}$/, 'Airtel Money'],
-        [/^242(04|03|02)\d{6}$/, 'Orange Money'],
-        [/^242\d{9}$/, 'MTN Mobile Money']
+        [/^24206\d{7}$/, 'MTN Mobile Money'],
+        [/^24205\d{7}$/, 'Airtel Money']
       ],
       CD: [
-        [/^243(81|82|83|84|89)\d{7}$/, 'Vodacom M-Pesa'],
-        [/^243(97|98|99|90|91|92)\d{7}$/, 'Airtel Money'],
-        [/^243(85|86|87|88)\d{7}$/, 'Orange Money'],
-        [/^243(80)\d{7}$/, 'Africell Money'],
-        [/^243\d{10}$/, 'Vodacom M-Pesa']
+        [/^243(81|82)\d{7}$/, 'Vodacom M-Pesa'],
+        [/^243(97|98|99)\d{7}$/, 'Airtel Money'],
+        [/^243(84|85|89)\d{7}$/, 'Orange Money']
       ]
     }
   };
@@ -116,18 +102,19 @@
 
   function detectLocally(raw) {
     var phone = normalizePhone(raw);
-    if (!phone) return { success: false, error: 'Numéro invalide. Saisissez-le avec son indicatif, par exemple +221 77 123 45 67.' };
+    if (!phone) return { success: false, error: 'Numéro invalide. Saisissez-le avec son indicatif, par exemple +237 6 70 12 34 56.' };
     var digits = phone.slice(1);
     var cc = digits.slice(0, 3);
     var c = LOCAL.countries[cc];
-    if (!c) return { success: false, error: 'Indicatif +' + cc + ' non couvert. C-Pay couvre +221, +225, +237, +242 et +243.' };
+    if (!c) return { success: false, error: 'Indicatif +' + cc + ' hors périmètre de lancement. C-Pay se concentre sur la CEMAC et la RD Congo.' };
     var ops = LOCAL.operators[c.country] || [];
+    if (!ops.length) return { success: false, error: 'Pays du périmètre de lancement ; la détection des opérateurs est en cours d’intégration.', countryInfo: c };
     for (var i = 0; i < ops.length; i++) {
       if (ops[i][0].test(digits)) {
         return { success: true, phone: phone, country: c.country, countryName: c.name, currency: c.currency, brand: ops[i][1], alternatives: c.alternatives };
       }
     }
-    return { success: false, error: 'Longueur de numéro inattendue pour ' + c.name + '.', countryInfo: c };
+    return { success: false, error: 'Opérateur non reconnu dans cette démonstration pour ' + c.name + '. Vérifiez le numéro ou contactez le support.', countryInfo: c };
   }
 
   /* ── Démo détection ─────────────────────────────────────── */
@@ -138,8 +125,8 @@
     var out = $('detect-result');
     if (!form || !input || !out) return;
 
-    var COUNTRY_NAMES = { SN: 'Sénégal', CI: "Côte d'Ivoire", CM: 'Cameroun', CG: 'Congo-Brazzaville', CD: 'RDC' };
-    var ALT_BY_COUNTRY = { SN: ['Wave'], CI: ['Wave'], CM: ['Express Union'] };
+    var COUNTRY_NAMES = { CM: 'Cameroun', CF: 'République centrafricaine', CG: 'République du Congo', GA: 'Gabon', GQ: 'Guinée équatoriale', TD: 'Tchad', CD: 'RD Congo' };
+    var ALT_BY_COUNTRY = { CM: ['Express Union'] };
 
     function altLabel(a) {
       if (!a) return '';
@@ -192,6 +179,13 @@
     function run(raw) {
       var phone = String(raw || '').trim();
       if (!phone) { input.focus(); return; }
+      var normalized = normalizePhone(phone);
+      var country = normalized && LOCAL.countries[normalized.slice(1, 4)];
+      // Do not let the legacy API advertise an out-of-launch country, or invent support.
+      if (!country || !LOCAL.operators[country.country]) {
+        render(detectLocally(phone), 'Source : périmètre de lancement C-Pay.');
+        return;
+      }
       setBusy(true);
       fetchJSON(ROUTES.detect, {
         method: 'POST',
