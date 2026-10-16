@@ -34,6 +34,16 @@ function BatchesTab() {
     try { const { data } = await financeApi.runSettlement(); toast.success(data.message || 'Règlement J+1 exécuté'); list.refresh(); }
     catch (e) { toast.error(errorMessage(e)); throw e; }
   };
+  const exportCsv = async () => {
+    try {
+      const { data } = await financeApi.exportCsv();
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'reglements.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { toast.error(errorMessage(e)); }
+  };
   const cols = [
     { key: 'batch_date', label: 'Date du lot', render: (s) => fmtDate(s.batch_date), sortValue: (s) => s.batch_date },
     { key: 'business_name', label: 'Marchand', render: (s) => <div><div className="cell-primary"><MerchantLink id={s.merchant_id} name={s.business_name} /></div><div className="cell-sub mono">{s.settlement_account}</div></div> },
@@ -55,7 +65,7 @@ function BatchesTab() {
       <Card flush title="Lots de règlement J+1" actions={<>
         <Chips value={status} onChange={(v) => set({ status: v, page: '' })} items={[{ value: 'pending', label: 'En attente' }, { value: 'submitted', label: 'Soumis' }, { value: 'completed', label: 'Versés' }, { value: 'failed', label: 'Échoués' }]} />
         {merchantId && <Button size="sm" icon="x" onClick={() => set({ merchantId: '' })}>Marchand : {merchantId.slice(0, 8)}…</Button>}
-        <Button size="sm" icon="download" onClick={() => window.open(financeApi.exportUrl(), '_blank', 'noopener')}>Export CSV</Button>
+        <Button size="sm" icon="download" onClick={exportCsv}>Export CSV</Button>
         <Button size="sm" icon="bolt" onClick={() => setRun(true)}>Lancer le règlement J+1</Button>
       </>}>
         <DataTable columns={cols} rows={list.data?.data || []} keyField="batch_id" loading={list.loading} error={list.error} onRetry={list.reload} page={page} limit={LIMIT} total={list.data?.total} onPage={setPage} dense empty="Aucun lot de règlement" emptyIcon="receipt" />

@@ -504,34 +504,62 @@ router.get('/account', merchantAuth, async (req, res) => {
 });
 
 router.put('/account', merchantAuth, async (req, res) => {
+  const destinationFields = ['settlementType', 'settlementAccount', 'settlementProvider', 'walletMtn', 'walletAirtel', 'bankAccount', 'bankName'];
+  if (destinationFields.some(key => Object.prototype.hasOwnProperty.call(req.body, key))) {
+    if (req.user.role !== 'owner') return res.status(403).json({ error: 'Seul le propriétaire peut modifier le bénéficiaire', code: 'INSUFFICIENT_ROLE' });
+    const step = await require('../services/cash/cash.service').verifyStepUp({ userId: req.user.sub, confirm: req.body.confirm });
+    if (!step.ok) return res.status(step.status).json(step.body);
+    if (req.body.settlementType && !['bank', 'mobile_money'].includes(req.body.settlementType)) {
+      return res.status(422).json({ error: 'Type de règlement invalide', code: 'VALIDATION_ERROR' });
+    }
+    if (req.body.settlementType === 'mobile_money' || req.body.settlementAccount) {
+      const current = await query('SELECT currency, country, settlement_type FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
+      const m = current.rows[0];
+      if (!m) return res.status(404).json({ error: 'Marchand introuvable' });
+      if ((req.body.settlementType || m.settlement_type) === 'mobile_money' && req.body.settlementAccount) {
+        const wallet = require('../services/cash/cash.service').detectWallet(req.body.settlementAccount, { country: m.country });
+        if (!wallet.success || wallet.currency !== m.currency) return res.status(422).json({ error: 'Wallet de règlement invalide ou devise incompatible', code: 'CURRENCY_MISMATCH' });
+        req.body.settlementAccount = wallet.phone;
+      }
+    }
+  }
   const { firstName, lastName, phone, settlementType, settlementAccount, settlementProvider,
           walletMtn, walletAirtel, bankAccount, bankName } = req.body;
-  await query(
-    `UPDATE merchant_users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name),
-     phone = COALESCE($3, phone) WHERE user_id = $4`,
-    [firstName, lastName, phone, req.user.sub]
-  );
-  // CR#3 : mise a jour des wallets de reglement
-  if (walletMtn !== undefined || walletAirtel !== undefined || bankAccount !== undefined || bankName !== undefined) {
+  await withTransaction(async client => {
+    const query = (sql, params) => client.query(sql, params);
+    const destinationChanged = destinationFields.some(key => Object.prototype.hasOwnProperty.call(req.body,key));
+    if (destinationChanged) await query('SELECT pg_advisory_xact_lock(hashtext($1))', [String(req.user.merchantId)]);
     await query(
-      `UPDATE merchants SET
-         wallet_mtn    = COALESCE($1, wallet_mtn),
-         wallet_airtel = COALESCE($2, wallet_airtel),
-         bank_account  = COALESCE($3, bank_account),
-         bank_name     = COALESCE($4, bank_name), updated_at = NOW()
-       WHERE merchant_id = $5`,
-      [walletMtn || null, walletAirtel || null, bankAccount || null, bankName || null, req.user.merchantId]
+      `UPDATE merchant_users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name),
+       phone = COALESCE($3, phone) WHERE user_id = $4`,
+      [firstName, lastName, phone, req.user.sub]
     );
-  }
-  if (settlementType || settlementAccount || settlementProvider) {
-    await query(
-      `UPDATE merchants SET settlement_type = COALESCE($1::settlement_type, settlement_type),
-       settlement_account = COALESCE($2, settlement_account),
-       settlement_provider = COALESCE($3, settlement_provider), updated_at = NOW()
-       WHERE merchant_id = $4`,
-      [settlementType, settlementAccount, settlementProvider, req.user.merchantId]
-    );
-  }
+    // CR#3 : mise a jour des wallets de reglement
+    if (walletMtn !== undefined || walletAirtel !== undefined || bankAccount !== undefined || bankName !== undefined) {
+      await query(
+        `UPDATE merchants SET
+           wallet_mtn    = COALESCE($1, wallet_mtn),
+           wallet_airtel = COALESCE($2, wallet_airtel),
+           bank_account  = COALESCE($3, bank_account),
+           bank_name     = COALESCE($4, bank_name), updated_at = NOW()
+         WHERE merchant_id = $5`,
+        [walletMtn || null, walletAirtel || null, bankAccount || null, bankName || null, req.user.merchantId]
+      );
+    }
+    if (settlementType || settlementAccount || settlementProvider) {
+      await query(
+        `UPDATE merchants SET settlement_type = COALESCE($1::settlement_type, settlement_type),
+         settlement_account = COALESCE($2, settlement_account),
+         settlement_provider = COALESCE($3, settlement_provider), updated_at = NOW()
+         WHERE merchant_id = $4`,
+        [settlementType, settlementAccount, settlementProvider, req.user.merchantId]
+      );
+    }
+    if (destinationChanged) await query(
+      `INSERT INTO audit_logs (actor_type,actor_id,actor_email,action,entity_type,entity_id,new_values,ip_address)
+       VALUES ('merchant',$1,$2,'SETTLEMENT_DESTINATION_CHANGED','merchant',$3,$4,$5)`,
+      [req.user.sub,req.user.email,req.user.merchantId,JSON.stringify({ fields: destinationFields.filter(key => Object.prototype.hasOwnProperty.call(req.body,key)) }),req.ip]);
+  });
   res.json({ success: true });
 });
 

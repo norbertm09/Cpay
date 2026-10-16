@@ -67,6 +67,23 @@ describe('POST /api/v1/pay/:shortId', () => {
   });
 });
 
+describe('Audit: public pay-link confirmation', () => {
+  test('inconsistent legacy success=true with pending is never treated as paid', async () => {
+    mockQuery.mockResolvedValueOnce({rows:[LINK]});
+    orchestrator.processTransaction.mockResolvedValue({success:true,pending:true,status:'pending',txnId:'T1'});
+    const r=await request(app).post('/api/v1/pay/ABC123').send({phone:'+242061234567'});
+    expect(r.status).toBe(200);expect(r.body.pending).toBe(true);
+    expect(mockQuery.mock.calls.some(([s])=>s.includes("status='paid'"))).toBe(false);
+  });
+  test('authorized payment consumes the link', async () => {
+    mockQuery.mockResolvedValueOnce({rows:[LINK]});
+    orchestrator.processTransaction.mockResolvedValue({success:true,pending:false,status:'authorized',txnId:'T1'});
+    const r=await request(app).post('/api/v1/pay/ABC123').send({phone:'+242061234567'});
+    expect(r.status).toBe(200);
+    expect(mockQuery.mock.calls.some(([s])=>s.includes("status='paid'"))).toBe(true);
+  });
+});
+
 describe('fail-closed', () => {
   test('/internal/settlement/run sans INTERNAL_TOKEN configuré → 503 (plus jamais 200)', async () => {
     expect((await request(app).post('/internal/settlement/run')).status).toBe(503);

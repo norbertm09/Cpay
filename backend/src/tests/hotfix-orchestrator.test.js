@@ -79,7 +79,8 @@ describe('Orchestrator — pending et settlement', () => {
   test('payout MM : provider pending → status pending, pas failed, pas de settlement', async () => {
     mmRouter.sendPayout.mockResolvedValue({ approved: false, pending: true, responseCode: '09', declineReason: 'PENDING', _operator: 'MTN_MOMO' });
     const r = await orchestrator.processTransaction({ merchantId: 'M-1', type: 'payout', amount: 5000, customerPhone: '+237670000000' });
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
+    expect(r.pending).toBe(true);
     expect(r.status).toBe('pending');
     const upd = sqlCalls(/UPDATE transactions SET/);
     expect(upd).toHaveLength(1);

@@ -48,7 +48,7 @@ const mockEncrypt = jest.fn(async ({ apiKey, apiSecret, extraParams }) => ({
   apiSecret: apiSecret ? `enc:${apiSecret}` : null,
   extraParams: extraParams ? Object.fromEntries(Object.entries(extraParams).map(([k, v]) => [k, `enc:${v}`])) : null,
 }));
-jest.mock('../config/secrets', () => ({ encryptConfigPatch: (...a) => mockEncrypt(...a) }), { virtual: true });
+jest.mock('../config/secrets', () => ({ encryptConfigPatch: (...a) => mockEncrypt(...a) }));
 
 const auth = require('../middleware/auth');
 const merchantRouter = require('../routes/merchant.routes');
@@ -560,7 +560,7 @@ describe('5. Middlewares et secrets', () => {
     });
     walk(root);
     const offenders = files.filter(f => /jwt\.(verify|sign)\(/.test(fs.readFileSync(f, 'utf8')))
-      .map(f => path.relative(root, f));
+      .map(f => path.relative(root, f).split(path.sep).join('/'));
     expect(offenders).toEqual(['middleware/auth.js']);
     // et plus aucun `jsonwebtoken` importe dans les routes
     const routeImports = files.filter(f => f.includes(`${path.sep}routes${path.sep}`) && /require\(['"]jsonwebtoken['"]\)/.test(fs.readFileSync(f, 'utf8')));

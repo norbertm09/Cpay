@@ -57,7 +57,11 @@ const finalizeTransaction = async ({ txn, provider, outcome, authCode, gatewayRe
             gateway_order_id = COALESCE($3, gateway_order_id),
             response_code = CASE WHEN $1 = 'authorized' THEN '00' ELSE COALESCE(response_code, '05') END,
             response_message = $4,
-            completed_at = NOW()
+            completed_at = NOW(),
+            fee_amount = CASE WHEN $1 = 'authorized' THEN COALESCE(fee_amount,
+              cpay_calculate_fee(merchant_id, type::text, detected_operator, amount, payment_method::text)) ELSE fee_amount END,
+            net_amount = CASE WHEN $1 = 'authorized' THEN COALESCE(net_amount,
+              amount - COALESCE(fee_amount, cpay_calculate_fee(merchant_id, type::text, detected_operator, amount, payment_method::text))) ELSE net_amount END
       WHERE transaction_id = $5 AND status = 'pending'
       RETURNING transaction_id`,
     [outcome, authCode ? String(authCode).slice(0, 64) : null, gatewayRef ? String(gatewayRef).slice(0, 128) : null,
