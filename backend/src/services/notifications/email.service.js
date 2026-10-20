@@ -1,4 +1,5 @@
 'use strict';
+const { smtpTlsOptions } = require('../../config/smtp-tls');
 
 let transporter = null;
 
@@ -22,7 +23,8 @@ const getTransporter = () => {
     port,
     secure: port === 465,
     auth: { user, pass },
-    tls: { rejectUnauthorized: false },
+    requireTLS: true,
+    tls: smtpTlsOptions(),
   });
   return transporter;
 };
