@@ -21,6 +21,10 @@
  *
  * Toute entrée marquée `verified:false` doit être confirmée auprès de l'opérateur
  * avant la mise en production du pays concerné.
+ *
+ * WAVE-6 lot 2 : CF, GA, GQ, TD (périmètre de lancement CEMAC) sont détectés (pays, devise, opérateur) mais
+ * marqués `planned:true` : aucun provider n'existe, le registre de capacités refuse l'opération avec un
+ * message clair (CAPABILITY_NOT_ACTIVE). La détection ne vaut jamais disponibilité.
  */
 'use strict';
 
@@ -32,6 +36,13 @@ const COUNTRIES = {
   CM: { callingCode: '237', name: 'Cameroun',          currency: 'XAF', region: 'CEMAC',  nsnLength: 9  },
   CG: { callingCode: '242', name: 'Congo Brazzaville', currency: 'XAF', region: 'CEMAC',  nsnLength: 9  },
   CD: { callingCode: '243', name: 'RDC',               currency: 'CDF', region: 'CUSTOM', nsnLength: 9  },
+  // WAVE-6 lot 2 : reste du périmètre de lancement CEMAC (docs/LAUNCH-CEMAC-RDC.md). Détection seule :
+  // aucun provider branché, le registre de capacités (services/capabilities/registry.js) les marque `planned`.
+  // Plans de numérotation à confirmer (docs/OPERATEURS-A-CONFIRMER.md §1) — GA : 8 chiffres avec le 0 initial.
+  CF: { callingCode: '236', name: 'Centrafrique',      currency: 'XAF', region: 'CEMAC',  nsnLength: 8, verified: false },
+  GA: { callingCode: '241', name: 'Gabon',             currency: 'XAF', region: 'CEMAC',  nsnLength: 8, verified: false },
+  GQ: { callingCode: '240', name: 'Guinée équatoriale', currency: 'XAF', region: 'CEMAC', nsnLength: 9, verified: false },
+  TD: { callingCode: '235', name: 'Tchad',             currency: 'XAF', region: 'CEMAC',  nsnLength: 8, verified: false },
   // Extensions futures (devise détectée, aucun opérateur branché)
   GH: { callingCode: '233', name: 'Ghana',             currency: 'GHS', region: 'CUSTOM', nsnLength: 9  },
   NG: { callingCode: '234', name: 'Nigeria',           currency: 'NGN', region: 'CUSTOM', nsnLength: 10 },
@@ -71,6 +82,24 @@ const MOBILE_MONEY_OPERATORS = {
     { prefixes: ['06'],            operator: 'MTN_MOMO',     brand: 'MTN MoMo',     gateway: 'mtn_cg',         verified: true  },
     { prefixes: ['05', '04'],      operator: 'AIRTEL_MONEY', brand: 'Airtel Money', gateway: 'airtel_cg',      verified: false }, // 04 : ex-Azur, à confirmer
   ],
+  // WAVE-6 lot 2 : opérateurs principaux CF / GA / GQ / TD — préfixes à confirmer (verified:false), aucun
+  // provider (gateway présent pour le registre, absent de mobilemoney.router.PROVIDERS → `planned`).
+  CF: [
+    { prefixes: ['72', '75', '77'], operator: 'ORANGE_MONEY',  brand: 'Orange Money',  gateway: 'orange_cf',  verified: false, planned: true },
+    { prefixes: ['70', '71', '78'], operator: 'TELECEL_MONEY', brand: 'Telecel Money', gateway: 'telecel_cf', verified: false, planned: true },
+  ],
+  GA: [
+    { prefixes: ['07'],            operator: 'AIRTEL_MONEY',  brand: 'Airtel Money',  gateway: 'airtel_ga',  verified: false, planned: true },
+    { prefixes: ['06'],            operator: 'MOOV_MONEY',    brand: 'Moov Money',    gateway: 'moov_ga',    verified: false, planned: true },
+  ],
+  GQ: [
+    { prefixes: ['222', '223'],    operator: 'GETESA_MONEY',  brand: 'GETESA',        gateway: 'getesa_gq',  verified: false, planned: true },
+    { prefixes: ['55'],            operator: 'MUNI_MONEY',    brand: 'Muni',          gateway: 'muni_gq',    verified: false, planned: true },
+  ],
+  TD: [
+    { prefixes: ['62', '63', '65', '69'],                   operator: 'AIRTEL_MONEY', brand: 'Airtel Money', gateway: 'airtel_td', verified: false, planned: true },
+    { prefixes: ['66', '90', '91', '92', '93', '95', '99'], operator: 'MOOV_MONEY',   brand: 'Moov Money',   gateway: 'moov_td',   verified: false, planned: true },
+  ],
   CD: [
     { prefixes: ['81', '82'],      operator: 'VODACOM_MPESA',  brand: 'M-Pesa',         gateway: 'vodacom_cd',  verified: true  },
     { prefixes: ['97', '98', '99'],operator: 'AIRTEL_MONEY',   brand: 'Airtel Money',   gateway: 'airtel_cd',   verified: true  },
@@ -84,7 +113,7 @@ const WALLET_ALTERNATIVES = {
   SN: [{ operator: 'WAVE', brand: 'Wave', gateway: 'wave_sn' }],
   CI: [{ operator: 'WAVE', brand: 'Wave', gateway: 'wave_ci' }],
   CM: [{ operator: 'EXPRESS_UNION', brand: 'Express Union Mobile', gateway: 'express_union_cm' }],
-  CG: [], CD: [],
+  CG: [], CD: [], CF: [], GA: [], GQ: [], TD: [],
 };
 
 // Migration CI 2021 : anciens numéros à 8 chiffres → nouveau préfixe à 2 chiffres
@@ -252,7 +281,7 @@ const detectFromPhone = (phone, opts = {}) => {
       error: `${operatorInfo.brand} n'a pas de service Mobile Money branché${alternatives.length ? ` — alternatives : ${alternatives.map(a => a.brand).join(', ')}` : ''}`,
     };
   }
-  return { success: true, ...base, operator: operatorInfo.operator, brand: operatorInfo.brand, gateway: operatorInfo.gateway, verified: operatorInfo.verified };
+  return { success: true, ...base, operator: operatorInfo.operator, brand: operatorInfo.brand, gateway: operatorInfo.gateway, verified: operatorInfo.verified, ...(operatorInfo.planned ? { planned: true } : {}) };
 };
 
 /**

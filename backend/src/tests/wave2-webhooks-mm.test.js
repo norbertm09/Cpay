@@ -11,7 +11,8 @@ const request = require('supertest');
 
 jest.mock('../config/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
 const mockQuery = jest.fn();
-jest.mock('../config/database', () => ({ query: (...a) => mockQuery(...a), withTransaction: jest.fn(), pool: {} }));
+// WAVE-6 : finalize.service écrit dans une transaction SQL (withTransaction) — même mock de requêtes
+jest.mock('../config/database', () => ({ query: (...a) => mockQuery(...a), withTransaction: async (fn) => fn({ query: (...a) => mockQuery(...a) }), pool: {} }));
 const mockEnqueue = jest.fn().mockResolvedValue(undefined);
 jest.mock('../services/settlement/settlement.queue', () => ({ enqueue: (...a) => mockEnqueue(...a) }));
 const mockGetConfig = jest.fn().mockResolvedValue({});
@@ -110,7 +111,7 @@ describe('Orange (notif_token)', () => {
     const upd = calls(UPDATE_TXN)[0];
     expect(upd[0]).toMatch(/AND status = 'pending'/);
     expect(upd[1][0]).toBe('authorized'); expect(upd[1][1]).toBe('MP123'); expect(upd[1][4]).toBe(TXN);
-    expect(mockEnqueue).toHaveBeenCalledWith({ txnId: TXN, merchantId: 'M-1', amount: 5000, currency: 'XAF' });
+    expect(mockEnqueue).toHaveBeenCalledWith({ txnId: TXN, merchantId: 'M-1', amount: 5000, currency: 'XAF' }, expect.anything()); // WAVE-6 : client SQL de la transaction
     expect(calls(PAY_LINKS)).toHaveLength(1); expect(calls(PAY_LINKS)[0][1]).toEqual([5000, PAY_LINK]);
     expect(calls(TXN_EVENTS)[0][1][2]).toBe('ORANGE_CALLBACK');
     expect(calls(WH_EVENTS).some(([, p]) => p[3] === 'authorized')).toBe(true);

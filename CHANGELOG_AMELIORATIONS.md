@@ -1,5 +1,12 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-wave-6 (2026-10-20) — reponse a l'audit du 17 octobre
+Voir `docs/WAVE-6.md` : resultats operateur incertains (statut unknown, reservation conservee, reconciliation,
+alertes), idempotence durable sur les routes monetaires, finalisation atomique et reparation de la file de
+reglement, beneficiaires proteges (proprietaire, confirmation forte, verification admin, historique), antifraude en
+mode degrade explicite, registre des capacites pays x moyen x operation avec garde serveur et interrupteur
+report/enforce, detection CF/GA/GQ/TD, GIMAC non active, TLS PostgreSQL verifie, migration 011, 655 tests.
+
 ## 2.7.0-wave-5 (2026-10-16) — deploiement automatique, refonte des interfaces
 Voir `docs/WAVE-5.md` : deploiement automatique apres CI verte sur main ; vitrine allegee (4 entrees, sans tarifs,
 page reclamation, hub developpeurs) ; refonte complete des portails marchand (accueil 360, caisse, activite,

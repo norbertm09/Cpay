@@ -286,4 +286,50 @@ async function reconcilePending({ maxAgeHours = 24, limit = 100, minAgeMinutes =
   return { summary, results };
 }
 
-module.exports = { reconcilePending, reconcileOne, opKind, wave2Provider, gatewayKeyFor, WAVE2_PROVIDERS };
+// ─── WAVE-6 (audit 17/10/2026 §1) : retraits et décaissements incertains ───
+// 1) merchant_transfers `unknown` / `processing` : statut réel opérateur via
+//    cash.service.refreshPayoutStatus (completed / failed uniquement sur statut explicite ;
+//    « introuvable » → failed seulement après CASH_UNKNOWN_GRACE_MINUTES) ; needs_review + e-mail
+//    ops après CASH_UNKNOWN_ALERT_HOURS.
+// 2) transactions type='payout' restées `pending` avec response_message='pending_unknown'
+//    (orchestrateur, exception gateway) : reconcileOne quand une référence existe, sinon alerte
+//    ops (une seule fois, événement PAYOUT_NEEDS_REVIEW) après CASH_UNKNOWN_ALERT_HOURS.
+async function reconcileUncertainPayouts({ graceMinutes = null, alertHours = null, limit = 200 } = {}) {
+  const cash = require('./cash/cash.service');
+  const transfers = await cash.sweepUncertainPayouts({ graceMinutes, alertHours, limit });
+  const alertH = alertHours === null || alertHours === undefined ? cash.unknownAlertHours() : Number(alertHours);
+  const r = await query(
+    `SELECT t.transaction_id, t.merchant_id, t.type, t.amount, t.currency, t.detected_operator, t.detected_country,
+            t.gateway_name, t.gateway_payment_id, t.pay_link_id, t.status, t.initiated_at, m.business_name
+     FROM transactions t LEFT JOIN merchants m ON m.merchant_id = t.merchant_id
+     WHERE t.type='payout' AND t.status='pending' AND t.response_message='pending_unknown'
+       AND t.initiated_at > NOW() - INTERVAL '30 days'
+       AND NOT EXISTS (SELECT 1 FROM transaction_events e WHERE e.transaction_id = t.transaction_id AND e.event_type = 'PAYOUT_NEEDS_REVIEW')
+     ORDER BY t.initiated_at ASC LIMIT $1`, [Math.min(1000, Math.max(1, parseInt(limit, 10) || 200))]);
+  const txResults = [];
+  for (const t of r.rows) {
+    let out = null;
+    if (t.gateway_payment_id) out = await reconcileOne(t);
+    const ageH = (Date.now() - new Date(t.initiated_at).getTime()) / 3600000;
+    const stillPending = !out || !out.updated;
+    if (stillPending && ageH >= alertH) {
+      await query(`INSERT INTO transaction_events (transaction_id, merchant_id, event_type, payload) VALUES ($1,$2,'PAYOUT_NEEDS_REVIEW',$3)`,
+        [t.transaction_id, t.merchant_id, JSON.stringify({ ageHours: Math.round(ageH * 10) / 10, alertHours: alertH, source: 'reconcile' })]).catch((e) => logger.error('reconcile: needs_review event failed', { txn: t.transaction_id, err: e.message }));
+      await cash.notifyOps({
+        subject: `Décaissement à vérifier (résultat opérateur incertain) — ${t.transaction_id}`,
+        html: `<p>Décaissement <code>${t.transaction_id}</code> (${Number(t.amount)} ${t.currency || ''}, ${t.detected_operator || ''}) du marchand ${t.business_name || t.merchant_id}
+          est <b>pending / pending_unknown</b> depuis ${Math.round(ageH * 10) / 10} h${t.gateway_payment_id ? '' : ' et ne possède aucune référence opérateur'}.</p>
+          <p>Les fonds restent réservés. Vérifiez le relevé opérateur puis finalisez (webhook rejoué, réconciliation ou décision Finance documentée).</p>`,
+      });
+      txResults.push({ txn: t.transaction_id, needsReview: true, ...(out || {}) });
+    } else {
+      txResults.push({ txn: t.transaction_id, ...(out || { skipped: 'no_ref', still: 'pending' }) });
+    }
+  }
+  return {
+    transfers,
+    transactions: { scanned: r.rows.length, flagged: txResults.filter((x) => x.needsReview).length, results: txResults },
+  };
+}
+
+module.exports = { reconcilePending, reconcileOne, reconcileUncertainPayouts, opKind, wave2Provider, gatewayKeyFor, WAVE2_PROVIDERS };

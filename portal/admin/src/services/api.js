@@ -250,6 +250,13 @@ export const partnersApi = {
 };
 
 // ─── Configuration ────────────────────────────────────────────────
+// Capacités pays (vague 6, lot 2) : matrice calculée côté serveur (statuts, prérequis, pilotes) — lecture seule.
+export const capabilitiesApi = {
+  matrix: (refresh) => api.get('/capabilities', { params: refresh ? { refresh: 1 } : undefined }),
+  refresh: () => api.post('/capabilities/refresh'),
+  publicSummary: () => axios.get(`${apiBaseUrl}/api/v1/public/capabilities`, { withCredentials: false }),
+};
+
 export const configApi = {
   apiConfigs: (params) => api.get('/api-configs', { params }),
   apiConfig: (id) => api.get(`/api-configs/${id}`),

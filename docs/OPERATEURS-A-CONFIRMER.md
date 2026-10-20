@@ -12,6 +12,20 @@ Liste de travail pour l'équipe Calculus Plus : chaque ligne doit être validée
 | 1 | CG (Congo-Brazzaville) | préfixes `05`, `04` | Airtel Money | `airtel_cg` | `04` = ex-Azur migré chez Airtel ? Plage encore attribuée ? Airtel Money actif sur `04` ? | | ☐ | |
 | 2 | CD (RDC) | préfixes `90`, `91` | Africell Money | `africell_cd` | Plages exactes d'Africell RDC ; `91` toujours Africell ; wallet « Africell Money » lancé et accessible par API ? | | ☐ | |
 | 3 | Cartes | BIN `979` | GIMAC (réseau CEMAC) | acquéreur `gimac_gateway` | Plage IIN officielle GIMAC (6 chiffres), acquéreur/switch de rattachement, longueur PAN, Luhn | | ☐ | |
+| 4 | CF (Centrafrique, +236, 8 chiffres) | préfixes `72`, `75`, `77` | Orange Money | `orange_cf` (aucun provider — `planned`) | Plages Orange Centrafrique ; API Orange Money disponible pour CF ? | | ☐ | |
+| 5 | CF (Centrafrique) | préfixes `70`, `71`, `78` | Telecel Money | `telecel_cf` (aucun provider — `planned`) | Plages Telecel ; existence et accès API du wallet Telecel Money | | ☐ | |
+| 6 | GA (Gabon, +241, **8 chiffres avec le 0 initial — à vérifier**) | préfixe `07` | Airtel Money | `airtel_ga` (aucun provider — `planned`) | Format international réel (`+241 07…` vs `+241 7…`), plages Airtel ; Airtel Money API Gabon | | ☐ | |
+| 7 | GA (Gabon) | préfixe `06` | Moov Money (Moov Africa Gabon Telecom) | `moov_ga` (aucun provider — `planned`) | Plages Moov / ex-Libertis ; API Moov Money | | ☐ | |
+| 8 | GQ (Guinée équatoriale, +240, 9 chiffres) | préfixes `222`, `223` | GETESA (Orange) | `getesa_gq` (aucun provider — `planned`) | Plages GETESA ; wallet mobile money opérationnel et accessible par API ? | | ☐ | |
+| 9 | GQ (Guinée équatoriale) | préfixe `55` | Muni (Hits Telecom) | `muni_gq` (aucun provider — `planned`) | Plages Muni (551–55x) ; existence d'un service de monnaie mobile | | ☐ | |
+| 10 | TD (Tchad, +235, 8 chiffres) | préfixes `62`, `63`, `65`, `69` | Airtel Money | `airtel_td` (aucun provider — `planned`) | Plages Airtel Tchad ; Airtel Money API Tchad | | ☐ | |
+| 11 | TD (Tchad) | préfixes `66`, `90`–`93`, `95`, `99` | Moov Money (Moov Africa Tchad, ex-Tigo) | `moov_td` (aucun provider — `planned`) | Plages Moov / ex-Tigo (`66` encore attribué ?) ; API Moov Money | | ☐ | |
+
+Lignes 4 à 11 (vague 6, lot 2) : ces pays sont **détectés** (pays, devise XAF, opérateur) mais aucun provider n'existe :
+le registre de capacités (`backend/src/services/capabilities/registry.js`) les expose `planned`, l'API refuse toute
+opération (`403 CAPABILITY_NOT_ACTIVE`) et l'inscription marchande y est fermée (`422 COUNTRY_NOT_OPEN`) tant qu'aucun
+encaissement n'est `active` ou `pilot`. Après confirmation des plages, implémenter le provider (`mobilemoney.router.PROVIDERS`),
+puis la configuration (`<GATEWAY>_API_KEY` ou `api_configurations`) rend le statut `active` sans autre modification.
 
 Une fois confirmée, passer l'entrée à `verified:true` dans `detection.engine.js` (ou corriger les
 préfixes) et ajouter le cas dans `backend/src/tests/wave2-detection.test.js`.

@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { cashApi, newIdempotencyKey, isFeatureUnavailable, isStepUp } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
 import { useCashSummary } from '../../hooks/useCashSummary';
+import { useCapabilities } from '../../hooks/useCapabilities';
 import { useStepUp } from '../../hooks/useStepUp';
 import { Button, Card, PageHeader, Input, AmountInput, Notice, KV, Icon, StatusBadge, StepUpModal, FeatureUnavailable, SkeletonCard, Modal } from '../../components';
 import { fmtMoney, fmtDateTime, fmtPhone } from '../../utils/format';
@@ -18,6 +19,7 @@ export const Retirer = () => {
   const { summary, state: sumState, reload } = useCashSummary();
   const stepUp = useStepUp(user);
   const currency = summary?.currency || user?.currency || 'XAF';
+  const cap = useCapabilities(user?.country);
   const dev = devParams();
   const [wallet, setWallet] = useState(null);
   const [walletState, setWalletState] = useState('loading');
@@ -44,7 +46,9 @@ export const Retirer = () => {
   const overLimit = remaining != null && amt > Number(remaining);
   const belowMin = minT != null && amt > 0 && amt < Number(minT);
   const amountError = overBalance ? 'Montant supérieur au solde disponible.' : overLimit ? 'Montant supérieur à votre limite journalière restante.' : belowMin ? `Montant minimum ${fmtMoney(minT, currency)}.` : null;
-  const canSubmit = amt > 0 && !!wallet && !amountError;
+  // Retrait Mobile Money actif dans le pays ? (registre serveur ; l'opérateur du wallet doit l'être aussi)
+  const withdrawClosed = !cap.isOpen('withdraw', 'mobile_money') || (wallet?.operator ? !cap.isOpen('withdraw', 'mobile_money', String(wallet.operator).toUpperCase()) : false);
+  const canSubmit = amt > 0 && !!wallet && !amountError && !withdrawClosed;
 
   const run = useCallback((confirm) => cashApi.withdraw({ amount: amt, description: description || undefined, confirm }, newIdempotencyKey())
     .then(({ data }) => { setResult(data); setAmount(''); setDescription(''); reload(); toast.success('Retrait lancé'); })
@@ -100,6 +104,7 @@ export const Retirer = () => {
 
       {walletState === 'ok' && wallet && !result && (
         <Card>
+          {withdrawClosed && <Notice tone="neutral" className="mb-4" icon="clock"><strong>{cap.message}.</strong> Le retrait vers {opLabel(wallet.operator, wallet.operatorLabel)} n’est pas encore activé dans votre pays (intégration en cours).</Notice>}
           <form onSubmit={submit} noValidate>
             <div className="row-between kv-box mb-4" style={{ padding: 'var(--s3) var(--s4)' }}>
               <div style={{ minWidth: 0 }}>

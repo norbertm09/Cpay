@@ -13,7 +13,8 @@
   var ROUTES = {
     detect: API_BASE + '/api/v1/detect/phone',       // POST { phone } — public, 30 req/min
     leads:  API_BASE + '/api/v1/public/leads',       // POST lead
-    claims: API_BASE + '/api/v1/public/claims'       // POST claim → { reference }
+    claims: API_BASE + '/api/v1/public/claims',      // POST claim → { reference }
+    capabilities: API_BASE + '/api/v1/public/capabilities' // GET états réels par pays (registre de capacités, cache 60 s)
   };
 
   function $(id) { return document.getElementById(id); }
@@ -490,5 +491,98 @@
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
     update();
+  })();
+
+  /* ── Pays & opérateurs : états réels depuis le registre de capacités (vague 6, lot 2) ──
+     Le tableau statique (pays, indicatif, devise, zone) reste le repli : sans réponse de l'API
+     aucune colonne de service n'est ajoutée, donc rien n'est présenté comme disponible. */
+  (function capabilitiesTable() {
+    var body = $('countries-body'), head = $('countries-head'), source = $('countries-source');
+    if (!body || !head) return;
+    var LABELS = { active: 'Disponible', pilot: 'Pilote', planned: "En cours d'intégration", unavailable: "En cours d'intégration" };
+    var CLASSES = { active: 'badge--ok', pilot: 'badge--soon', planned: 'badge--muted', unavailable: 'badge--muted' };
+    var OPS = { collect: 'encaissement', withdraw: 'retrait', transfer: 'transfert' };
+    function badge(status) {
+      var st = LABELS[status] ? status : 'unavailable';
+      return el('span', 'badge ' + CLASSES[st], LABELS[st]);
+    }
+    function best(statuses) {
+      var rank = { active: 3, pilot: 2, planned: 1, unavailable: 0 }, b = 'unavailable';
+      for (var i = 0; i < statuses.length; i++) if ((rank[statuses[i]] || 0) > rank[b]) b = statuses[i];
+      return b;
+    }
+    function st(x) { return x && x.status ? x.status : 'unavailable'; }
+    function opsSummary(ops, key) {
+      var parts = [];
+      for (var k in OPS) if (ops[k] && ops[k][key]) parts.push(OPS[k] + ' : ' + LABELS[st(ops[k][key])].toLowerCase());
+      return parts.join(' · ');
+    }
+    function mobileCell(c) {
+      var ops = c.operations || {};
+      var mm = ops.collect && ops.collect.mobile_money ? ops.collect.mobile_money : { status: 'unavailable', operators: [] };
+      var td = el('td', 'cap-cell');
+      td.appendChild(badge(st(mm)));
+      var names = [];
+      (mm.operators || []).forEach(function (o) {
+        var s = st(o);
+        names.push((o.brand || o.operator) + (s === 'active' ? '' : s === 'pilot' ? ' (pilote)' : ' (en cours)'));
+      });
+      var sub = el('span', 'cap-ops', names.length ? names.join(', ') : 'Opérateurs à confirmer');
+      td.appendChild(sub);
+      td.title = opsSummary(ops, 'mobile_money');
+      return td;
+    }
+    function cardCell(c) {
+      var ops = c.operations || {};
+      var td = el('td', 'cap-cell');
+      td.appendChild(badge(st(ops.collect && ops.collect.card)));
+      td.appendChild(el('span', 'cap-ops', st(ops.collect && ops.collect.card) === 'active' ? 'Lien de paiement hébergé' : 'Retrait et transfert carte non proposés'));
+      td.title = opsSummary(ops, 'card');
+      return td;
+    }
+    function gimacCell(c) {
+      var ops = c.operations || {};
+      var td = el('td', 'cap-cell');
+      var s = best([st(ops.collect && ops.collect.gimac), st(ops.withdraw && ops.withdraw.gimac), st(ops.transfer && ops.transfer.gimac)]);
+      td.appendChild(badge(s));
+      td.appendChild(el('span', 'cap-ops', c.region === 'CEMAC' ? 'Après contrat et tests partenaires' : 'Hors CEMAC : selon partenaires'));
+      td.title = opsSummary(ops, 'gimac');
+      return td;
+    }
+    function render(data) {
+      if (!data || !data.countries || !data.countries.length) return false;
+      var byCode = {};
+      data.countries.forEach(function (c) { byCode[c.code] = c; });
+      var rows = body.querySelectorAll('tr[data-code]');
+      var any = false;
+      for (var i = 0; i < rows.length; i++) {
+        var c = byCode[rows[i].getAttribute('data-code')];
+        if (!c) continue;
+        any = true;
+      }
+      if (!any) return false;
+      ['Monnaie mobile', 'Carte', 'GIMAC'].forEach(function (t) { var th = el('th', null, t); th.setAttribute('scope', 'col'); head.appendChild(th); });
+      for (var j = 0; j < rows.length; j++) {
+        var cc = byCode[rows[j].getAttribute('data-code')];
+        if (!cc) {
+          for (var n = 0; n < 3; n++) rows[j].appendChild(el('td', 'cap-cell', '—'));
+          continue;
+        }
+        rows[j].appendChild(mobileCell(cc));
+        rows[j].appendChild(cardCell(cc));
+        rows[j].appendChild(gimacCell(cc));
+      }
+      if (source) {
+        var when = data.generatedAt ? new Date(data.generatedAt) : null;
+        var stamp = when && !isNaN(when.getTime()) ? when.toLocaleDateString('fr-FR') : '';
+        source.appendChild(el('span', null, ' Source : registre de capacités C-Pay' + (stamp ? ' (' + stamp + ')' : '') + '.'));
+      }
+      return true;
+    }
+    fetchJSON(ROUTES.capabilities, { method: 'GET', headers: { Accept: 'application/json' } }, 6000).then(function (r) {
+      if (!r.ok || !render(r.data)) throw new Error('capabilities unavailable');
+    }).catch(function () {
+      if (source) source.appendChild(el('span', null, ' États indisponibles pour le moment : contactez-nous pour connaître les services activés dans votre pays.'));
+    });
   })();
 })();

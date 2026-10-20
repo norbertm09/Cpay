@@ -34,6 +34,7 @@ export const NAV = [
     { to: '/configuration/notifications', label: 'Notifications', icon: 'bell', roles: PERMS.ops },
     { to: '/configuration/terminaux', label: 'Terminaux', icon: 'phone' },
     { to: '/configuration/fonctionnalites', label: 'Fonctionnalités & pilote', icon: 'toggle', roles: PERMS.ops },
+    { to: '/configuration/capacites', label: 'Capacités pays', icon: 'globe' },
     { to: '/configuration/administrateurs', label: 'Administrateurs', icon: 'usershield', roles: PERMS.superOnly },
     { to: '/configuration/audit', label: 'Journal d’audit', icon: 'list', roles: PERMS.superOnly },
     { to: '/configuration/monitoring', label: 'Monitoring', icon: 'activity' },

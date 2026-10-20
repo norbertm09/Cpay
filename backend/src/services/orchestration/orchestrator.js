@@ -158,12 +158,35 @@ const processTransaction = async (params) => {
   });
 
   // ── 4b. Fraud Engine ────────────────────────────────────────────
+  // WAVE-6 (audit 17/10/2026 §5) : une exception du moteur n'est plus « allow / score 0 ».
+  // Mode dégradé FRAUD_DEGRADED_MODE (review | allow_limited | block, défaut allow_limited).
   if (fraudEngine) {
-    const fraudResult = await fraudEngine.evaluate({
-      txnId, merchantId, amount, currency: detection.currency || merchantCheck.merchantCurrency,
-      paymentMethod: customerPhone ? 'mobile_money' : 'card_nfc',
-      deviceId, ip: null,
-    }).catch(() => ({ action: 'allow', score: 0 }));
+    let fraudResult;
+    let degraded = null;
+    try {
+      fraudResult = await fraudEngine.evaluate({
+        txnId, merchantId, amount, currency: detection.currency || merchantCheck.merchantCurrency,
+        paymentMethod: customerPhone ? 'mobile_money' : 'card_nfc',
+        deviceId, ip: null,
+      });
+      if (!fraudResult || typeof fraudResult !== 'object' || !fraudResult.action) throw new Error('fraud engine returned no decision');
+    } catch (err) {
+      degraded = applyFraudDegradedPolicy({ amount, type });
+      fraudResult = { action: degraded.allow ? 'allow' : 'block', score: null, degraded: true, blockReason: degraded.allow ? null : degraded.reason };
+      logFraudDegraded({ txnId, merchantId, amount, type, mode: degraded.mode, allowed: degraded.allow, err: err.message });
+      await addTransactionEvent({
+        txnId, merchantId, eventType: degraded.allow ? 'FRAUD_DEGRADED' : 'FRAUD_DEGRADED_REFUSED',
+        payload: { fraud_degraded: true, mode: degraded.mode, maxAmount: degraded.maxAmount, amount, error: String(err.message || '').slice(0, 200) },
+      }).catch((e) => logger.warn('Orchestrator: fraud degraded event failed', { txnId, err: e.message }));
+      if (!degraded.allow) {
+        await updateTransactionStatus(txnId, 'failed', { message: 'fraud_unavailable', responseCode: '96' });
+        return {
+          success: false, txnId, code: 'FRAUD_UNAVAILABLE', statusCode: 503, status: 'failed',
+          error: 'Contrôle antifraude indisponible : opération refusée temporairement', message: 'Contrôle de sécurité indisponible',
+          amount, currency: detection.currency || merchantCheck.merchantCurrency, fraudDegraded: true, mode: degraded.mode,
+        };
+      }
+    }
 
     if (fraudResult.action === 'block') {
       logger.warn('Fraud: transaction blocked', { txnId, score: fraudResult.score });
@@ -205,14 +228,44 @@ const processTransaction = async (params) => {
       });
     }
   } catch (err) {
-    logger.error('Orchestrator: gateway error', { txnId, error: err.message });
-    await updateTransactionStatus(txnId, 'failed', { error: err.message });
-    return { success: false, error: 'Erreur de traitement du paiement', txnId };
+    // WAVE-6 (audit 17/10/2026 §1) : une exception gateway n'est un échec définitif QUE si
+    // l'opérateur a explicitement refusé (4xx synchrone). Timeout / réseau / 5xx / réponse
+    // illisible → la transaction reste `pending` (response_message 'pending_unknown') :
+    // le webhook ou la réconciliation (finalize exige status='pending') tranchent.
+    const { classifyRailError } = require('../cash/cash.service');
+    const outcome = classifyRailError(err);
+    logger.error('Orchestrator: gateway error', { txnId, outcome, error: err.message });
+    if (outcome === 'declined') {
+      await updateTransactionStatus(txnId, 'failed', { declineReason: String(err.message || 'Refusé').slice(0, 200), responseCode: err.statusCode ? String(err.statusCode) : null });
+      await addTransactionEvent({ txnId, merchantId, eventType: 'GATEWAY_DECLINED', payload: { outcome, error: String(err.message || '').slice(0, 200), statusCode: err.statusCode || null } }).catch(() => {});
+      return { success: false, error: 'Erreur de traitement du paiement', txnId, status: 'failed', outcome };
+    }
+    await updateTransactionStatus(txnId, 'pending', { message: 'pending_unknown', gatewayRef: err.gatewayRef || null, _gateway: detection.gateway || null });
+    await addTransactionEvent({ txnId, merchantId, eventType: 'GATEWAY_UNKNOWN', payload: { outcome: 'unknown', error: String(err.message || '').slice(0, 200), statusCode: err.statusCode || null, gateway: detection.gateway || null } }).catch(() => {});
+    return {
+      success: false, pending: true, txnId, status: 'pending', outcome: 'unknown', code: 'GATEWAY_UNKNOWN',
+      error: 'Résultat opérateur incertain : opération en cours de vérification', message: 'Paiement en attente de confirmation',
+      amount, currency: detection.currency || merchantCheck.merchantCurrency,
+    };
   }
 
   // ── 6. Mettre à jour et répondre ───────────────────────────────
   // Un résultat provider "pending" (push accepté, PIN non encore saisi, timeout de
   // polling…) reste `pending` : jamais `failed` — la réconciliation / le webhook finalisent.
+  // WAVE-6 : un résultat réseau normalisé par le routeur MM (responseCode '96', retryable) sur un
+  // PAYOUT (fonds réservés) est incertain → reste `pending` ('pending_unknown'), jamais `failed`.
+  if (type === TRANSACTION_TYPES.PAYOUT && customerPhone && gatewayResult && gatewayResult.approved !== true && gatewayResult.pending !== true) {
+    const { classifyRailResult } = require('../cash/cash.service');
+    if (classifyRailResult(gatewayResult) === 'unknown') {
+      await updateTransactionStatus(txnId, 'pending', { ...gatewayResult, declineReason: null, message: 'pending_unknown' });
+      await addTransactionEvent({ txnId, merchantId, eventType: 'GATEWAY_UNKNOWN', payload: { outcome: 'unknown', responseCode: gatewayResult.responseCode || null, reason: gatewayResult.declineReason || null, gateway: gatewayResult._gateway || gatewayResult._operator || null } }).catch(() => {});
+      return {
+        success: false, pending: true, txnId, status: 'pending', outcome: 'unknown', code: 'GATEWAY_UNKNOWN',
+        error: 'Résultat opérateur incertain : opération en cours de vérification', message: 'Paiement en attente de confirmation',
+        amount, currency: detection.currency || merchantCheck.merchantCurrency, paymentMethod: 'mobile_money',
+      };
+    }
+  }
   const isPending   = gatewayResult.pending === true;
   const finalStatus = isPending ? 'pending' : (gatewayResult.approved === true ? 'authorized' : 'failed');
   await updateTransactionStatus(txnId, finalStatus, gatewayResult);
@@ -326,6 +379,54 @@ const generatePayLink = async ({ merchantId, amount, currency, description }) =>
       sms:      `sms:?body=${encodeURIComponent(`Payer ${amount} ${currency} : ${url}`)}`,
     },
   };
+};
+
+// ─── WAVE-6 : antifraude en mode dégradé ──────────────────────────
+const FRAUD_DEGRADED_MODES = ['review', 'allow_limited', 'block'];
+const fraudDegradedMode = () => {
+  const m = String(process.env.FRAUD_DEGRADED_MODE || '').trim().toLowerCase();
+  return FRAUD_DEGRADED_MODES.includes(m) ? m : 'allow_limited';
+};
+const fraudDegradedMaxAmount = () => {
+  const n = parseFloat(process.env.FRAUD_DEGRADED_MAX_AMOUNT);
+  return Number.isFinite(n) && n >= 0 ? n : 100000;
+};
+/**
+ * @returns {{ mode, allow:boolean, reason:string|null, maxAmount:number|null }}
+ *   review         : on laisse passer, tagué fraud_degraded (pas de statut pending_review possible ici) + alerte ops
+ *   allow_limited  : autorisé seulement si montant ≤ FRAUD_DEGRADED_MAX_AMOUNT (défaut 100 000), sinon 503 FRAUD_UNAVAILABLE
+ *   block          : tout refusé (503 FRAUD_UNAVAILABLE)
+ */
+const applyFraudDegradedPolicy = ({ amount }) => {
+  const mode = fraudDegradedMode();
+  if (mode === 'block') return { mode, allow: false, reason: 'fraud_unavailable_block', maxAmount: null };
+  if (mode === 'review') return { mode, allow: true, reason: null, maxAmount: null };
+  const max = fraudDegradedMaxAmount();
+  const allow = Number(amount) <= max;
+  return { mode, allow, reason: allow ? null : 'fraud_unavailable_amount_over_limit', maxAmount: max };
+};
+
+// Journal + alerte ops au plus une fois toutes les 10 minutes par instance (tempête d'erreurs)
+const FRAUD_ALERT_INTERVAL_MS = 10 * 60 * 1000;
+let _lastFraudAlert = 0;
+let _fraudSuppressed = 0;
+const _resetFraudAlertClock = () => { _lastFraudAlert = 0; _fraudSuppressed = 0; };
+const logFraudDegraded = ({ txnId, merchantId, amount, type, mode, allowed, err }) => {
+  const now = Date.now();
+  if (now - _lastFraudAlert < FRAUD_ALERT_INTERVAL_MS) { _fraudSuppressed++; return false; }
+  const suppressed = _fraudSuppressed;
+  _lastFraudAlert = now; _fraudSuppressed = 0;
+  logger.error('Fraud engine unavailable — degraded mode', { txnId, merchantId, amount, type, mode, allowed, err, suppressedSince: suppressed });
+  try {
+    const { notifyOps } = require('../cash/cash.service');
+    notifyOps({
+      subject: `Antifraude indisponible — mode dégradé ${mode}`,
+      html: `<p>Le moteur antifraude a levé une erreur : <code>${String(err || '').slice(0, 300)}</code>.</p>
+        <p>Mode dégradé : <b>${mode}</b>${mode === 'allow_limited' ? ` (montant max ${fraudDegradedMaxAmount()})` : ''}. Dernière transaction : ${txnId} (${amount}, ${type}, ${allowed ? 'autorisée' : 'refusée'}).</p>
+        <p>${suppressed} alerte(s) supprimée(s) au cours des 10 dernières minutes. Les transactions concernées portent l'événement <code>FRAUD_DEGRADED</code>.</p>`,
+    }).catch(() => {});
+  } catch (e) { /* notification best effort */ }
+  return true;
 };
 
 // ─── Validation ───────────────────────────────────────────────────
@@ -496,4 +597,6 @@ module.exports = {
   addTransactionEvent,
   TRANSACTION_TYPES,
   PAYMENT_METHODS,
+  // WAVE-6 : antifraude dégradée
+  FRAUD_DEGRADED_MODES, fraudDegradedMode, fraudDegradedMaxAmount, applyFraudDegradedPolicy, _resetFraudAlertClock,
 };
