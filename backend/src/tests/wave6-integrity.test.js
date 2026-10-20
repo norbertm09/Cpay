@@ -79,8 +79,8 @@ const INST = '55555555-5555-4555-8555-555555555555';
 const PASSWORD = 'Aa1!wave6-password';
 const HASH = bcrypt.hashSync(PASSWORD, 4);
 const tok = (sub, role) => signToken({ sub, merchantId: M, type: 'merchant', email: 'owner@test.io', role });
-const owner = () => ({ Authorization: `Bearer ${tok(OWNER, 'owner')}` });
-const cashier = () => ({ Authorization: `Bearer ${tok(CASHIER, 'cashier')}` });
+const owner = () => ({ Authorization: `Bearer ${tok(OWNER, 'owner')}`, 'Idempotency-Key': require('crypto').randomUUID() });
+const cashier = () => ({ Authorization: `Bearer ${tok(CASHIER, 'cashier')}`, 'Idempotency-Key': require('crypto').randomUUID() });
 const admin = (role = 'ops_admin') => ({ Authorization: `Bearer ${signToken({ sub: ADMIN, type: 'admin', role, email: 'admin@test.io' })}` });
 const confirm = { password: PASSWORD };
 const uuid = () => require('crypto').randomUUID();
@@ -287,6 +287,24 @@ describe('1. Résultat opérateur incertain → statut unknown, réservation con
 describe('2. Idempotence durable sur les endpoints monétaires', () => {
   beforeEach(() => reset());
   const KEY = 'wave6-idem-key-0001';
+
+  test('same key: missing confirmation, invalid TOTP, valid TOTP, then replay without a second payout', async () => {
+    const speakeasy = require('speakeasy');
+    const secret = speakeasy.generateSecret({ length: 20 }).base32;
+    await sql('UPDATE merchant_users SET mfa_enabled=TRUE, mfa_secret=$1 WHERE user_id=$2', [secret, OWNER]);
+    const headers = { 'Idempotency-Key': 'durable-totp-intent-001' };
+    expect((await withdraw({ confirm: undefined }, headers)).status).toBe(428);
+    expect((await withdraw({ confirm: { code: 'invalid' } }, headers)).status).toBe(428);
+    expect(await count('SELECT COUNT(*)::int AS n FROM merchant_transfers')).toBe(0);
+    expect(mockSendPayout).not.toHaveBeenCalled();
+    mockSendPayout.mockResolvedValue({ approved: true, reference: 'PAYOUT-ONE' });
+    const r = await withdraw({ confirm: { code: speakeasy.totp({ secret, encoding: 'base32' }) } }, headers);
+    expect(r.status).toBe(201); await flush();
+    const replay = await withdraw({ confirm: { code: 'renewed-code' } }, headers);
+    expect(replay.status).toBe(201); expect(replay.body.transferId).toBe(r.body.transferId);
+    expect(await count('SELECT COUNT(*)::int AS n FROM merchant_transfers')).toBe(1);
+    expect(mockSendPayout).toHaveBeenCalledTimes(1);
+  });
 
   test('5xx après création de l’ordre → clé conservée avec la ressource ; rejeu = ordre d’origine, aucun doublon', async () => {
     mockSendPayout.mockResolvedValue({ approved: false, pending: false, responseCode: '05', declineReason: 'Compte inactif' });

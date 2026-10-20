@@ -391,7 +391,7 @@ describe('7. Double depense /transfer/payout (solde sous verrou, insertion avant
 
   test('solde insuffisant (retraits precedents deduits) → 422, aucun INSERT', async () => {
     txMock({ collected: 10000, withdrawn: 6000, disbursed: 1000 });
-    const res = await request(app).post('/merchant/transfer/payout').set(bearer(merchantToken()))
+    const res = await request(app).post('/merchant/transfer/payout').set(bearer(merchantToken())).set('Idempotency-Key', require('crypto').randomUUID())
       .send({ destType: 'bank', accountId: 'ba1', amount: 5000 });
     expect(res.status).toBe(422);
     expect(res.body.code).toBe('INSUFFICIENT_BALANCE');
@@ -401,7 +401,7 @@ describe('7. Double depense /transfer/payout (solde sous verrou, insertion avant
 
   test('solde suffisant → verrou + INSERT dans la transaction, puis pending_settlement', async () => {
     txMock({ collected: 10000, withdrawn: 2000 });
-    const res = await request(app).post('/merchant/transfer/payout').set(bearer(merchantToken()))
+    const res = await request(app).post('/merchant/transfer/payout').set(bearer(merchantToken())).set('Idempotency-Key', require('crypto').randomUUID())
       .send({ destType: 'bank', accountId: 'ba1', amount: 5000 });
     expect(res.status).toBe(200);
     expect(res.body.transferId).toBe('t-1');

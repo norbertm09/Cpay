@@ -10,7 +10,7 @@ Erreurs : `{ "error", "code", "details?" }`. Montants en unité de la devise (en
 Toute opération qui crée un mouvement exige `Idempotency-Key` (8–128 caractères).
 
 ## 0. Idempotence et résultats incertains (vague 6, audit du 17/10/2026)
-- Même clé + même corps → la réponse d'origine (2xx/4xx) est rejouée ; corps différent → `409 IDEMPOTENCY_CONFLICT` ;
+- Même clé + même corps métier → la réponse d'origine (2xx/4xx) est rejouée ; corps métier différent → `409 IDEMPOTENCY_CONFLICT` ;
   requête identique encore en cours → `409 IDEMPOTENCY_IN_PROGRESS`.
 - **Endpoints monétaires** (`/merchant/cash/withdraw`, `/merchant/cash/transfers`, `/merchant/cash/collect`,
   `/merchant/transfer/payout`, `/merchant/disburse`, `/merchant/collect`) : une erreur serveur (5xx) ou une
@@ -19,6 +19,30 @@ Toute opération qui crée un mouvement exige `Idempotency-Key` (8–128 caract�
   "transferId"|"txnId", "status", … }`), sinon `409 IDEMPOTENCY_RETRY_AFTER_ERROR { "lastError" }` : le client
   vérifie ses opérations (`GET /merchant/cash/transfers`) avant de réémettre avec une **nouvelle** clé. Un retry
   ne crée jamais un second ordre. Les autres endpoints conservent le comportement vague 2 (5xx → clé libérée).
+- **Clé obligatoire** sur ces routes monétaires : absence → `400 IDEMPOTENCY_KEY_REQUIRED`,
+  format hors 8–128 caractères → `400 INVALID_IDEMPOTENCY_KEY`, avant toute exécution métier.
+- Les clés monétaires sont **conservées sans expiration automatique**, y compris après un succès ou une
+  erreur. `IDEMPOTENCY_TTL_HOURS` ne purge que les réponses terminées des autres routes. Une clé déjà
+  purgée avant cette version ne peut pas être restaurée : vérifier l'historique avant toute reprise ancienne.
+- Pour les nouvelles clés monétaires, l'ordre des propriétés JSON ne change pas l'empreinte ; seul le
+  champ racine `confirm` est exclu. Montant, destinataire, devise et tout autre champ métier restent liés
+  à la clé. Un `428 STEP_UP_REQUIRED` sans ressource créée peut être repris avec la **même clé**, les
+  **mêmes paramètres métier** et une confirmation renouvelée ; la reprise est réservée atomiquement.
+  Les anciennes empreintes restent compatibles uniquement avec leur corps JSON exact ; un changement
+  de confirmation sur une ancienne clé peut donc renvoyer `409 IDEMPOTENCY_CONFLICT`. Ne pas contourner
+  ce conflit avec une nouvelle clé sans vérifier les opérations.
+- Le portail marchand conserve dans `sessionStorage` une intention par marchand, utilisateur et action
+  (Encaisser, Retirer, Transférer) : clé, champs métier autorisés et indicateur de réponse connue, **sans
+  mot de passe ni TOTP**. Une erreur réseau, un `5xx`, `409` ou `428` conserve cette intention. Après un
+  rechargement du même onglet, le formulaire restaure les champs et réutilise la clé. Les modifications
+  métier sont bloquées tant que le résultat est incertain. Après une réponse réussie, « Nouvelle opération »
+  permet une autre intention explicite ; un statut `pending` ou `unknown` doit toujours être suivi dans
+  le journal. Les rejets de validation vérifiés avant exécution permettent de corriger les champs.
+  Cette reprise ne couvre pas la fermeture de l'onglet, l'effacement du stockage ou un autre appareil.
+- Déploiement : publier le backend et le portail marchand du même lot ; aucune migration supplémentaire.
+  Les clients des routes concernées doivent déjà envoyer une clé stable par intention (l'app Expo et les
+  méthodes Android existantes transmettent cet en-tête). Tester une reprise `428`, une interruption réseau
+  et la consultation du journal sur la recette. Ne jamais réutiliser une clé pour une opération distincte.
 - Statut `unknown` (retraits) : l'opérateur n'a ni confirmé ni refusé (timeout, réseau, 5xx, réponse illisible).
   La réponse reste `201` avec `"status": "unknown", "outcome": "unknown"` ; les fonds **restent réservés** ; le
   client interroge `GET /merchant/cash/transfers/:id` (statut réel opérateur) — voir §5.

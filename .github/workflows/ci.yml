@@ -69,6 +69,11 @@ jobs:
             echo "::notice::portal/${{ matrix.portal }} : pas de package-lock.json, npm install (non reproductible)"
             npm install --no-audit --no-fund
           fi
+      - name: Tests des intentions de paiement (merchant)
+        if: matrix.portal == 'merchant'
+        run: npm test -- --watchAll=false --runInBand
+        env:
+          CI: 'true'
       - name: Build (react-scripts)
         run: npm run build
         env:
