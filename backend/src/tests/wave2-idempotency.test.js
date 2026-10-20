@@ -128,13 +128,13 @@ describe('purge paresseuse (IDEMPOTENCY_TTL_HOURS)', () => {
     await flush();
     const purges = calls(PURGE);
     expect(purges).toHaveLength(1);
-    expect(purges[0][1]).toEqual(['24']);
+    expect(purges[0][1]).toEqual(['24', expect.arrayContaining(['/cash/withdraw', '/collect'])]);
     expect(_ttlHours()).toBe(24);
   });
   test('TTL configurable', async () => {
     process.env.IDEMPOTENCY_TTL_HOURS = '72';
     await request(app).post('/ok').set('Idempotency-Key', KEY).send({ n: 1 }); await flush();
-    expect(calls(PURGE)[0][1]).toEqual(['72']);
+    expect(calls(PURGE)[0][1]).toEqual(['72', expect.arrayContaining(['/cash/withdraw', '/collect'])]);
     process.env.IDEMPOTENCY_TTL_HOURS = 'abc';
     expect(_ttlHours()).toBe(24);
   });

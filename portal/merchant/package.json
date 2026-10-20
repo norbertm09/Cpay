@@ -14,7 +14,8 @@
   },
   "scripts": {
     "start": "PORT=3002 react-scripts start",
-    "build": "react-scripts build"
+    "build": "react-scripts build",
+    "test": "react-scripts test"
   },
   "proxy": "http://localhost:3000",
   "browserslist": {

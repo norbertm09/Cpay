@@ -19,6 +19,10 @@
  *   - un rejeu (même clé, même corps) renvoie alors l'ORDRE D'ORIGINE (200, IDEMPOTENCY_REPLAY)
  *     s'il existe, sinon 409 IDEMPOTENCY_RETRY_AFTER_ERROR : un retry ne crée jamais un
  *     second ordre.
+ * DURABLE : les clés monétaires sont obligatoires et exclues de la purge TTL.
+ * Leur empreinte trie les objets et exclut seulement confirm ; un challenge 428
+ * sans ressource peut être repris atomiquement sous la même clé et le même corps métier.
+ * Les anciennes empreintes brutes restent rejouables à corps strictement identique.
  *   Les autres endpoints conservent le comportement vague 2 (5xx → clé libérée).
  */
 
@@ -48,8 +52,13 @@ const maybePurge = () => {
   if (now - _lastPurge < PURGE_INTERVAL_MS) return;
   _lastPurge = now;
   query(
-    `DELETE FROM idempotency_keys WHERE created_at < NOW() - ($1 || ' hours')::interval`,
-    [String(ttlHours())]
+    `DELETE FROM idempotency_keys WHERE created_at < NOW() - ($1 || ' hours')::interval
+       AND status_code IS NOT NULL AND in_progress = FALSE
+       AND NOT EXISTS (
+         SELECT 1 FROM unnest($2::text[]) AS money(suffix)
+         WHERE endpoint LIKE 'POST %' AND right(rtrim(endpoint, '/'), length(suffix)) = suffix
+       )`,
+    [String(ttlHours()), MONEY_ENDPOINTS]
   ).catch((err) => logger.warn('Idempotency purge failed', { err: err.message }));
 };
 /** Tests / ops : force la prochaine purge. */
@@ -58,6 +67,21 @@ const _resetPurgeClock = () => { _lastPurge = 0; };
 const hashBody = (body) => crypto.createHash('sha256')
   .update(JSON.stringify(body || {}))
   .digest('hex');
+
+// Authentication is renewable; only business data defines a monetary intention.
+// Keep the old raw hash as a read-only compatibility check for pre-existing keys.
+const canonical = (value) => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') return Object.fromEntries(
+    Object.keys(value).sort().map((key) => [key, canonical(value[key])])
+  );
+  return value;
+};
+const moneyHash = (body) => {
+  const business = { ...(body || {}) };
+  delete business.confirm;
+  return hashBody(canonical(business));
+};
 
 const deleteKey = (merchantId, endpoint, key) => query(
   `DELETE FROM idempotency_keys WHERE merchant_id = $1 AND endpoint = $2 AND key = $3`,
@@ -130,14 +154,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const idempotency = async (req, res, next) => {
   const key = req.headers['idempotency-key'];
-  if (!key) return next();
+  const money = isMoneyEndpoint(req);
+  if (!key) {
+    if (money) return res.status(400).json({ error: 'Idempotency-Key requis', code: 'IDEMPOTENCY_KEY_REQUIRED' });
+    return next();
+  }
   if (typeof key !== 'string' || key.length < 8 || key.length > 128) {
     return res.status(400).json({ error: 'Idempotency-Key invalide', code: 'INVALID_IDEMPOTENCY_KEY' });
   }
 
   const { merchantId, endpoint } = keyContext(req);
-  const requestHash = hashBody(req.body);
-  const money = isMoneyEndpoint(req);
+  const requestHash = money ? moneyHash(req.body) : hashBody(req.body);
+  let reclaimed = false;
 
   maybePurge();
 
@@ -151,7 +179,7 @@ const idempotency = async (req, res, next) => {
 
     if (existing.rows.length) {
       const row = existing.rows[0];
-      if (row.request_hash !== requestHash) {
+      if (row.request_hash !== requestHash && !(money && row.request_hash === hashBody(req.body))) {
         return res.status(409).json({ error: 'Idempotency-Key deja utilisee avec une requete differente', code: 'IDEMPOTENCY_CONFLICT' });
       }
       if (row.status_code === null || row.status_code === undefined) {
@@ -171,10 +199,24 @@ const idempotency = async (req, res, next) => {
         // Ligne réservée, réponse pas encore persistée : requête concurrente en cours
         return res.status(409).json({ error: 'Requete identique en cours de traitement', code: 'IDEMPOTENCY_IN_PROGRESS' });
       }
-      return res.status(row.status_code).json(row.response_body);
+      // A challenge is issued before any order exists. Atomically reclaim it,
+      // retaining the original business hash even while authentication is renewed.
+      if (money && row.status_code === 428 && row.response_body?.code === 'STEP_UP_REQUIRED'
+          && !row.resource_id && !row.resource_type) {
+        const claimed = await query(
+          `UPDATE idempotency_keys SET status_code = NULL, response_body = NULL, in_progress = TRUE
+           WHERE merchant_id = $1 AND endpoint = $2 AND key = $3
+             AND status_code = 428 AND response_body->>'code' = 'STEP_UP_REQUIRED'
+             AND resource_id IS NULL AND resource_type IS NULL RETURNING key`,
+          [merchantId, endpoint, key]);
+        if (!claimed.rows.length) return res.status(409).json({ code: 'IDEMPOTENCY_IN_PROGRESS', error: 'Requete identique en cours de traitement' });
+        reclaimed = true;
+      } else {
+        return res.status(row.status_code).json(row.response_body);
+      }
     }
 
-    await query(
+    if (!reclaimed) await query(
       `INSERT INTO idempotency_keys (merchant_id, endpoint, key, request_hash)
        VALUES ($1, $2, $3, $4)`,
       [merchantId, endpoint, key, requestHash]
@@ -204,12 +246,22 @@ const idempotency = async (req, res, next) => {
           deleteKey(merchantId, endpoint, key);
         }
       } else {
-        query(
+        const saved = query(
           `UPDATE idempotency_keys
            SET status_code = $1, response_body = $2, completed_at = NOW(), in_progress = FALSE
            WHERE merchant_id = $3 AND endpoint = $4 AND key = $5`,
           [status, body, merchantId, endpoint, key]
-        ).catch((err) => logger.error('Idempotency save failed', { err: err.message }));
+        );
+        // Persist a renewable challenge before exposing it to an immediate retry.
+        if (money && status === 428 && body?.code === 'STEP_UP_REQUIRED') {
+          saved.then(() => originalJson(body)).catch((err) => {
+            logger.error('Idempotency save failed', { err: err.message });
+            res.status(503);
+            originalJson({ error: 'Controle idempotence indisponible', code: 'IDEMPOTENCY_UNAVAILABLE' });
+          });
+          return res;
+        }
+        saved.catch((err) => logger.error('Idempotency save failed', { err: err.message }));
       }
     }
     return originalJson(body);

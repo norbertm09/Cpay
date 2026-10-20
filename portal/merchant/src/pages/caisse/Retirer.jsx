@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { cashApi, newIdempotencyKey, isFeatureUnavailable, isStepUp } from '../../services/api';
+import { cashApi, isFeatureUnavailable, isStepUp } from '../../services/api';
+import { useFinancialIntent } from '../../hooks/useFinancialIntent';
 import { useAuth } from '../../hooks/useAuth';
 import { useCashSummary } from '../../hooks/useCashSummary';
 import { useCapabilities } from '../../hooks/useCapabilities';
@@ -16,11 +17,13 @@ import { WalletForm, previewFee } from './shared';
 // Retirer : solde disponible -> wallet Mobile Money enregistré (step-up, limite journalière).
 export const Retirer = () => {
   const { user } = useAuth();
+  const intent = useFinancialIntent(user, 'withdraw');
   const { summary, state: sumState, reload } = useCashSummary();
   const stepUp = useStepUp(user);
   const currency = summary?.currency || user?.currency || 'XAF';
   const cap = useCapabilities(user?.country);
   const dev = devParams();
+  const devDefaults = useRef({ amount: dev?.get('amount') || '' });
   const [wallet, setWallet] = useState(null);
   const [walletState, setWalletState] = useState('loading');
   const [editing, setEditing] = useState(false);
@@ -28,6 +31,9 @@ export const Retirer = () => {
   const [description, setDescription] = useState('');
   const [result, setResult] = useState(null);
   const [blocked, setBlocked] = useState(null);
+  const restore = useCallback((payload) => { setAmount(payload ? String(payload.amount) : ''); setDescription(payload?.description || ''); }, []);
+  useEffect(() => { restore(intent.restored || devDefaults.current); setResult(null); }, [intent.restored, user?.merchantId, user?.userId, restore]);
+  const newOperation = () => { try { intent.startNew(); setResult(null); restore(null); } catch (err) { toast.error(err.message); } };
 
   const loadWallet = useCallback(() => {
     setWalletState('loading');
@@ -48,10 +54,12 @@ export const Retirer = () => {
   const amountError = overBalance ? 'Montant supérieur au solde disponible.' : overLimit ? 'Montant supérieur à votre limite journalière restante.' : belowMin ? `Montant minimum ${fmtMoney(minT, currency)}.` : null;
   // Retrait Mobile Money actif dans le pays ? (registre serveur ; l'opérateur du wallet doit l'être aussi)
   const withdrawClosed = !cap.isOpen('withdraw', 'mobile_money') || (wallet?.operator ? !cap.isOpen('withdraw', 'mobile_money', String(wallet.operator).toUpperCase()) : false);
-  const canSubmit = amt > 0 && !!wallet && !amountError && !withdrawClosed;
+  // A saved order may already have debited the balance. Let its existing key
+  // retrieve the result; execute still rejects any changed business payload.
+  const canSubmit = amt > 0 && (intent.pending || (!!wallet && !amountError && !withdrawClosed));
 
-  const run = useCallback((confirm) => cashApi.withdraw({ amount: amt, description: description || undefined, confirm }, newIdempotencyKey())
-    .then(({ data }) => { setResult(data); setAmount(''); setDescription(''); reload(); toast.success('Retrait lancé'); })
+  const run = useCallback((confirm) => intent.execute({ amount: amt, description: description || undefined, confirm }, cashApi.withdraw)
+    .then(({ data }) => { setResult(data); reload(); toast.success('Retrait lancé'); })
     .catch(err => {
       if (isStepUp(err)) throw err;
       const code = err.response?.data?.code;
@@ -59,7 +67,7 @@ export const Retirer = () => {
       if (isFeatureUnavailable(err)) setBlocked('Retrait indisponible : aucun rail de paiement sortant n’est encore configuré pour l’opérateur de votre wallet. Fonctionnalité en cours d’intégration.');
       else if (code === 'DAILY_LIMIT_EXCEEDED' || code === 'INSUFFICIENT_BALANCE') reload();
       toast.error(errorMessage(err, { currency }));
-    }), [amt, description, currency, reload]);
+    }), [amt, description, currency, reload, intent.execute]);
   const submit = (e) => { e?.preventDefault(); if (!canSubmit) return; setBlocked(null); stepUp.request(run); };
 
   // Outil de développement : ?stepup=1 ouvre la fenêtre de confirmation (captures d'écran).
@@ -71,6 +79,11 @@ export const Retirer = () => {
   return (
     <div className="narrow">
       <PageHeader title="Retirer" subtitle="Transférez votre solde disponible vers votre wallet Mobile Money. Chaque retrait exige une confirmation forte." actions={<Button size="sm" variant="ghost" to="/compte/tarifs" icon="tag">Voir les frais</Button>} />
+      {(intent.pending || intent.error) && <Notice tone={intent.error ? 'error' : 'info'} className="mb-4">
+        {intent.error || 'Opération enregistrée dans cet onglet. Réessayez avec les mêmes paramètres pour retrouver son résultat.'}
+        {intent.pending && <Button size="sm" onClick={() => restore(intent.payload)}>Reprendre les paramètres</Button>}
+        {intent.canStartNew && <Button size="sm" onClick={newOperation}>Nouvelle opération</Button>}
+      </Notice>}
 
       {result && (
         <Card className="mb-4">
@@ -88,7 +101,7 @@ export const Retirer = () => {
           </div>
           <div className="form-actions">
             <Button icon="print" onClick={() => printDoc('Retrait', [['Référence', result.reference], ['Date', fmtDateTime(new Date())], ['Montant', fmtMoney(result.amount, currency)], ['Frais', fmtMoney(result.fee, currency)], ['Net', fmtMoney(result.net, currency)], ['Wallet', `${opLabel(result.wallet?.operator)} ${result.wallet?.phone || ''}`], ['Statut', statusLabel(result.status)]])}>Imprimer</Button>
-            <Button variant="primary" icon="plus" onClick={() => setResult(null)}>Nouveau retrait</Button>
+            <Button variant="primary" icon="plus" onClick={newOperation}>Nouveau retrait</Button>
           </div>
         </Card>
       )}

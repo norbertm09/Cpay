@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { cashApi, accountApi, newIdempotencyKey, isFeatureUnavailable, isStepUp } from '../../services/api';
+import { cashApi, accountApi, isFeatureUnavailable, isStepUp } from '../../services/api';
+import { useFinancialIntent } from '../../hooks/useFinancialIntent';
 import { useAuth } from '../../hooks/useAuth';
 import { useCashSummary } from '../../hooks/useCashSummary';
 import { useCapabilities } from '../../hooks/useCapabilities';
@@ -19,6 +20,7 @@ const CANCELLABLE = ['awaiting_funds', 'pending_manual'];
 // (ordre d'approvisionnement référencé, aucune confirmation forte).
 export const Transferer = () => {
   const { user } = useAuth();
+  const intent = useFinancialIntent(user, 'transfer');
   const { summary, state: sumState, reload } = useCashSummary();
   const stepUp = useStepUp(user);
   const currency = summary?.currency || user?.currency || 'XAF';
@@ -34,6 +36,12 @@ export const Transferer = () => {
   const [detail, setDetail] = useState(null);
   const [toCancel, setToCancel] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const restore = useCallback((payload) => {
+    setDirection(payload?.direction || 'wallet_to_bank'); setAmount(payload ? String(payload.amount) : '');
+    setDescription(payload?.description || ''); setAccountId(payload?.accountId || '');
+  }, []);
+  useEffect(() => { restore(intent.restored); setResult(null); }, [intent.restored, user?.merchantId, user?.userId, restore]);
+  const newOperation = () => { try { intent.startNew(); setResult(null); restore(null); } catch (err) { toast.error(err.message); } };
   const accounts = useAsync(() => accountApi.bankAccounts(), []);
   const transfers = useAsync(() => cashApi.listTransfers({ limit: 20, offset: 0 }), []);
   const verified = (accounts.data?.data || []).filter(a => a.status === 'verified');
@@ -47,18 +55,18 @@ export const Transferer = () => {
   const overBalance = direction === 'wallet_to_bank' && available != null && amt > Number(available);
   const amountError = belowMin ? `Montant minimum ${fmtMoney(minT, currency)}.` : overBalance ? 'Montant supérieur au solde disponible.' : null;
   const directionClosed = !cap.isOpen('transfer', direction);
-  const canSubmit = amt > 0 && !loading && !amountError && !directionClosed && (direction === 'bank_to_wallet' || !!account);
+  const canSubmit = amt > 0 && !loading && (intent.pending || (!amountError && !directionClosed && (direction === 'bank_to_wallet' || !!account)));
   const fee = direction === 'wallet_to_bank' && amt > 0 ? previewFee(summary, amt, 'transfer') : null;
 
   const doCreate = useCallback(async (confirm) => {
     const body = { direction, amount: amt, description: description || undefined };
     if (direction === 'wallet_to_bank') body.accountId = accountId;
     if (confirm) body.confirm = confirm;
-    const { data } = await cashApi.createTransfer(body, newIdempotencyKey());
-    setResult(data); setAmount(''); setDescription(''); setFundingUnavailable(false);
+    const { data } = await intent.execute(body, cashApi.createTransfer);
+    setResult(data); setFundingUnavailable(false);
     reload(); transfers.reload();
     toast.success(direction === 'bank_to_wallet' ? 'Ordre d’approvisionnement créé' : 'Transfert lancé');
-  }, [direction, amt, description, accountId, reload, transfers]);
+  }, [direction, amt, description, accountId, reload, transfers, intent.execute]);
 
   const submit = async (e) => {
     e?.preventDefault();
@@ -73,7 +81,7 @@ export const Transferer = () => {
     catch (err) {
       if (isStepUp(err)) {
         stepUp.request(async (confirm) => { try { await doCreate(confirm); } catch (e2) { if (isStepUp(e2)) throw e2; if (e2.response?.data?.code === 'FUNDING_UNAVAILABLE') setFundingUnavailable(true); else toast.error(errorMessage(e2, { currency })); } }, err.response?.data?.methods);
-      } else if (err.response?.data?.code === 'FUNDING_UNAVAILABLE' || err.response?.status === 409) setFundingUnavailable(true);
+      } else if (err.response?.data?.code === 'FUNDING_UNAVAILABLE') setFundingUnavailable(true);
       else toast.error(errorMessage(err, { currency }));
     } finally { setLoading(false); }
   };
@@ -97,6 +105,11 @@ export const Transferer = () => {
   return (
     <div className="medium">
       <PageHeader title="Transférer" subtitle="Entre votre solde C-Pay et vos comptes bancaires : virement vers la banque ou approvisionnement de votre solde." />
+      {(intent.pending || intent.error) && <Notice tone={intent.error ? 'error' : 'info'} className="mb-4">
+        {intent.error || 'Opération enregistrée dans cet onglet. Réessayez avec les mêmes paramètres pour retrouver son résultat.'}
+        {intent.pending && <Button size="sm" onClick={() => restore(intent.payload)}>Reprendre les paramètres</Button>}
+        {intent.canStartNew && <Button size="sm" onClick={newOperation}>Nouvelle opération</Button>}
+      </Notice>}
 
       {result && (
         <Card className="mb-4">
@@ -105,7 +118,7 @@ export const Transferer = () => {
           {result.status === 'awaiting_funds' ? <FundingInstructions transfer={result} currency={currency} /> : (
             <KVList boxed rows={[['Montant', fmtMoney(result.amount, currency)], result.fee != null && ['Frais', fmtMoney(result.fee, currency)], result.net != null && ['Net viré', fmtMoney(result.net, currency), { tone: 'success' }], result.bankAccount && ['Compte', `${result.bankAccount.bankName || ''} ${result.bankAccount.accountMasked || ''}`]]} />
           )}
-          <Button variant="primary" block className="mt-4" icon="plus" onClick={() => setResult(null)}>Nouveau transfert</Button>
+          <Button variant="primary" block className="mt-4" icon="plus" onClick={newOperation}>Nouveau transfert</Button>
         </Card>
       )}
 

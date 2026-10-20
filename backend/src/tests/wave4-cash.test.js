@@ -67,7 +67,7 @@ const TOTP_SECRET = speakeasy.generateSecret({ length: 20 }).base32;
 
 const merchantToken = (sub = 'user-1', role = 'owner') => signToken({ sub, merchantId: MERCHANT_ID, type: 'merchant', email: 'm@test.io', role }); // WAVE-6 : rôle owner requis pour PUT /wallet
 const adminToken = (role = 'ops_admin') => signToken({ sub: ADMIN_ID, type: 'admin', role, email: 'admin@test.io' });
-const bearer = (t) => ({ Authorization: `Bearer ${t}` });
+const bearer = (t) => ({ Authorization: `Bearer ${t}`, 'Idempotency-Key': require('crypto').randomUUID() });
 const rows = (r) => ({ rows: r, rowCount: r.length });
 const calls = (mock, re) => mock.mock.calls.filter(([s]) => re.test(s));
 

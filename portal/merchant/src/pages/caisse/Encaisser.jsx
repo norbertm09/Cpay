@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
-import { cashApi, newIdempotencyKey, isFeatureUnavailable, isCapabilityBlocked } from '../../services/api';
+import { cashApi, isFeatureUnavailable, isCapabilityBlocked } from '../../services/api';
+import { useFinancialIntent } from '../../hooks/useFinancialIntent';
 import { useAuth } from '../../hooks/useAuth';
 import { useCashSummary } from '../../hooks/useCashSummary';
 import { useCapabilities } from '../../hooks/useCapabilities';
@@ -20,6 +21,7 @@ const POLL_EVERY_MS = 3000, POLL_MAX_MS = 90000;
 // statut 3 s / 90 s) ou carte (lien de paiement hébergé + QR).
 export const Encaisser = () => {
   const { user } = useAuth();
+  const intent = useFinancialIntent(user, 'collect');
   const { summary, state: sumState } = useCashSummary();
   const currency = summary?.currency || user?.currency || 'XAF';
   const cardAcceptance = summary?.profile?.cardAcceptance;
@@ -28,6 +30,7 @@ export const Encaisser = () => {
   const mmOpen = cap.isOpen('collect', 'mobile_money');
   const cardOpen = cap.isOpen('collect', 'card');
   const dev = devParams();
+  const devDefaults = useRef({ amount: dev?.get('amount') || '', method: dev?.get('method') || 'mobile_money', customerPhone: dev?.get('phone') || '' });
   const [method, setMethod] = useState(dev?.get('method') || 'mobile_money');
   const [amount, setAmount] = useState(dev?.get('amount') || '');
   const [phone, setPhone] = useState(dev?.get('phone') || '');
@@ -39,9 +42,15 @@ export const Encaisser = () => {
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(POLL_MAX_MS / 1000);
   const [errors, setErrors] = useState({});
+  const restore = useCallback((payload) => {
+    setMethod(payload?.method || 'mobile_money'); setAmount(payload ? String(payload.amount) : '');
+    setPhone(payload?.customerPhone || ''); setDescription(payload?.description || '');
+    setReference(payload?.reference || ''); setOperator(payload?.operator || '');
+  }, []);
+  useEffect(() => { restore(intent.restored || devDefaults.current); setResult(null); setPhase('form'); }, [intent.restored, user?.merchantId, user?.userId, restore]);
   const pollRef = useRef(null);
   const { detect, detecting } = usePhoneDetection(phone, method === 'mobile_money');
-  useEffect(() => { setOperator(''); }, [detect]);
+  useEffect(() => { if (!intent.pending) setOperator(''); }, [detect, intent.pending]);
 
   // Avertissement avant de quitter la page pendant une attente de paiement.
   useEffect(() => {
@@ -81,7 +90,7 @@ export const Encaisser = () => {
   const effectiveOperator = operator ? operator.toUpperCase() : detect?.operator;
   const operatorClosed = method === 'mobile_money' && detectedOk && !!effectiveOperator && !cap.isOpen('collect', 'mobile_money', effectiveOperator);
   const methodClosed = method === 'mobile_money' ? !mmOpen : !cardOpen;
-  const canSubmit = amt > 0 && !loading && !methodClosed && !operatorClosed && (method === 'card' || (phoneOk && !currencyMismatch && !detecting));
+  const canSubmit = amt > 0 && !loading && (intent.pending || (!methodClosed && !operatorClosed && (method === 'card' || (phoneOk && !currencyMismatch && !detecting))));
 
   const submit = async (e) => {
     e?.preventDefault();
@@ -93,7 +102,7 @@ export const Encaisser = () => {
     const body = { amount: amt, currency, method, description: description || undefined, reference: reference || undefined };
     if (method === 'mobile_money') { body.customerPhone = (detect?.phone || phone).trim(); if (operator) body.operator = operator; }
     try {
-      const { data } = await cashApi.collect(body, newIdempotencyKey());
+      const { data } = await intent.execute(body, cashApi.collect);
       if (method === 'card') { setResult(data); setPhase('card'); }
       else { setResult({ ...data, customerPhone: body.customerPhone }); setPhase('pending'); }
     } catch (err) {
@@ -101,7 +110,7 @@ export const Encaisser = () => {
       else toast.error(errorMessage(err, { currency }));
     } finally { setLoading(false); }
   };
-  const reset = () => { setPhase('form'); setResult(null); setAmount(''); setPhone(''); setOperator(''); setDescription(''); setReference(''); setErrors({}); };
+  const reset = () => { try { intent.startNew(); setPhase('form'); setResult(null); restore(null); setErrors({}); } catch (err) { toast.error(err.message); } };
   const receiptRows = (r) => [['Référence', r.reference || r.txnId], ['Date', fmtDateTime(r.finalizedAt || r.createdAt || new Date())], ['Montant', fmtMoney(r.amount, r.currency || currency)], ['Frais', fmtMoney(r.fee, r.currency || currency)], ['Net', fmtMoney(r.net, r.currency || currency)], ['Opérateur', opLabel(r.operator, r.operatorLabel)], ['Client', r.customerPhone ? fmtPhone(r.customerPhone) : null], ['Statut', statusLabel(r.status)]];
   const cur = result?.currency || currency;
 
@@ -130,6 +139,11 @@ export const Encaisser = () => {
   return (
     <div className="narrow">
       <PageHeader title="Encaisser" subtitle="Encaissez une vente par Mobile Money ou par carte. Le client confirme sur son téléphone." actions={<Button size="sm" variant="ghost" to="/compte/tarifs" icon="tag">Voir les frais</Button>} />
+      {(intent.pending || intent.error) && <Notice tone={intent.error ? 'error' : 'info'} className="mb-4">
+        {intent.error || 'Opération enregistrée dans cet onglet. Réessayez avec les mêmes paramètres pour retrouver son résultat.'}
+        {intent.pending && <Button size="sm" onClick={() => { restore(intent.payload); setPhase('form'); }}>Reprendre les paramètres</Button>}
+        {intent.canStartNew && <Button size="sm" onClick={reset}>Nouvelle opération</Button>}
+      </Notice>}
       {sumState === 'unavailable' && <Notice tone="warn" className="mb-4">Résumé de caisse indisponible (en cours d’intégration). L’encaissement reste possible.</Notice>}
 
       {phase === 'form' && (
@@ -200,7 +214,7 @@ export const Encaisser = () => {
             <p className="small text-2">{result.message || 'Le client n’a pas validé le paiement. Vous pouvez réessayer.'}</p>
             <p className="xs muted mono mt-2">Réf. {result.txnId}</p>
           </div>
-          <Button variant="primary" size="lg" block onClick={() => { setPhase('form'); setResult(null); }}>Réessayer</Button>
+          <Button variant="primary" size="lg" block onClick={reset}>Nouvel encaissement</Button>
         </Card>
       )}
 
@@ -236,7 +250,7 @@ export const Encaisser = () => {
       {phase === 'card_unavailable' && (
         <Card>
           <Notice tone="neutral" className="mb-4"><strong>Paiement par carte non disponible dans votre pays pour le moment.</strong><br />Aucune passerelle carte n’est encore configurée pour votre pays (Tap-to-Phone : bientôt, après certification). Encaissez par Mobile Money.</Notice>
-          <Button variant="primary" size="lg" block onClick={() => { setPhase('form'); setMethod('mobile_money'); }}>Encaisser par Mobile Money</Button>
+          <Button variant="primary" size="lg" block onClick={() => { setPhase('form'); if (!intent.pending) setMethod('mobile_money'); }}>Revenir au formulaire</Button>
         </Card>
       )}
     </div>
