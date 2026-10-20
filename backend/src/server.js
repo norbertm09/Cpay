@@ -119,6 +119,7 @@ const loadPendingLink = async (shortId) => {
 const capability = require('./middleware/capability');
 const capabilityRoutes = require('./routes/capabilities.routes');
 const { adminAuth } = require('./middleware/auth');
+capability.logStartupMode(); // CAPABILITY_ENFORCE = enforce | report | off (avertissement si report / off)
 app.post('/api/v1/pay/:shortId/card', capability.payCardCapabilityGuard);
 app.post('/api/v1/pay/:shortId/card', publicPayLimiter, asyncHandler(async (req, res) => {
   if (req.body?.cardNum || req.body?.pan || req.body?.cvv) {

@@ -178,6 +178,83 @@ describe('payCardCapabilityGuard — page publique', () => {
   });
 });
 
+// ─── CAPABILITY_ENFORCE : enforce (défaut) | report | off ──────────
+describe('CAPABILITY_ENFORCE — interrupteur global de déploiement', () => {
+  const logger = require('../config/logger');
+  afterEach(() => { delete process.env.CAPABILITY_ENFORCE; capability.resetReportOnly(); });
+
+  test('enforce (défaut, valeur inconnue → enforce) : refus 403 / 422', async () => {
+    expect(capability.enforcementMode()).toBe('enforce');
+    process.env.CAPABILITY_ENFORCE = 'bogus';
+    expect(capability.enforcementMode()).toBe('enforce');
+    merchantCountry = 'TD';
+    expect((await request(mini).post('/merchant/cash/collect').set(bearer(merchantToken())).send({ method: 'mobile_money' })).status).toBe(403);
+    expect((await request(mini).post('/merchant/auth/register').send({ phone: '+23566123456' })).status).toBe(422);
+    expect(capability.getReportOnlyState()).toEqual({ since: null, count: 0, refusals: [] });
+  });
+
+  test('report : tout passe, journal « would refuse » structuré, compteur et 50 derniers refus', async () => {
+    process.env.CAPABILITY_ENFORCE = 'report';
+    logger.warn.mockClear();
+    merchantCountry = 'TD';
+    const c = await request(mini).post('/merchant/cash/collect').set(bearer(merchantToken())).send({ method: 'mobile_money', operator: 'airtel' });
+    expect(c.status).toBe(200); expect(c.body.reached).toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith('capability: would refuse', expect.objectContaining({ guard: 'cash', country: 'TD', operation: 'collect', method: 'mobile_money', operator: 'AIRTEL_MONEY', status: 'planned', merchantId: MERCHANT_ID, path: '/merchant/cash/collect' }));
+    expect((await request(mini).post('/merchant/disburse').set(bearer(merchantToken())).send({ method: 'airtel_money', amount: 1 })).status).toBe(200);
+    expect((await request(mini).post('/merchant/auth/register').send({ phone: '+23566123456' })).status).toBe(200);
+    expect(logger.warn).toHaveBeenCalledWith('capability: would refuse', expect.objectContaining({ guard: 'register', country: 'TD', operation: 'register', status: 'planned', merchantId: null }));
+    linkCountry = 'GH';
+    expect((await request(mini).post('/pay/ABC123/card').send({})).status).toBe(200);
+    expect(logger.warn).toHaveBeenCalledWith('capability: would refuse', expect.objectContaining({ guard: 'pay_card', country: 'GH', method: 'card', shortId: 'ABC123' }));
+    // les requêtes autorisées ne sont pas comptées
+    merchantCountry = 'CM'; linkCountry = 'CM';
+    expect((await request(mini).post('/merchant/cash/collect').set(bearer(merchantToken())).send({ method: 'mobile_money' })).status).toBe(200);
+    const st = capability.getReportOnlyState();
+    expect(st.count).toBe(4); expect(st.since).toEqual(expect.any(String)); expect(st.refusals).toHaveLength(4);
+    expect(st.refusals[0]).toMatchObject({ at: expect.any(String), guard: 'cash', country: 'TD' });
+    expect(st.refusals.map((r) => r.guard)).toEqual(['cash', 'cash', 'register', 'pay_card']);
+    // plafond : 50 derniers refus conservés, compteur total exact
+    merchantCountry = 'TD';
+    for (let i = 0; i < 55; i++) await request(mini).post('/merchant/cash/withdraw').set(bearer(merchantToken())).send({ amount: 1 });
+    const after = capability.getReportOnlyState();
+    expect(after.count).toBe(59); expect(after.refusals).toHaveLength(50); expect(after.refusals[0].guard).toBe('cash'); expect(after.refusals[0].operation).toBe('withdraw');
+    expect(logger.warn).not.toHaveBeenCalledWith('capability: refused', expect.anything());
+  });
+
+  test('off : gardes désactivées (aucune lecture base, aucun journal), avertissement au démarrage', async () => {
+    process.env.CAPABILITY_ENFORCE = 'off';
+    logger.warn.mockClear(); mockQuery.mockClear();
+    merchantCountry = 'TD';
+    expect((await request(mini).post('/merchant/cash/collect').set(bearer(merchantToken())).send({ method: 'mobile_money' })).status).toBe(200);
+    expect((await request(mini).post('/merchant/auth/register').send({ phone: '+23566123456' })).status).toBe(200);
+    linkCountry = 'GH';
+    expect((await request(mini).post('/pay/ABC123/card').send({})).status).toBe(200);
+    expect(mockQuery.mock.calls.filter(([q]) => /FROM merchants WHERE merchant_id|FROM pay_links pl JOIN/.test(q))).toHaveLength(0);
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(capability.getReportOnlyState().count).toBe(0);
+    // avertissement de démarrage (une seule fois par processus)
+    jest.isolateModules(() => {
+      const fresh = require('../middleware/capability');
+      fresh.logStartupMode(); fresh.logStartupMode();
+    });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/CAPABILITY_ENFORCE=off/));
+  });
+
+  test('admin : enforcement et reportOnly exposés par GET /api/v1/admin/capabilities', async () => {
+    const app = require('../server');
+    process.env.CAPABILITY_ENFORCE = 'report';
+    merchantCountry = 'CF';
+    expect((await request(app).post('/api/v1/merchant/cash/withdraw').set(bearer(merchantToken())).send({ amount: 5000 })).status).not.toBe(403);
+    const r = await request(app).get('/api/v1/admin/capabilities').set(bearer(adminToken()));
+    expect(r.status).toBe(200);
+    expect(r.body.enforcement).toBe('report'); expect(r.body.env.enforce).toBe('report');
+    expect(r.body.reportOnly).toMatchObject({ since: expect.any(String), count: 1, refusals: [expect.objectContaining({ guard: 'cash', country: 'CF', operation: 'withdraw', status: 'planned', path: '/api/v1/merchant/cash/withdraw' })] });
+    process.env.CAPABILITY_ENFORCE = 'enforce';
+    expect((await request(app).get('/api/v1/admin/capabilities').set(bearer(adminToken()))).body.enforcement).toBe('enforce');
+  });
+});
+
 // ─── Montage réel dans server.js ───────────────────────────────────
 describe('server.js — montage', () => {
   let app;
@@ -214,7 +291,8 @@ describe('server.js — montage', () => {
     expect(r.body.countries.CM.operations.collect.mobile_money.operators[0].requires).toContain('MTN_CM_API_KEY');
     expect(r.body.countries.CM.operations.collect.gimac.requires).toEqual(expect.arrayContaining(['GIMAC_MERCHANT_ID']));
     expect(r.body.countries.SN.legacy).toBe(true);
-    expect(r.body.env).toMatchObject({ legacyAllowed: true, registrationGuard: true, pilotFlags: [] });
+    expect(r.body.env).toMatchObject({ legacyAllowed: true, registrationGuard: true, pilotFlags: [], enforce: 'enforce' });
+    expect(r.body.enforcement).toBe('enforce'); expect(r.body.reportOnly).toEqual({ since: null, count: 0, refusals: [] });
   });
   test('POST /api/v1/merchant/cash/collect pour un marchand CF → 403 avant la route caisse', async () => {
     merchantCountry = 'CF';

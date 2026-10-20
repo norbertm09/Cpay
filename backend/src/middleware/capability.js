@@ -16,6 +16,44 @@ const logger = require('../config/logger');
 
 const registrationGuardEnabled = () => String(process.env.CAPABILITY_REGISTRATION_GUARD || 'on').toLowerCase() !== 'off';
 
+// ─── Interrupteur global de déploiement : CAPABILITY_ENFORCE = enforce (défaut) | report | off ───
+// report : les gardes laissent passer, journalisent « capability: would refuse » et comptent (admin) ;
+// off    : gardes désactivées (avertissement au démarrage). Lu à chaque requête (bascule sans redéploiement).
+const ENFORCE_MODES = ['enforce', 'report', 'off'];
+const enforcementMode = () => {
+  const v = String(process.env.CAPABILITY_ENFORCE || 'enforce').trim().toLowerCase();
+  return ENFORCE_MODES.includes(v) ? v : 'enforce';
+};
+const REPORT_MAX = 50;
+const reportOnly = { since: null, count: 0, refusals: [] };
+const recordWouldRefuse = (entry) => {
+  if (!reportOnly.since) reportOnly.since = new Date().toISOString();
+  reportOnly.count += 1;
+  reportOnly.refusals.push({ at: new Date().toISOString(), ...entry });
+  if (reportOnly.refusals.length > REPORT_MAX) reportOnly.refusals.splice(0, reportOnly.refusals.length - REPORT_MAX);
+  logger.warn('capability: would refuse', entry);
+};
+const getReportOnlyState = () => ({ since: reportOnly.since, count: reportOnly.count, refusals: [...reportOnly.refusals] });
+const resetReportOnly = () => { reportOnly.since = null; reportOnly.count = 0; reportOnly.refusals = []; };
+let _startupLogged = false;
+const logStartupMode = () => {
+  if (_startupLogged) return;
+  _startupLogged = true;
+  const mode = enforcementMode();
+  if (mode === 'off') logger.warn('capability: CAPABILITY_ENFORCE=off — gardes de capacités DÉSACTIVÉES (aucun contrôle pays / moyen / opération)');
+  else if (mode === 'report') logger.warn('capability: CAPABILITY_ENFORCE=report — gardes en observation seule (aucun refus, journal « would refuse »)');
+  else logger.info('capability: guards enforced (CAPABILITY_ENFORCE=enforce)');
+};
+
+/**
+ * Décision commune : refuse (403/422 selon `send`), ou laisse passer en mode report (journal + compteur).
+ * @returns {boolean} true si la réponse a été envoyée
+ */
+const refuseOrReport = ({ res, next, mode, entry, send }) => {
+  if (mode === 'report') { recordWouldRefuse(entry); next(); return false; }
+  send(); return true;
+};
+
 const sendCapabilityError = (res, err) => res.status(err.statusCode || 403).json(err.toJSON ? err.toJSON() : { error: err.message, code: 'CAPABILITY_NOT_ACTIVE' });
 
 /** Pays (et devise) du marchand connecté, mis en cache sur la requête. */
@@ -59,6 +97,8 @@ const mapLegacyRequest = (req) => {
 const guardWith = (mapper) => async (req, res, next) => {
   try {
     if (req.method !== 'POST') return next();
+    const mode = enforcementMode();
+    if (mode === 'off') return next();
     const wanted = mapper(req);
     if (!wanted) return next();
     const m = await merchantCountry(req);
@@ -66,9 +106,9 @@ const guardWith = (mapper) => async (req, res, next) => {
     await registry.loadFacts().catch(() => null);
     const r = registry.isAllowed({ country: m.country, ...wanted });
     if (r.allowed) return next();
-    logger.warn('capability: refused', { merchantId: m.merchantId, country: m.country, ...wanted, status: r.status, path: req.originalUrl });
+    const entry = { guard: 'cash', country: r.country, operation: r.operation, method: r.method, operator: r.operator || null, status: r.status, merchantId: m.merchantId, path: req.originalUrl };
     const err = new registry.CapabilityError({ country: r.country, operation: r.operation, method: r.method, status: r.status, message: r.message, operator: r.operator });
-    return sendCapabilityError(res, err);
+    return refuseOrReport({ res, next, mode, entry, send: () => { logger.warn('capability: refused', entry); sendCapabilityError(res, err); } });
   } catch (err) { return next(err); }
 };
 
@@ -79,6 +119,8 @@ const legacyCapabilityGuard = guardWith(mapLegacyRequest);
 const registerCapabilityGuard = async (req, res, next) => {
   try {
     if (req.method !== 'POST' || !registrationGuardEnabled()) return next();
+    const mode = enforcementMode();
+    if (mode === 'off') return next();
     const phone = req.body && req.body.phone;
     if (!phone) return next();                                                  // 422 par la route
     const { detectFromPhone } = require('../services/detection/detection.engine');
@@ -93,8 +135,11 @@ const registerCapabilityGuard = async (req, res, next) => {
       ? `${name} est hors du périmètre de lancement C-Pay (CEMAC et RD Congo) : inscription impossible.`
       : c ? `${name} : aucun moyen d’encaissement n’est encore activé, l’inscription ouvrira après activation des partenaires.`
           : `Pays ${r.country} hors du périmètre C-Pay.`;
-    logger.warn('capability: registration refused', { country: r.country, status: r.status });
-    return res.status(422).json({ error: message, code: 'COUNTRY_NOT_OPEN', country: r.country, status: r.status, launchCountries: registry.LAUNCH_COUNTRIES });
+    const entry = { guard: 'register', country: r.country, operation: 'register', method: 'collect', operator: null, status: r.status, merchantId: null, path: req.originalUrl };
+    return refuseOrReport({ res, next, mode, entry, send: () => {
+      logger.warn('capability: registration refused', entry);
+      res.status(422).json({ error: message, code: 'COUNTRY_NOT_OPEN', country: r.country, status: r.status, launchCountries: registry.LAUNCH_COUNTRIES });
+    } });
   } catch (err) { return next(err); }
 };
 
@@ -107,6 +152,8 @@ const registerCapabilityGuard = async (req, res, next) => {
 const payCardCapabilityGuard = async (req, res, next) => {
   try {
     if (req.method !== 'POST') return next();
+    const mode = enforcementMode();
+    if (mode === 'off') return next();
     const shortId = req.params && req.params.shortId;
     if (!shortId) return next();
     const { query } = require('../config/database');
@@ -116,10 +163,13 @@ const payCardCapabilityGuard = async (req, res, next) => {
     const a = registry.isAllowed({ country: row.country, operation: 'collect', method: 'card' });
     const structural = !a.cell || a.status === registry.STATUS.PLANNED || a.legacy;
     if (a.allowed || !structural) return next();
-    logger.warn('capability: public card payment refused', { shortId, country: a.country, status: a.status });
+    const entry = { guard: 'pay_card', country: a.country, operation: 'collect', method: 'card', operator: null, status: a.status, merchantId: null, path: req.originalUrl, shortId };
     const err = new registry.CapabilityError({ country: a.country, operation: 'collect', method: 'card', status: a.status, message: a.message });
-    return sendCapabilityError(res, err);
+    return refuseOrReport({ res, next, mode, entry, send: () => { logger.warn('capability: public card payment refused', entry); sendCapabilityError(res, err); } });
   } catch (err) { return next(err); }
 };
 
-module.exports = { capabilityGuard, legacyCapabilityGuard, registerCapabilityGuard, payCardCapabilityGuard, merchantCountry, mapCashRequest, mapLegacyRequest };
+module.exports = {
+  capabilityGuard, legacyCapabilityGuard, registerCapabilityGuard, payCardCapabilityGuard, merchantCountry, mapCashRequest, mapLegacyRequest,
+  enforcementMode, ENFORCE_MODES, getReportOnlyState, resetReportOnly, logStartupMode,
+};

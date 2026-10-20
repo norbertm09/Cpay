@@ -90,6 +90,32 @@ Les requêtes `GET`, les corps invalides (la route répond `422`) et les marchan
 traversent la garde ; une erreur base remonte au gestionnaire d'erreurs (`500`), jamais de passage silencieux.
 Le `merchantAuth` au niveau de la route reste en place (double appel idempotent).
 
+### 2.1 Interrupteur global et procédure de déploiement — `CAPABILITY_ENFORCE`
+
+Les fusions sur `main` déploient automatiquement en production : une erreur de calcul du registre bloquerait de vrais
+marchands. Toutes les gardes (caisse, routes historiques, inscription, page carte) lisent `CAPABILITY_ENFORCE` à chaque
+requête (bascule par simple changement d'environnement + redémarrage, sans redéploiement de code) :
+
+| Valeur | Comportement |
+|---|---|
+| `enforce` (défaut, et toute valeur inconnue) | refus `403 CAPABILITY_NOT_ACTIVE` / `422 COUNTRY_NOT_OPEN`, journal `capability: refused` |
+| `report` | **tout passe** ; chaque refus évité est journalisé en avertissement structuré `capability: would refuse { guard, country, operation, method, operator, status, merchantId, path }` et compté en mémoire : `GET /api/v1/admin/capabilities` → `enforcement:'report'`, `reportOnly:{ since, count, refusals:[…50 derniers] }` (remis à zéro au redémarrage) |
+| `off` | gardes désactivées (aucune lecture base, aucun journal), avertissement `CAPABILITY_ENFORCE=off` au démarrage — retour arrière d'urgence uniquement |
+
+Procédure de mise en production du registre :
+
+1. Déployer avec `CAPABILITY_ENFORCE=report` dans `backend/.env` ; vérifier au démarrage le journal
+   `capability: CAPABILITY_ENFORCE=report — gardes en observation seule`.
+2. Pendant **48 h**, suivre le portail admin, page « Capacités pays » (bloc « Mode d'application ») et le journal
+   `capability: would refuse` : chaque entrée est une requête réelle que le mode `enforce` aurait refusée. Pour chacune,
+   trancher : refus légitime (moyen non activé) ou cellule mal calculée (clé présente sous un autre nom, passerelle pays
+   absente de `country_payment_defaults`, opérateur manquant dans le registre…) → corriger la configuration ou le registre
+   avant d'aller plus loin. `count` = 0 ou uniquement des refus légitimes pendant 48 h = feu vert.
+3. Passer `CAPABILITY_ENFORCE=enforce` (ou retirer la variable), redémarrer, vérifier `enforcement:'enforce'` sur
+   `GET /api/v1/admin/capabilities` et, sur un compte de test d'un pays `planned`, le `403 CAPABILITY_NOT_ACTIVE`.
+4. En cas d'incident après bascule : `CAPABILITY_ENFORCE=report` rétablit immédiatement le passage (le journal continue
+   d'alimenter l'analyse) ; `off` n'est à utiliser que si les gardes elles-mêmes posent problème.
+
 Endpoints :
 
 - `GET /api/v1/public/capabilities` — sans authentification, `Cache-Control: public, max-age=60`, cache serveur 60 s :
@@ -98,7 +124,8 @@ Endpoints :
   transfer:{ wallet_to_bank:{ status }, bank_to_wallet:{ status }, gimac:{ status } } } }], statuses, generatedAt }`.
   Sept pays, aucun nom de variable ni prérequis exposé.
 - `GET /api/v1/admin/capabilities` (`adminAuth`, tous rôles) — matrice complète (`requires`, `note`, `implemented`,
-  `configured`, `since`, `legacy`), `pilots`, `env.{legacyAllowed, registrationGuard, pilotFlags}`, `facts` ;
+  `configured`, `since`, `legacy`), `pilots`, `enforcement`, `reportOnly` (§2.1), `env.{enforce, legacyAllowed,
+  registrationGuard, pilotFlags}`, `facts` ;
   `?refresh=1` ou `POST /api/v1/admin/capabilities/refresh` recharge les faits base.
 
 ## 3. Détection et GIMAC
@@ -164,6 +191,7 @@ Déploiement (OVH Cloud Databases) :
 
 | Variable | Effet |
 |---|---|
+| `CAPABILITY_ENFORCE=enforce\|report\|off` | interrupteur global des gardes (§2.1) : `enforce` (défaut) refuse ; `report` laisse passer et journalise `capability: would refuse` ; `off` désactive les gardes (avertissement au démarrage). Lu à chaque requête |
 | `CAPABILITY_PILOT_<CC>=true` | pays CC (CM, CF, CG, GA, GQ, TD, CD) en ouverture restreinte : toute cellule `active` devient `pilot` (autorisée, affichée « Pilote ») |
 | `CAPABILITY_LEGACY_ALLOW=false` | bloque aussi les marchands SN / CI existants (défaut : tolérés ; l'inscription y est toujours refusée) |
 | `CAPABILITY_REGISTRATION_GUARD=off` | désactive le contrôle pays à l'inscription (environnements de test sans aucune clé opérateur) |

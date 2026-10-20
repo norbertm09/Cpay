@@ -35,11 +35,15 @@ adminRouter.get('/', async (req, res) => {
   else await registry.loadFacts().catch(() => null);
   const caps = registry.getCapabilities();
   const pilots = Object.fromEntries(registry.LAUNCH_COUNTRIES.map((cc) => [cc, caps.countries[cc].pilot]));
+  const guards = require('../middleware/capability');
   res.setHeader('Cache-Control', 'no-store');
   res.json({
     ...caps,
     pilots,
+    enforcement: guards.enforcementMode(),
+    reportOnly: guards.getReportOnlyState(),
     env: {
+      enforce: guards.enforcementMode(),
       legacyAllowed: String(process.env.CAPABILITY_LEGACY_ALLOW ?? 'true').toLowerCase() !== 'false',
       registrationGuard: String(process.env.CAPABILITY_REGISTRATION_GUARD || 'on').toLowerCase() !== 'off',
       pilotFlags: registry.LAUNCH_COUNTRIES.filter((cc) => pilots[cc]).map((cc) => `CAPABILITY_PILOT_${cc}`),

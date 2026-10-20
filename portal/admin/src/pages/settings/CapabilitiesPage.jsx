@@ -107,6 +107,17 @@ export default function CapabilitiesPage() {
           <Card dense title="Pilotes actifs">
             {pilotFlags.length ? pilotFlags.map((f) => <Badge key={f} tone="warn">{f}</Badge>) : <span className="muted small">Aucun drapeau CAPABILITY_PILOT_* positionné</span>}
           </Card>
+          <Card dense title="Mode d’application (CAPABILITY_ENFORCE)">
+            {data.enforcement === 'enforce' && <Badge tone="success">enforce : refus appliqués</Badge>}
+            {data.enforcement === 'report' && <Badge tone="warn">report : observation seule</Badge>}
+            {data.enforcement === 'off' && <Badge tone="neutral">off : gardes désactivées</Badge>}
+            {data.reportOnly && (
+              <div className="small muted" style={{ marginTop: 6 }}>
+                Refus évités depuis {data.reportOnly.since ? fmtDateTime(data.reportOnly.since) : 'le démarrage'} : <strong>{data.reportOnly.count || 0}</strong>
+                {data.enforcement === 'report' && ' — surveiller 48 h avant de passer en enforce.'}
+              </div>
+            )}
+          </Card>
           <Card dense title="Réglages">
             <KeyValue rows={[
               ['Marchands SN / CI existants', data.env?.legacyAllowed ? 'tolérés (CAPABILITY_LEGACY_ALLOW)' : 'bloqués'],
@@ -118,6 +129,23 @@ export default function CapabilitiesPage() {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{Object.entries(counts).map(([s, n]) => <span key={s}><StatusBadge status={s} /> <strong>{n}</strong></span>)}</div>
           </Card>
         </div>
+        {data.reportOnly?.refusals?.length > 0 && (
+          <Card title="Refus évités (mode report) — 50 derniers" sub="Chaque ligne est une requête réelle que le mode enforce aurait refusée : vérifier si le refus est légitime ou si la cellule est mal calculée." flush>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr>{['Date', 'Garde', 'Pays', 'Opération', 'Moyen', 'Opérateur', 'Statut', 'Marchand', 'Chemin'].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {[...data.reportOnly.refusals].reverse().map((r, i) => (
+                    <tr key={i}>
+                      <td className="cell-date">{fmtDateTime(r.at)}</td><td className="mono">{r.guard}</td><td className="mono">{r.country}</td><td>{r.operation}</td><td>{r.method}</td>
+                      <td className="mono">{r.operator || '—'}</td><td><StatusBadge status={r.status} /></td><td className="mono small">{r.merchantId || '—'}</td><td className="mono small">{r.path}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
         <div style={{ marginBottom: 12 }}>
           <Chips items={[{ value: 'launch', label: 'Périmètre de lancement (7 pays)' }, { value: 'all', label: 'Tous, y compris historiques SN / CI' }]} value={scope} onChange={setScope} />
         </div>
