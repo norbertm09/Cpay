@@ -180,6 +180,20 @@ const requireMerchantRole = (...roles) => (req, res, next) => {
   });
 };
 
+// WAVE-6 (audit 17/10/2026 §3) : gestion des bénéficiaires (wallet, comptes bancaires)
+// réservée au propriétaire du compte marchand. Le rôle vient du JWT émis au login
+// (merchant_users.role : owner | cashier | manager | viewer) ; les clés API (role 'api')
+// et les autres rôles reçoivent 403 INSUFFICIENT_ROLE. Le step-up (cash.verifyStepUp)
+// reste à la charge de la route.
+const MERCHANT_OWNER_ROLES = ['owner'];
+const requireMerchantOwner = (req, res, next) =>
+  merchantAuth(req, res, () => {
+    if (!MERCHANT_OWNER_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Seul le propriétaire du compte peut modifier les bénéficiaires', code: 'INSUFFICIENT_ROLE' });
+    }
+    next();
+  });
+
 // Utilisable seul (`requirePartnerRole('bank_admin')`) ou apres partnerAuth
 // (`partnerAuth, requireRole('bank_admin')` dans partners.routes.js) sans
 // double verification du jeton.
@@ -415,7 +429,7 @@ module.exports = {
   JWT_ISSUER, JWT_AUDIENCE, ACCESS_TTL_SECONDS, MFA_TTL_SECONDS, PARTNER_ROLES, PARTNER_TYPES,
   // middlewares
   verifyToken, requireType, merchantAuth, adminAuth, cardholderAuth, partnerAuth, distributionAuth,
-  requireRole, requireMerchantRole, requirePartnerRole, aliasUser,
+  requireRole, requireMerchantRole, requireMerchantOwner, MERCHANT_OWNER_ROLES, requirePartnerRole, aliasUser,
   // jetons
   signToken, signAccessToken, verifyAccessToken, hashToken,
   // sessions

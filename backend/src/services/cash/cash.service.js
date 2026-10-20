@@ -47,9 +47,12 @@ const withdrawDailyLimit = (kybLevel) => {
   return limits[lvl];
 };
 
-// Statuts
-const OUT_NOT_FAILED = ['pending', 'processing', 'pending_settlement', 'pending_manual', 'completed'];
-const OUT_INFLIGHT   = ['pending', 'processing', 'pending_settlement', 'pending_manual'];
+// Statuts — WAVE-6 : `unknown` = résultat opérateur incertain (timeout, 5xx, réseau, réponse
+// illisible) ; la réservation est CONSERVÉE (compté comme pending/processing dans le solde)
+// jusqu'à ce que l'opérateur confirme (completed) ou refuse explicitement (failed).
+const OUT_NOT_FAILED = ['pending', 'processing', 'unknown', 'pending_settlement', 'pending_manual', 'completed'];
+const OUT_INFLIGHT   = ['pending', 'processing', 'unknown', 'pending_settlement', 'pending_manual'];
+const UNCERTAIN      = ['unknown', 'processing'];   // interrogés par refreshPayoutStatus / reconcile
 const MANUAL_QUEUE   = ['pending_manual', 'pending_settlement']; // pending_settlement = legacy /transfer/payout
 const CANCELLABLE    = ['awaiting_funds', 'pending_manual'];
 const REJECTABLE     = ['awaiting_funds', 'pending_manual', 'pending_settlement'];
@@ -92,6 +95,46 @@ const detectWallet = (phone, { country, operator } = {}) => {
 };
 
 const maskNumber = (v, keep = 4) => String(v || '').replace(new RegExp(`.(?=.{${keep}})`, 'g'), '*');
+
+// ─── WAVE-6 : classification du résultat d'un rail sortant ────────
+// `declined` : l'opérateur a REFUSÉ l'ordre (réponse explicite) → failed, fonds libérés.
+// `accepted` : ordre pris en charge (pending) ; `completed` : exécuté.
+// `unknown`  : on ne sait pas si l'opérateur a exécuté (timeout, réseau, 5xx, réponse
+//              illisible, indisponibilité renvoyée par le routeur MM) → statut `unknown`,
+//              réservation conservée, rapprochement par statut opérateur.
+const UNKNOWN_RESPONSE_CODES = new Set(['96', '91', '68']);          // ISO 8583 : system malfunction / issuer inoperative / timeout
+const DECLINED_HTTP = new Set([400, 401, 403, 404, 422]);            // refus synchrone avant exécution
+const UNKNOWN_ERR_RE = /timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|network|indisponible|unavailable|unexpected token|json/i;
+
+/** @returns {'declined'|'accepted'|'completed'|'unknown'} */
+function classifyRailResult(res) {
+  if (!res || typeof res !== 'object') return 'unknown';
+  if (res.outcome && ['declined', 'accepted', 'completed', 'unknown'].includes(res.outcome)) return res.outcome;
+  if (res.approved === true) return 'completed';
+  if (res.pending === true) return 'accepted';
+  const code = res.responseCode === undefined || res.responseCode === null ? null : String(res.responseCode);
+  if (code && UNKNOWN_RESPONSE_CODES.has(code)) return 'unknown';
+  if (res.retryable === true && (!code || code === '96')) return 'unknown';
+  if (!code && !res.declineReason && !res.message && !res.errorMessage) return 'unknown'; // réponse vide / illisible
+  return 'declined';
+}
+
+/** @returns {'declined'|'unknown'} */
+function classifyRailError(err) {
+  if (!err) return 'unknown';
+  if (err.outcome === 'declined' || err.outcome === 'unknown') return err.outcome;
+  const status = Number(err.statusCode || err.status || (err.response && err.response.status));
+  if (Number.isFinite(status) && status > 0) return DECLINED_HTTP.has(status) ? 'declined' : 'unknown';
+  if (UNKNOWN_ERR_RE.test(String(err.code || '')) || UNKNOWN_ERR_RE.test(String(err.message || ''))) return 'unknown';
+  return 'unknown'; // sans information fiable, jamais « échec définitif »
+}
+
+const envMinutes = (name, fallback) => {
+  const n = parseFloat(process.env[name]);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+const unknownGraceMinutes = () => envMinutes('CASH_UNKNOWN_GRACE_MINUTES', 30);
+const unknownAlertHours   = () => envMinutes('CASH_UNKNOWN_ALERT_HOURS', 2);
 const newReference = (prefix) =>
   `${prefix}-${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
@@ -297,7 +340,13 @@ const serializeTransfer = (t, { admin = false } = {}) => {
     out.executedBy = t.executed_by || t.settled_by || null;
     out.adminNote = t.admin_note || null;
     out.gatewayReference = t.gateway_reference || null;
+    out.needsReview = !!t.needs_review;
+    out.unknownSince = t.unknown_since || null;
+    out.lastStatusCheckAt = t.last_status_check_at || null;
+    out.requestPayload = t.request_payload || null;
     if (t.dest_type === 'bank') out.bankAccount.accountNumber = t.account_number || null;
+  } else if (t.status === 'unknown') {
+    out.message = 'Résultat opérateur en cours de vérification — les fonds restent réservés';
   }
   return out;
 };
@@ -324,7 +373,8 @@ async function getTransfer(transferId, { merchantId } = {}) {
  * @param {string}   p.transferId
  * @param {string[]} p.from   statuts acceptés (claim atomique)
  * @param {string}   p.to
- * @param {object}   [p.patch]  { gatewayReference, bankReference, errorMessage, executedBy, adminNote, amount, amountRequested }
+ * @param {object}   [p.patch]  { gatewayReference, bankReference, errorMessage, executedBy, adminNote, amount, amountRequested,
+ *                               requestPayload (WAVE-6, jsonb), needsReview (WAVE-6, bool) }
  * @param {object}   p.event    événement ajouté au journal JSONB
  * @param {string}   [p.merchantId]  garde d'appartenance (routes marchand)
  * @returns ligne mise à jour ou null (statut déjà changé)
@@ -347,14 +397,20 @@ async function transitionTransfer({ transferId, from, to, patch = {}, event: ev,
          admin_note        = COALESCE($9::text, admin_note),
          amount            = COALESCE($10::numeric, amount),
          net_amount        = CASE WHEN $10::numeric IS NOT NULL THEN $10::numeric - COALESCE(fee,0) ELSE net_amount END,
-         amount_requested  = COALESCE($11::numeric, amount_requested)
+         amount_requested  = COALESCE($11::numeric, amount_requested),
+         request_payload   = COALESCE($14::jsonb, request_payload),
+         unknown_since     = CASE WHEN $2 = 'unknown' THEN COALESCE(unknown_since, NOW()) ELSE unknown_since END,
+         needs_review      = CASE WHEN $2 = ANY($3::text[]) THEN FALSE ELSE COALESCE($15::boolean, needs_review) END,
+         last_status_check_at = CASE WHEN $2 = ANY($3::text[]) THEN NOW() ELSE last_status_check_at END
      WHERE transfer_id=$1 AND status = ANY($12::text[])
        AND ($13::uuid IS NULL OR merchant_id = $13::uuid)
      RETURNING *`,
     [transferId, to, FINAL, JSON.stringify([ev || event(to)]),
      patch.gatewayReference ?? null, patch.bankReference ?? null, patch.errorMessage ?? null,
      patch.executedBy ?? null, patch.adminNote ?? null,
-     patch.amount ?? null, patch.amountRequested ?? null, from, merchantId ?? null]);
+     patch.amount ?? null, patch.amountRequested ?? null, from, merchantId ?? null,
+     patch.requestPayload === undefined || patch.requestPayload === null ? null : JSON.stringify(patch.requestPayload),
+     patch.needsReview === undefined || patch.needsReview === null ? null : !!patch.needsReview]);
   const row = r.rows[0];
   if (!row) return null;
   // Premier retrait completed vers le wallet enregistré → wallet vérifié
@@ -381,12 +437,15 @@ async function transitionTransfer({ transferId, from, to, patch = {}, event: ev,
  * @param {string} [p.bankQueueStatus='pending_manual']  'pending_settlement' pour la route historique
  * @param {number|null} [p.dailyLimit]  limite journalière (retrait) vérifiée sous verrou
  * @param {string} [p.actor]
+ * @param {Function} [p.onReserved]  WAVE-6 : async ({ transferId, reference }) appelé dès que la ligne
+ *                                   'pending' est engagée (avant tout appel rail) — idempotency.attachResource
  * @returns {{ error:{status, body} }} | {{ transfer, bankAcc, merchant, fee, net, reference }}
+ *   Résultat rail incertain (WAVE-6) : { transfer: { status:'unknown', outcome:'unknown', … } } — fonds réservés.
  */
 async function createPayout(p) {
   const {
     merchantId, destType, accountId, wallet, rail, amount, description,
-    refPrefix = 'PAY', bankQueueStatus = 'pending_manual', dailyLimit = null, actor = 'merchant',
+    refPrefix = 'PAY', bankQueueStatus = 'pending_manual', dailyLimit = null, actor = 'merchant', onReserved = null,
   } = p;
   if (!BANK_QUEUE_STATUSES.has(bankQueueStatus)) throw new Error(`bankQueueStatus invalide: ${bankQueueStatus}`);
   const amt = Number(amount);
@@ -434,15 +493,19 @@ async function createPayout(p) {
     }
 
     const currency = merchant.currency || 'XAF';
+    // WAVE-6 : requête rail conservée sur la ligne (rapprochement d'un résultat incertain)
+    const requestPayload = destType === 'wallet'
+      ? { rail: rail?.kind || null, gateway: rail?.gateway || null, operator: walletOperator, phoneMasked: maskNumber(walletPhone, 3), amount: net, currency, externalId: ref }
+      : { rail: 'manual', accountId: accountId || null, amount: net, currency, externalId: ref };
     const t = await exec(
       `INSERT INTO merchant_transfers (merchant_id, direction, dest_type, bank_account_id,
-        wallet_operator, wallet_phone, amount, fee, net_amount, currency, status, reference, description, events)
-       VALUES ($1,'payout',$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$12::jsonb)
+        wallet_operator, wallet_phone, amount, fee, net_amount, currency, status, reference, description, events, request_payload)
+       VALUES ($1,'payout',$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$12::jsonb,$13::jsonb)
        RETURNING transfer_id, created_at`,
       [merchantId, destType, destType === 'bank' ? accountId : null,
        walletOperator, walletPhone, amt, fee, net, currency, ref,
        description || (destType === 'bank' ? 'Transfert vers banque' : 'Retrait'),
-       JSON.stringify([event('created', { by: actor, status: 'pending', destType })])]);
+       JSON.stringify([event('created', { by: actor, status: 'pending', destType })]), JSON.stringify(requestPayload)]);
     return { transferId: t.rows[0].transfer_id, createdAt: t.rows[0].created_at, currency };
   });
 
@@ -452,6 +515,20 @@ async function createPayout(p) {
     transferId, reference: ref, amount: amt, fee, net, currency: reservation.currency,
     createdAt: reservation.createdAt, destType, merchant, bankAcc,
     wallet: wallet ? { operator: walletOperator, phone: walletPhone } : null,
+  };
+  // WAVE-6 : la ressource existe → la clé d'idempotence la référence AVANT l'appel rail
+  if (typeof onReserved === 'function') {
+    try { await onReserved({ transferId, reference: ref }); }
+    catch (e) { logger.warn('cash: onReserved callback failed', { transferId, err: e.message }); }
+  }
+
+  // Résultat incertain : statut `unknown`, réservation conservée, référence/requête stockées (WAVE-6)
+  const markUnknown = async ({ reason, gatewayReference = null, responseCode = null, railName = null }) => {
+    await transitionTransfer({ transferId, from: ['pending'], to: 'unknown',
+      patch: { gatewayReference, errorMessage: String(reason || 'Résultat opérateur incertain').slice(0, 200) },
+      event: event('unknown', { rail: railName, reason: String(reason || '').slice(0, 200), responseCode, gatewayReference }) }).catch((e) => logger.error('cash: unknown transition failed', { transferId, err: e.message }));
+    logger.warn('cash: payout outcome unknown (reservation kept)', { transferId, reason, rail: railName });
+    return { transfer: { ...base, status: 'unknown', outcome: 'unknown', gatewayReference, message: 'Résultat opérateur incertain — vérification en cours, fonds réservés' } };
   };
 
   // 2) Appel rail HORS transaction — la ligne 'pending' est déjà comptée dans le solde
@@ -464,30 +541,43 @@ async function createPayout(p) {
       }
       if (rail.kind === 'mtn_client') {
         const mtn = require('../rails/mtn-momo.client');
-        const d = await mtn.transfer({ amount: net, phone: walletPhone, description: description || 'Retrait C-Pay', externalId: ref });
+        let d;
+        try { d = await mtn.transfer({ amount: net, phone: walletPhone, description: description || 'Retrait C-Pay', externalId: ref }); }
+        catch (err) {
+          if (classifyRailError(err) === 'unknown') return markUnknown({ reason: err.message, railName: 'mtn_client', responseCode: err.statusCode || null });
+          await transitionTransfer({ transferId, from: ['pending'], to: 'failed',
+            patch: { errorMessage: String(err.message || 'Retrait refusé').slice(0, 200) }, event: event('failed', { rail: 'mtn_client', reason: 'declined', responseCode: err.statusCode || null }) });
+          return { error: { status: 502, body: { error: err.message, code: 'GATEWAY_ERROR', transferId, outcome: 'declined' } } };
+        }
+        if (!d || typeof d !== 'object') return markUnknown({ reason: 'Réponse opérateur illisible', railName: 'mtn_client' });
         await transitionTransfer({ transferId, from: ['pending'], to: 'processing',
           patch: { gatewayReference: d.referenceId || null }, event: event('processing', { rail: 'mtn_client', gatewayReference: d.referenceId || null }) });
         return { transfer: { ...base, status: 'processing', gatewayReference: d.referenceId || null } };
       }
-      // mobilemoney.router
+      // mobilemoney.router (ne lève jamais : les erreurs réseau sont normalisées en responseCode '96')
       const mm = require('../mobilemoney/mobilemoney.router');
       const res = await mm.sendPayout({
         txnId: transferId, amount: net, currency: reservation.currency, phone: walletPhone,
         operator: String(walletOperator || '').toUpperCase(), gateway: rail.gateway, country: wallet.country || null,
       });
-      if (res.approved) {
+      const outcome = classifyRailResult(res);
+      const gwRef = res && (res.gatewayRef || res.authCode) ? (res.gatewayRef || res.authCode) : null;
+      if (outcome === 'completed') {
         await transitionTransfer({ transferId, from: ['pending'], to: 'completed',
-          patch: { gatewayReference: res.gatewayRef || res.authCode || null }, event: event('completed', { rail: rail.gateway, responseCode: res.responseCode }) });
-        return { transfer: { ...base, status: 'completed', gatewayReference: res.gatewayRef || res.authCode || null } };
+          patch: { gatewayReference: gwRef }, event: event('completed', { rail: rail.gateway, responseCode: res.responseCode }) });
+        return { transfer: { ...base, status: 'completed', gatewayReference: gwRef } };
       }
-      if (res.pending) {
+      if (outcome === 'accepted') {
         await transitionTransfer({ transferId, from: ['pending'], to: 'processing',
-          patch: { gatewayReference: res.gatewayRef || res.authCode || null }, event: event('processing', { rail: rail.gateway, responseCode: res.responseCode }) });
-        return { transfer: { ...base, status: 'processing', gatewayReference: res.gatewayRef || res.authCode || null } };
+          patch: { gatewayReference: gwRef }, event: event('processing', { rail: rail.gateway, responseCode: res.responseCode }) });
+        return { transfer: { ...base, status: 'processing', gatewayReference: gwRef } };
+      }
+      if (outcome === 'unknown') {
+        return markUnknown({ reason: res?.declineReason || 'Opérateur injoignable', gatewayReference: gwRef, responseCode: res?.responseCode || null, railName: rail.gateway });
       }
       await transitionTransfer({ transferId, from: ['pending'], to: 'failed',
         patch: { errorMessage: String(res.declineReason || 'Retrait refusé').slice(0, 200) }, event: event('failed', { rail: rail.gateway, responseCode: res.responseCode, reason: res.declineReason || null }) });
-      return { error: { status: 502, body: { error: res.declineReason || 'Retrait refusé par l’opérateur', code: 'GATEWAY_ERROR', transferId, retryable: !!res.retryable } } };
+      return { error: { status: 502, body: { error: res.declineReason || 'Retrait refusé par l’opérateur', code: 'GATEWAY_ERROR', transferId, outcome: 'declined', retryable: !!res.retryable } } };
     }
 
     // Vers une banque : aucun rail bancaire branché → file d'attente manuelle (opérations C-Pay, J+1 ouvré)
@@ -498,11 +588,37 @@ async function createPayout(p) {
     notifyOpsBankPayout({ merchant, merchantId, ref, amt, fee, net, currency: reservation.currency, bankAcc }).catch(() => {});
     return { transfer: { ...base, status: bankQueueStatus } };
   } catch (err) {
-    logger.error('cash: payout rail error', { transferId, err: err.message });
-    await transitionTransfer({ transferId, from: ['pending'], to: 'failed',
-      patch: { errorMessage: String(err.message || 'erreur rail').slice(0, 200) }, event: event('failed', { reason: 'rail_error' }) }).catch(() => {});
-    return { error: { status: 502, body: { error: err.message, code: 'GATEWAY_ERROR', transferId } } };
+    // WAVE-6 : une exception ici n'est JAMAIS un refus opérateur prouvé → `unknown`, fonds réservés
+    logger.error('cash: payout rail error (outcome unknown)', { transferId, err: err.message });
+    return markUnknown({ reason: err.message || 'erreur rail', railName: rail?.kind || rail?.gateway || null, responseCode: err.statusCode || null });
   }
+}
+
+// ─── Notifications ops (e-mail best effort) ───────────────────────
+async function notifyOps({ subject, html }) {
+  try {
+    const email = require('../notifications/email.service');
+    await email.send({ to: process.env.ADMIN_ALERT_EMAIL || 'support@c-pay.global', subject, html });
+    return true;
+  } catch (e) { logger.warn('cash: ops email failed', { subject, err: e.message }); return false; }
+}
+
+async function notifyOpsUnknownPayout(t, { ageHours } = {}) {
+  const name = t.business_name || t.merchant_id;
+  return notifyOps({
+    subject: `Retrait à vérifier (résultat opérateur incertain) — ${t.reference} — ${name}`,
+    html: `<h2>Retrait en statut <code>unknown</code> depuis ${ageHours != null ? `${ageHours} h` : `plus de ${unknownAlertHours()} h`}</h2>
+      <table style="border-collapse:collapse">
+      <tr><td style="padding:6px 12px"><b>Marchand</b></td><td>${name}</td></tr>
+      <tr><td style="padding:6px 12px"><b>Référence</b></td><td>${t.reference}</td></tr>
+      <tr><td style="padding:6px 12px"><b>Montant</b></td><td>${num(t.amount)} ${t.currency || ''} (net ${num(t.net_amount ?? t.amount)})</td></tr>
+      <tr><td style="padding:6px 12px"><b>Opérateur</b></td><td>${operatorLabel(t.wallet_operator)} ${maskNumber(t.wallet_phone, 3)}</td></tr>
+      <tr><td style="padding:6px 12px"><b>Référence opérateur</b></td><td>${t.gateway_reference || '— (aucune : vérifier le relevé opérateur par référence externe ' + t.reference + ')'}</td></tr>
+      <tr><td style="padding:6px 12px"><b>Dernière erreur</b></td><td>${t.error_message || ''}</td></tr>
+      </table>
+      <p>Les fonds restent réservés. Vérifiez le relevé opérateur puis clôturez dans le back-office admin
+      (Caisse → transfert → <i>mark-executed</i> si exécuté, <i>reject</i> si l'opérateur confirme l'absence d'exécution).</p>`,
+  });
 }
 
 async function notifyOpsBankPayout({ merchant, merchantId, ref, amt, fee, net, currency, bankAcc }) {
@@ -528,26 +644,43 @@ async function notifyOpsBankPayout({ merchant, merchantId, ref, amt, fee, net, c
   } catch (e) { logger.warn('cash: ops email failed', { err: e.message }); }
 }
 
-// ─── Statut réel d'un retrait 'processing' (polling opérateur) ────
-// Appelé par GET /cash/transfers/:id et l'admin : MTN (client rails Congo ou provider pays),
-// autres providers via getStatus({ product:'disbursement' }) quand il existe. Toute
-// indisponibilité laisse 'processing'.
-async function refreshPayoutStatus(t) {
-  if (!t || t.status !== 'processing' || t.direction !== 'payout' || t.dest_type !== 'wallet' || !t.gateway_reference) return t;
+// ─── Statut réel d'un retrait 'processing' | 'unknown' (polling opérateur) ────
+// Appelé par GET /cash/transfers/:id, l'admin et reconcile.service : MTN (client rails Congo ou
+// provider pays), autres providers via getStatus({ product:'disbursement' }) quand il existe.
+// Seul un statut opérateur EXPLICITE change l'état : SUCCESSFUL → completed, FAILED → failed
+// (fonds libérés). Toute indisponibilité laisse le statut inchangé. « Introuvable » (NOT_FOUND /
+// 404) ne vaut échec qu'après la période de grâce CASH_UNKNOWN_GRACE_MINUTES (défaut 30) :
+// l'opérateur peut ne pas encore avoir indexé l'ordre.
+// Sans gateway_reference (timeout avant réponse) : MTN ne peut être interrogé (X-Reference-Id
+// généré par le client rails) → reste `unknown` jusqu'à revue ops ; les providers du routeur MM
+// sont interrogés par txnId (= transfer_id, référence externe).
+async function refreshPayoutStatus(t, { graceMinutes = null, source = 'status_poll' } = {}) {
+  if (!t || !UNCERTAIN.includes(t.status) || t.direction !== 'payout' || t.dest_type !== 'wallet') return t;
   const code = normalizeOperatorCode(t.wallet_operator);
   const country = String(t.merchant_country || '').toUpperCase();
+  const grace = graceMinutes === null || graceMinutes === undefined ? unknownGraceMinutes() : Number(graceMinutes);
+  const ageMinutes = (Date.now() - new Date(t.unknown_since || t.created_at || Date.now()).getTime()) / 60000;
+  const from = [t.status];
+  const touch = () => query(`UPDATE merchant_transfers SET last_status_check_at=NOW() WHERE transfer_id=$1`, [t.transfer_id]).catch(() => {});
   try {
     let st = null; let reason = null; let gatewayRef = null;
     if (code === 'mtn_momo') {
+      if (!t.gateway_reference) { await touch(); return { ...t, _statusCheck: 'no_reference' }; }
       let s = null;
       if (country && country !== 'CG') {
         try {
           const mm = require('../mobilemoney/mobilemoney.router');
           const cfg = await mm.getConfig(`mtn_${country.toLowerCase()}`);
           if (cfg && cfg.apiKey && cfg.baseUrl) s = await require('../mobilemoney/providers/mtn.provider').getTransferStatus(cfg, t.gateway_reference);
-        } catch (e) { s = null; }
+        } catch (e) {
+          if (Number(e?.statusCode) === 404) s = { status: 'NOT_FOUND' };
+          else s = null;
+        }
       }
-      if (!s) s = await require('../rails/mtn-momo.client').getDisbursementStatus(t.gateway_reference);
+      if (!s) {
+        try { s = await require('../rails/mtn-momo.client').getDisbursementStatus(t.gateway_reference); }
+        catch (e) { if (Number(e?.statusCode) === 404) s = { status: 'NOT_FOUND' }; else throw e; }
+      }
       st = String(s?.status || '').toUpperCase(); reason = s?.reason || null; gatewayRef = s?.financialTxnId || s?.financialTransactionId || null;
     } else {
       const d = detectWallet(t.wallet_phone, { country, operator: code });
@@ -557,24 +690,132 @@ async function refreshPayoutStatus(t) {
       const provider = mm.getProvider(gateway);
       if (!provider || typeof provider.getStatus !== 'function') return t;
       const cfg = await mm.getConfig(gateway);
-      const s = await provider.getStatus({ txnId: t.transfer_id, gatewayRef: t.gateway_reference, config: cfg, product: 'disbursement' });
+      let s;
+      try { s = await provider.getStatus({ txnId: t.transfer_id, gatewayRef: t.gateway_reference || null, config: cfg, product: 'disbursement' }); }
+      catch (e) { if (Number(e?.statusCode) === 404) s = { available: true, status: 'NOT_FOUND' }; else throw e; }
       if (!s || s.available === false) return t;
       st = String(s.status || '').toUpperCase(); reason = s.reason || null; gatewayRef = s.gatewayRef || null;
     }
-    if (st === 'SUCCESSFUL') {
-      const row = await transitionTransfer({ transferId: t.transfer_id, from: ['processing'], to: 'completed',
-        patch: { gatewayReference: gatewayRef }, event: event('completed', { source: 'status_poll' }) });
+    await touch();
+    if (st === 'SUCCESSFUL' || st === 'SUCCESS' || st === 'COMPLETED') {
+      const row = await transitionTransfer({ transferId: t.transfer_id, from, to: 'completed',
+        patch: { gatewayReference: gatewayRef }, event: event('completed', { source, from: t.status, gatewayReference: gatewayRef }) });
       return row ? { ...t, ...row } : t;
     }
-    if (st === 'FAILED') {
-      const row = await transitionTransfer({ transferId: t.transfer_id, from: ['processing'], to: 'failed',
-        patch: { errorMessage: String(reason || 'Retrait échoué').slice(0, 200) }, event: event('failed', { source: 'status_poll', reason }) });
+    if (st === 'FAILED' || st === 'REJECTED') {
+      const row = await transitionTransfer({ transferId: t.transfer_id, from, to: 'failed',
+        patch: { errorMessage: String(reason || 'Retrait échoué').slice(0, 200) }, event: event('failed', { source, from: t.status, reason, providerStatus: st }) });
       return row ? { ...t, ...row } : t;
     }
+    if (st === 'NOT_FOUND') {
+      if (ageMinutes < grace) {
+        logger.info('cash: payout not found at operator — within grace period', { transferId: t.transfer_id, ageMinutes: Math.round(ageMinutes), grace });
+        return { ...t, _statusCheck: 'not_found_in_grace' };
+      }
+      const row = await transitionTransfer({ transferId: t.transfer_id, from, to: 'failed',
+        patch: { errorMessage: 'Ordre inconnu de l’opérateur après la période de grâce' },
+        event: event('failed', { source, from: t.status, reason: 'not_found_after_grace', ageMinutes: Math.round(ageMinutes), graceMinutes: grace }) });
+      return row ? { ...t, ...row } : t;
+    }
+    return { ...t, _statusCheck: st || 'no_status' };
   } catch (e) {
-    logger.warn('cash: payout status poll failed (left processing)', { transferId: t.transfer_id, err: e.message });
+    logger.warn('cash: payout status poll failed (status kept)', { transferId: t.transfer_id, status: t.status, err: e.message });
+    return { ...t, _statusCheck: 'error', _statusError: e.message };
   }
-  return t;
+}
+
+/**
+ * WAVE-6 : balayage des retraits incertains (`unknown`, `processing`) — appelé par
+ * reconcile.service / scripts/reconcile-pending.js / POST /admin/reconcile.
+ *   - interroge l'opérateur (refreshPayoutStatus) ; completed / failed uniquement sur statut explicite ;
+ *   - après CASH_UNKNOWN_ALERT_HOURS (défaut 2) en `unknown` : needs_review=true + e-mail ops (une fois).
+ */
+async function sweepUncertainPayouts({ graceMinutes = null, alertHours = null, limit = 200, maxAgeDays = 30 } = {}) {
+  const alertH = alertHours === null || alertHours === undefined ? unknownAlertHours() : Number(alertHours);
+  const r = await query(
+    `${TRANSFER_SELECT}
+     WHERE mt.direction='payout' AND mt.dest_type='wallet' AND mt.status = ANY($1::text[])
+       AND mt.created_at > NOW() - ($2 || ' days')::interval
+     ORDER BY mt.created_at ASC LIMIT $3`, [UNCERTAIN, String(Math.max(1, parseInt(maxAgeDays, 10) || 30)), Math.min(1000, Math.max(1, parseInt(limit, 10) || 200))]);
+  const results = [];
+  for (const t of r.rows) {
+    const out = await refreshPayoutStatus(t, { graceMinutes, source: 'reconcile' });
+    const entry = { transferId: t.transfer_id, reference: t.reference, from: t.status, status: out.status, check: out._statusCheck || null };
+    if (out.status === 'unknown') {
+      const ageH = (Date.now() - new Date(t.unknown_since || t.created_at).getTime()) / 3600000;
+      if (ageH >= alertH && !t.review_alerted_at) {
+        await query(`UPDATE merchant_transfers SET needs_review=TRUE, review_alerted_at=NOW(), updated_at=NOW(),
+                       events = COALESCE(events,'[]'::jsonb) || $2::jsonb WHERE transfer_id=$1`,
+          [t.transfer_id, JSON.stringify([event('needs_review', { source: 'reconcile', ageHours: Math.round(ageH * 10) / 10, alertHours: alertH })])]).catch((e) => logger.error('cash: needs_review flag failed', { transferId: t.transfer_id, err: e.message }));
+        entry.needsReview = true;
+        entry.alerted = await notifyOpsUnknownPayout(t, { ageHours: Math.round(ageH * 10) / 10 });
+      }
+    }
+    results.push(entry);
+  }
+  const summary = {
+    scanned: r.rows.length,
+    completed: results.filter((x) => x.status === 'completed' && x.from !== 'completed').length,
+    failed: results.filter((x) => x.status === 'failed').length,
+    still_uncertain: results.filter((x) => UNCERTAIN.includes(x.status)).length,
+    flagged: results.filter((x) => x.needsReview).length,
+    errors: results.filter((x) => x.check === 'error').length,
+  };
+  if (r.rows.length) logger.info('cash: uncertain payouts sweep', summary);
+  return { summary, results };
+}
+
+// ─── WAVE-6 : historique des bénéficiaires (wallet, comptes bancaires) ───
+const maskBankAccount = (a) => a ? { accountId: a.account_id, bankName: a.inst_name || null, accountMasked: maskNumber(a.account_number), accountName: a.account_name || null, status: a.status || null } : null;
+const maskWallet = (operator, phone) => (phone ? { operator: operator || null, phoneMasked: maskNumber(phone, 3) } : null);
+
+/**
+ * @param {object} p { merchantId, actor:{ type, id, email, role }, eventType, entityType, entityId, oldValues, newValues, ip, exec }
+ */
+async function recordBeneficiaryEvent({ merchantId, actor = {}, eventType, entityType, entityId = null, oldValues = null, newValues = null, ip = null, exec = query }) {
+  const r = await exec(
+    `INSERT INTO beneficiary_events (merchant_id, actor_type, actor_id, actor_email, actor_role, event_type, entity_type, entity_id, old_values, new_values, ip_address)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING event_id, created_at`,
+    [merchantId, actor.type || 'merchant', actor.id && UUID_RE.test(String(actor.id)) ? actor.id : null, actor.email || null, actor.role || null,
+     eventType, entityType, entityId && UUID_RE.test(String(entityId)) ? entityId : null,
+     oldValues ? JSON.stringify(oldValues) : null, newValues ? JSON.stringify(newValues) : null, ip ? String(ip).slice(0, 64) : null]);
+  return r.rows[0] || null;
+}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const serializeBeneficiaryEvent = (e) => ({
+  eventId: e.event_id, type: e.event_type, entityType: e.entity_type, entityId: e.entity_id || null,
+  actor: { type: e.actor_type, id: e.actor_id || null, email: e.actor_email || null, role: e.actor_role || null },
+  oldValues: e.old_values || null, newValues: e.new_values || null, ip: e.ip_address || null, createdAt: e.created_at,
+});
+
+async function beneficiaryHistory(merchantId, { limit = 50, offset = 0 } = {}) {
+  let lim = parseInt(limit, 10); if (!Number.isFinite(lim)) lim = 50; lim = Math.min(200, Math.max(1, lim));
+  let off = parseInt(offset, 10); if (!Number.isFinite(off) || off < 0) off = 0;
+  const r = await query(`SELECT * FROM beneficiary_events WHERE merchant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`, [merchantId, lim, off]);
+  const c = await query(`SELECT COUNT(*)::int AS total FROM beneficiary_events WHERE merchant_id=$1`, [merchantId]);
+  return { data: r.rows.map(serializeBeneficiaryEvent), total: parseInt(c.rows[0]?.total, 10) || 0, limit: lim, offset: off };
+}
+
+/** E-mail au propriétaire (best effort) à chaque changement de bénéficiaire. */
+async function notifyBeneficiaryChange(merchant, { eventType, summary, ip }) {
+  if (!merchant || !merchant.email) return false;
+  const labels = {
+    wallet_updated: 'Wallet de retrait modifié', bank_account_added: 'Compte bancaire ajouté',
+    bank_account_removed: 'Compte bancaire supprimé', bank_account_verified: 'Compte bancaire vérifié',
+  };
+  try {
+    const email = require('../notifications/email.service');
+    await email.send({
+      to: merchant.email,
+      subject: `C-Pay — ${labels[eventType] || 'Bénéficiaire modifié'}`,
+      html: `<p>Bonjour ${merchant.business_name || ''},</p>
+        <p>${labels[eventType] || 'Un bénéficiaire de votre compte a été modifié'} : <b>${summary}</b>.</p>
+        <p>Date : ${new Date().toISOString()}${ip ? ` — adresse IP : ${ip}` : ''}.</p>
+        <p>Si vous n'êtes pas à l'origine de ce changement, contactez immédiatement le support C-Pay et changez votre mot de passe.</p>`,
+    });
+    return true;
+  } catch (e) { logger.warn('cash: beneficiary email failed', { err: e.message }); return false; }
 }
 
 // ─── Ordre d'approvisionnement (bank_to_wallet) ───────────────────
@@ -776,13 +1017,17 @@ async function historyCsv(merchantId, { from, to, type } = {}) {
 module.exports = {
   // règles
   TRANSFER_MIN, FUNDING_EXPIRES_DAYS, FEE_RATES, CASH_LIMITS, CASH_LIMITS_DEFAULT, withdrawDailyLimit,
-  OUT_NOT_FAILED, OUT_INFLIGHT, MANUAL_QUEUE, CANCELLABLE, REJECTABLE, FINAL, HISTORY_TYPES,
+  OUT_NOT_FAILED, OUT_INFLIGHT, UNCERTAIN, MANUAL_QUEUE, CANCELLABLE, REJECTABLE, FINAL, HISTORY_TYPES,
   // opérateurs
   OPERATOR_LABELS, normalizeOperatorCode, operatorLabel, detectWallet, maskNumber,
   // solde / frais
   computeAvailableBalance, withdrawnToday, getMerchant, feeRate, computeFee,
   // rails
   payoutRail, collectRail, cardGatewayFor,
+  // WAVE-6 : classification des résultats rail, retraits incertains, ops
+  classifyRailResult, classifyRailError, unknownGraceMinutes, unknownAlertHours, sweepUncertainPayouts, notifyOps, notifyOpsUnknownPayout,
+  // WAVE-6 : bénéficiaires
+  recordBeneficiaryEvent, beneficiaryHistory, serializeBeneficiaryEvent, notifyBeneficiaryChange, maskBankAccount, maskWallet,
   // step-up
   verifyStepUp, _resetStepUp,
   // transferts

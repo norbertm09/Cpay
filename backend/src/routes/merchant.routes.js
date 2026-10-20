@@ -864,12 +864,29 @@ router.delete('/tokens/:id', merchantAuth, async (req, res) => {
 // TRANSFERTS MERCHANT — comptes bancaires + retraits
 // ═══════════════════════════════════════════════════════════════════
 
+// WAVE-6 (audit 17/10/2026 §3) : ajout / suppression réservés au rôle `owner` + confirmation forte
+// (cash.verifyStepUp) ; nouveau compte inséré `pending_verification` (vérification par l'admin :
+// POST /admin/cash/bank-accounts/:id/verify) — seuls les comptes `verified` sont utilisables pour
+// wallet_to_bank ; historique beneficiary_events + audit_logs + e-mail au propriétaire.
+const { requireMerchantOwner: requireBeneficiaryOwner } = require('../middleware/auth');
+const UUID_RE_BENEF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const beneficiaryAudit = async (req, action, entityId, newValues, oldValues = null) => {
+  try {
+    await query(
+      `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, old_values, new_values, ip_address)
+       VALUES ('merchant',$1,$2,$3,'bank_account',$4,$5,$6,$7)`,
+      [UUID_RE_BENEF.test(String(req.user?.sub || '')) ? req.user.sub : null, req.user?.email || null, action,
+       UUID_RE_BENEF.test(String(entityId || '')) ? entityId : null, oldValues ? JSON.stringify(oldValues) : null, JSON.stringify(newValues || {}), req.ip || null]);
+  } catch (e) { logger.warn('[merchant] beneficiary audit failed', { action, err: e.message }); }
+};
+const beneficiaryActor = (req) => ({ type: 'merchant', id: req.user?.sub || null, email: req.user?.email || null, role: req.user?.role || null });
+
 router.get('/bank-accounts', merchantAuth, async (req, res) => {
   const mid = req.merchant?.merchantId || req.user?.merchantId;
   try {
     const r = await query(
       `SELECT ba.account_id, ba.account_number, ba.account_name, ba.iban,
-              ba.status, ba.is_default, fi.name AS inst_name, fi.code AS inst_code,
+              ba.status, ba.is_default, ba.verified_at, ba.created_at, fi.name AS inst_name, fi.code AS inst_code,
               fi.type AS inst_type, fi.country
        FROM bank_accounts ba
        LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
@@ -882,6 +899,8 @@ router.get('/bank-accounts', merchantAuth, async (req, res) => {
         accountNumber: a.account_number.replace(/.(?=.{4})/g, '*'),
         accountName: a.account_name,
         status: a.status,
+        usable: a.status === 'verified',          // WAVE-6 : seul un compte vérifié reçoit un transfert
+        verifiedAt: a.verified_at || null,
         isDefault: a.is_default,
         institution: { name: a.inst_name, code: a.inst_code,
                        type: a.inst_type, country: a.country },
@@ -891,11 +910,14 @@ router.get('/bank-accounts', merchantAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/bank-accounts', merchantAuth, async (req, res) => {
+router.post('/bank-accounts', requireBeneficiaryOwner, async (req, res) => {
   const mid = req.merchant?.merchantId || req.user?.merchantId;
-  const { institutionId, accountNumber, accountName, iban } = req.body;
+  const { institutionId, accountNumber, accountName, iban, confirm } = req.body || {};
   if (!institutionId || !accountNumber || !accountName)
-    return res.status(422).json({ error: 'institutionId, accountNumber, accountName requis' });
+    return res.status(422).json({ error: 'institutionId, accountNumber, accountName requis', code: 'VALIDATION_ERROR' });
+  const cashSvc = require('../services/cash/cash.service');
+  const step = await cashSvc.verifyStepUp({ userId: req.user?.sub, confirm });
+  if (!step.ok) return res.status(step.status).json(step.body);
   try {
     const ex = await query(
       `SELECT COUNT(*)::int AS n FROM bank_accounts
@@ -903,29 +925,52 @@ router.post('/bank-accounts', merchantAuth, async (req, res) => {
 
     const r = await query(
       `INSERT INTO bank_accounts (owner_type, owner_id, institution_id, account_number,
-        account_name, iban, status, is_default)
-       VALUES ('merchant',$1,$2,$3,$4,$5,'verified',$6)
-       RETURNING account_id, account_number, account_name, is_default`,
-      [mid, institutionId, accountNumber, accountName.toUpperCase(),
-       iban || null, ex.rows[0].n === 0]);
+        account_name, iban, status, is_default, created_by)
+       VALUES ('merchant',$1,$2,$3,$4,$5,'pending_verification',$6,$7)
+       RETURNING account_id, account_number, account_name, is_default, status, created_at`,
+      [mid, institutionId, String(accountNumber).trim(), String(accountName).toUpperCase(),
+       iban || null, ex.rows[0].n === 0, UUID_RE_BENEF.test(String(req.user?.sub || '')) ? req.user.sub : null]);
 
     const a = r.rows[0];
-    res.json({
+    const inst = await query(`SELECT name FROM financial_institutions WHERE institution_id=$1`, [institutionId]).catch(() => ({ rows: [] }));
+    const masked = cashSvc.maskBankAccount({ ...a, inst_name: inst.rows[0]?.name || null });
+    await cashSvc.recordBeneficiaryEvent({ merchantId: mid, actor: beneficiaryActor(req), eventType: 'bank_account_added', entityType: 'bank_account', entityId: a.account_id, newValues: masked, ip: req.ip })
+      .catch((e) => logger.error('[merchant] beneficiary event failed', { err: e.message }));
+    await beneficiaryAudit(req, 'BANK_ACCOUNT_ADD', a.account_id, { ...masked, stepUp: step.method });
+    const m = await query(`SELECT merchant_id, business_name, email FROM merchants WHERE merchant_id=$1`, [mid]).catch(() => ({ rows: [] }));
+    cashSvc.notifyBeneficiaryChange(m.rows[0], { eventType: 'bank_account_added', summary: `${masked.bankName || 'Banque'} ${masked.accountMasked} (en attente de vérification)`, ip: req.ip }).catch(() => {});
+    res.status(201).json({
       accountId: a.account_id,
       accountNumber: a.account_number.replace(/.(?=.{4})/g, '*'),
       accountName: a.account_name,
       isDefault: a.is_default,
+      status: a.status,
+      usable: false,
+      message: 'Compte enregistré : utilisable pour les transferts après vérification par C-Pay',
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/bank-accounts/:accountId', merchantAuth, async (req, res) => {
+router.delete('/bank-accounts/:accountId', requireBeneficiaryOwner, async (req, res) => {
   const mid = req.merchant?.merchantId || req.user?.merchantId;
+  const cashSvc = require('../services/cash/cash.service');
+  const step = await cashSvc.verifyStepUp({ userId: req.user?.sub, confirm: req.body?.confirm });
+  if (!step.ok) return res.status(step.status).json(step.body);
   try {
-    await query(
+    const r = await query(
       `UPDATE bank_accounts SET status='removed', updated_at=NOW()
-       WHERE account_id=$1 AND owner_id=$2`, [req.params.accountId, mid]);
-    res.json({ success: true });
+       WHERE account_id=$1 AND owner_id=$2 AND owner_type='merchant' AND status <> 'removed'
+       RETURNING account_id, account_number, account_name, status, institution_id`, [req.params.accountId, mid]);
+    const a = r.rows[0];
+    if (!a) return res.status(404).json({ error: 'Compte bancaire introuvable', code: 'BANK_ACCOUNT_NOT_FOUND' });
+    const inst = await query(`SELECT name FROM financial_institutions WHERE institution_id=$1`, [a.institution_id]).catch(() => ({ rows: [] }));
+    const masked = cashSvc.maskBankAccount({ ...a, inst_name: inst.rows[0]?.name || null });
+    await cashSvc.recordBeneficiaryEvent({ merchantId: mid, actor: beneficiaryActor(req), eventType: 'bank_account_removed', entityType: 'bank_account', entityId: a.account_id, oldValues: masked, newValues: { status: 'removed' }, ip: req.ip })
+      .catch((e) => logger.error('[merchant] beneficiary event failed', { err: e.message }));
+    await beneficiaryAudit(req, 'BANK_ACCOUNT_REMOVE', a.account_id, { status: 'removed', stepUp: step.method }, masked);
+    const m = await query(`SELECT merchant_id, business_name, email FROM merchants WHERE merchant_id=$1`, [mid]).catch(() => ({ rows: [] }));
+    cashSvc.notifyBeneficiaryChange(m.rows[0], { eventType: 'bank_account_removed', summary: `${masked.bankName || 'Banque'} ${masked.accountMasked}`, ip: req.ip }).catch(() => {});
+    res.json({ success: true, accountId: a.account_id, status: 'removed' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

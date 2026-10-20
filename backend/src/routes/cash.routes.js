@@ -20,14 +20,31 @@ const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
 const { query } = require('../config/database');
-const { merchantAuth } = require('../middleware/auth');
-const { idempotency } = require('../middleware/idempotency');
+const { merchantAuth, requireMerchantOwner } = require('../middleware/auth');
+const { idempotency, attachResource } = require('../middleware/idempotency');
 const logger = require('../config/logger');
 const cash = require('../services/cash/cash.service');
 
 const ZERO_DECIMAL = new Set(['XOF', 'XAF', 'CDF']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const mid = (req) => req.merchant?.merchantId || req.user?.merchantId;
 const fail = (res, status, error, code, extra = {}) => res.status(status).json({ error, code, ...extra });
+const actor = (req) => ({ type: 'merchant', id: req.user?.sub || null, email: req.user?.email || null, role: req.user?.role || null });
+// Audit log marchand (best effort) — même table que l'admin
+const merchantAudit = async (req, action, entityType, entityId, newValues, oldValues = null) => {
+  try {
+    await query(
+      `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, old_values, new_values, ip_address)
+       VALUES ('merchant',$1,$2,$3,$4,$5,$6,$7,$8)`,
+      [UUID_RE.test(String(req.user?.sub || '')) ? req.user.sub : null, req.user?.email || null, action, entityType,
+       UUID_RE.test(String(entityId || '')) ? entityId : null, oldValues ? JSON.stringify(oldValues) : null, JSON.stringify(newValues || {}), req.ip || null]);
+  } catch (e) { logger.warn('[cash] audit log failed', { action, err: e.message }); }
+};
+// WAVE-6 : réponse d'un ordre sortant — `unknown` (résultat opérateur incertain) reste 201 avec outcome
+const payoutResponse = (res, t, body) => res.status(201).json({
+  ...body, status: t.status,
+  ...(t.status === 'unknown' ? { outcome: 'unknown', message: t.message || 'Résultat opérateur incertain — vérification en cours, fonds réservés' } : {}),
+});
 const featureDisabled = (res, extra = {}) => res.status(410).json({
   error: 'Fonctionnalité désactivée en attendant l’intégration opérateur', code: 'FEATURE_DISABLED', ...extra,
 });
@@ -130,7 +147,9 @@ router.post('/collect', merchantAuth, idempotency, async (req, res) => {
     merchantId, type: 'collect', amount, customerPhone: d.phone, description: desc || 'Encaissement caisse',
     deviceId: terminalId || deviceId || null, operatorOverride: d.overridden ? d.operator : undefined,
   });
+  if (result.txnId) await attachResource(req, { type: 'transaction', id: result.txnId });
   if (!result.success && !result.pending) {
+    if (result.code === 'FRAUD_UNAVAILABLE') return fail(res, 503, result.error, 'FRAUD_UNAVAILABLE', { txnId: result.txnId || null });
     if (result.limitInfo) return fail(res, 429, result.error || 'Plafond atteint', 'LIMIT_EXCEEDED', { txnId: result.txnId || null, limit: result.limitInfo.limit, currentVolume: result.limitInfo.currentVolume });
     if (result.status === 'failed' || result.code === 'PAYMENT_DECLINED') return fail(res, 402, result.error || result.message || 'Paiement refusé', 'PAYMENT_DECLINED', { txnId: result.txnId || null });
     return fail(res, result.statusCode || 422, result.error || 'Encaissement impossible', result.code || 'VALIDATION_ERROR', { txnId: result.txnId || null });
@@ -182,7 +201,8 @@ router.get('/wallet', merchantAuth, async (req, res) => {
   res.json({ operator: m.cash_wallet_operator, phone: m.cash_wallet_phone, verifiedAt: m.cash_wallet_verified_at || null });
 });
 
-router.put('/wallet', merchantAuth, async (req, res) => {
+// WAVE-6 (audit §3) : rôle owner + step-up ; historique beneficiary_events + audit + e-mail au propriétaire
+router.put('/wallet', requireMerchantOwner, async (req, res) => {
   const { operator, phone, confirm } = req.body || {};
   if (!phone) return fail(res, 422, 'phone requis', 'VALIDATION_ERROR');
   const step = await cash.verifyStepUp({ userId: req.user?.sub, confirm });
@@ -203,7 +223,21 @@ router.put('/wallet', merchantAuth, async (req, res) => {
      WHERE merchant_id=$3
      RETURNING cash_wallet_operator, cash_wallet_phone, cash_wallet_verified_at`, [code, d.phone, m.merchant_id]);
   const w = r.rows[0] || { cash_wallet_operator: code, cash_wallet_phone: d.phone, cash_wallet_verified_at: null };
+  const changed = m.cash_wallet_phone !== d.phone || cash.normalizeOperatorCode(m.cash_wallet_operator) !== code;
+  if (changed) {
+    const oldValues = cash.maskWallet(m.cash_wallet_operator, m.cash_wallet_phone);
+    const newValues = cash.maskWallet(code, d.phone);
+    await cash.recordBeneficiaryEvent({ merchantId: m.merchant_id, actor: actor(req), eventType: 'wallet_updated', entityType: 'wallet', entityId: m.merchant_id, oldValues, newValues, ip: req.ip })
+      .catch((e) => logger.error('[cash] beneficiary event failed', { err: e.message }));
+    await merchantAudit(req, 'CASH_WALLET_UPDATE', 'merchant', m.merchant_id, { ...newValues, stepUp: step.method }, oldValues);
+    cash.notifyBeneficiaryChange(m, { eventType: 'wallet_updated', summary: `${cash.operatorLabel(code)} ${cash.maskNumber(d.phone, 3)}`, ip: req.ip }).catch(() => {});
+  }
   res.json({ operator: w.cash_wallet_operator, phone: w.cash_wallet_phone, operatorLabel: cash.operatorLabel(code), country: d.country, verifiedAt: w.cash_wallet_verified_at || null });
+});
+
+// WAVE-6 : historique des changements de bénéficiaire (wallet, comptes bancaires)
+router.get('/beneficiaries/history', merchantAuth, async (req, res) => {
+  res.json(await cash.beneficiaryHistory(mid(req), req.query));
 });
 
 // ─── §4 Retirer ───────────────────────────────────────────────────
@@ -230,10 +264,11 @@ router.post('/withdraw', merchantAuth, idempotency, async (req, res) => {
     wallet: { operator: operatorCode, phone: merchant.cash_wallet_phone, gateway: rail.gateway, country },
     rail, amount, description: description || 'Retrait', refPrefix: 'PAY',
     dailyLimit: cash.withdrawDailyLimit(merchant.kyb_level), actor: `merchant:${req.user?.sub || ''}`,
+    onReserved: ({ transferId }) => attachResource(req, { type: 'merchant_transfer', id: transferId }),
   });
   if (r.error) return res.status(r.error.status).json(r.error.body);
   const t = r.transfer;
-  res.status(201).json({
+  payoutResponse(res, t, {
     transferId: t.transferId, reference: t.reference, status: t.status,
     amount: t.amount, fee: t.fee, net: t.net, currency: t.currency,
     wallet: { operator: operatorCode, phone: merchant.cash_wallet_phone, operatorLabel: rail.operatorLabel },
@@ -257,6 +292,7 @@ router.post('/transfers', merchantAuth, idempotency, async (req, res) => {
     const r = await cash.createPayout({
       merchantId: merchant.merchant_id, destType: 'bank', accountId, amount, description: description || 'Transfert vers banque',
       refPrefix: 'TRF', bankQueueStatus: 'pending_manual', actor: `merchant:${req.user?.sub || ''}`,
+      onReserved: ({ transferId }) => attachResource(req, { type: 'merchant_transfer', id: transferId }),
     });
     if (r.error) return res.status(r.error.status).json(r.error.body);
     const t = r.transfer;
@@ -271,6 +307,7 @@ router.post('/transfers', merchantAuth, idempotency, async (req, res) => {
   // bank_to_wallet : ordre d'approvisionnement (aucun mouvement avant confirmation de réception)
   const r = await cash.createFundingOrder({ merchantId: merchant.merchant_id, amount, description, accountId, actor: `merchant:${req.user?.sub || ''}` });
   if (r.error) return res.status(r.error.status).json(r.error.body);
+  await attachResource(req, { type: 'merchant_transfer', id: r.transfer.transfer_id });
   res.status(201).json({
     transferId: r.transfer.transfer_id, reference: r.reference, direction, status: 'awaiting_funds',
     amount, currency: r.currency, instructions: r.instructions, expiresAt: r.expiresAt,
@@ -307,7 +344,7 @@ router.get('/transfers', merchantAuth, async (req, res) => {
 router.get('/transfers/:id', merchantAuth, async (req, res) => {
   let t = await cash.getTransfer(req.params.id, { merchantId: mid(req) });
   if (!t) return fail(res, 404, 'Transfert introuvable', 'TRANSFER_NOT_FOUND');
-  if (t.status === 'processing') t = await cash.refreshPayoutStatus(t);
+  if (cash.UNCERTAIN.includes(t.status)) t = await cash.refreshPayoutStatus(t);
   res.json(cash.serializeTransfer(t));
 });
 

@@ -89,7 +89,7 @@ describe('reconcile.service — providers vague 2', () => {
     expect(sql).toMatch(/WHERE transaction_id = \$5 AND status = 'pending'/);
     expect(sql).toMatch(/response_code = CASE WHEN \$1 = 'authorized' THEN '00'/);
     expect(params[0]).toBe('authorized'); expect(params[1]).toBe('AF-OP-1'); expect(params[3]).toMatch(/reconcile/);
-    expect(mockEnqueue).toHaveBeenCalledWith(expect.objectContaining({ txnId: 'T-AF', merchantId: 'M-1', amount: 5000, currency: 'CDF' }));
+    expect(mockEnqueue).toHaveBeenCalledWith(expect.objectContaining({ txnId: 'T-AF', merchantId: 'M-1', amount: 5000, currency: 'CDF' }), expect.anything()); // WAVE-6 : client SQL
     const ev = calls(/INSERT INTO transaction_events/)[0];
     expect(ev[1][2]).toBe('AFRICELL_RECONCILE');
   });

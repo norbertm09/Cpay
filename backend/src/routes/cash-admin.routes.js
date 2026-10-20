@@ -46,6 +46,9 @@ router.get('/stats', cashAdmin, async (req, res) => {
        COUNT(*) FILTER (WHERE status='awaiting_funds') AS q_funding,
        COALESCE(SUM(amount) FILTER (WHERE status='awaiting_funds'),0) AS q_funding_amount,
        COUNT(*) FILTER (WHERE status='processing') AS q_processing,
+       COUNT(*) FILTER (WHERE status='unknown') AS q_unknown,
+       COALESCE(SUM(amount) FILTER (WHERE status='unknown'),0) AS q_unknown_amount,
+       COUNT(*) FILTER (WHERE needs_review AND status NOT IN ('completed','failed','cancelled','rejected')) AS q_review,
        COUNT(*) FILTER (WHERE direction='payout' AND dest_type='wallet' AND status = ANY($2::text[]) AND created_at::date = CURRENT_DATE) AS d_withdraw_n,
        COALESCE(SUM(amount) FILTER (WHERE direction='payout' AND dest_type='wallet' AND status = ANY($2::text[]) AND created_at::date = CURRENT_DATE),0) AS d_withdraw,
        COUNT(*) FILTER (WHERE direction='payout' AND dest_type='bank' AND status = ANY($2::text[]) AND created_at::date = CURRENT_DATE) AS d_out_n,
@@ -73,6 +76,8 @@ router.get('/stats', cashAdmin, async (req, res) => {
       pendingManual: { count: i(m.q_manual), amount: n(m.q_manual_amount) },
       awaitingFunds: { count: i(m.q_funding), amount: n(m.q_funding_amount) },
       processing: { count: i(m.q_processing) },
+      unknown: { count: i(m.q_unknown), amount: n(m.q_unknown_amount) },
+      needsReview: { count: i(m.q_review) },
     },
     today: {
       collected: { count: i(t.d_n), amount: n(t.d_amount) },
@@ -97,10 +102,10 @@ const DIRECTION_SQL = {
   payout:         `mt.direction='payout'`,
   funding:        `mt.direction='funding'`,
 };
-const STATUS_ALIASES = { pending_manual: cash.MANUAL_QUEUE };
+const STATUS_ALIASES = { pending_manual: cash.MANUAL_QUEUE, uncertain: cash.UNCERTAIN };
 
 router.get('/transfers', cashAdmin, async (req, res) => {
-  const { status, direction, merchantId, q } = req.query;
+  const { status, direction, merchantId, q, needsReview } = req.query;
   if (direction && !DIRECTION_SQL[direction]) return fail(res, 422, `direction: ${Object.keys(DIRECTION_SQL).join(' | ')}`, 'VALIDATION_ERROR');
   let limit = parseInt(req.query.limit, 10); if (!Number.isFinite(limit)) limit = 50; limit = Math.min(200, Math.max(1, limit));
   let offset = parseInt(req.query.offset, 10); if (!Number.isFinite(offset) || offset < 0) offset = 0;
@@ -110,6 +115,7 @@ router.get('/transfers', cashAdmin, async (req, res) => {
     params.push(list); conds.push(`mt.status = ANY($${params.length}::text[])`);
   }
   if (direction) conds.push(DIRECTION_SQL[direction]);
+  if (needsReview !== undefined && ['1', 'true'].includes(String(needsReview))) conds.push('mt.needs_review = TRUE');
   if (merchantId) { params.push(String(merchantId)); conds.push(`mt.merchant_id::text = $${params.length}`); }
   if (q) { params.push(`%${String(q).trim()}%`); conds.push(`(mt.reference ILIKE $${params.length} OR m.business_name ILIKE $${params.length} OR m.email ILIKE $${params.length} OR mt.bank_reference ILIKE $${params.length})`); }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
@@ -124,11 +130,78 @@ router.get('/transfers', cashAdmin, async (req, res) => {
   res.json({ data: r.rows.map((t) => cash.serializeTransfer(t, { admin: true })), total: parseInt(c.rows[0]?.total, 10) || 0, limit, offset });
 });
 
+// WAVE-6 : rafraîchit `processing` ET `unknown` ; contexte bénéficiaire (derniers changements du marchand)
 router.get('/transfers/:id', cashAdmin, async (req, res) => {
   let t = await cash.getTransfer(req.params.id);
   if (!t) return fail(res, 404, 'Transfert introuvable', 'TRANSFER_NOT_FOUND');
-  if (t.status === 'processing') t = await cash.refreshPayoutStatus(t);
-  res.json(cash.serializeTransfer(t, { admin: true }));
+  if (cash.UNCERTAIN.includes(t.status)) t = await cash.refreshPayoutStatus(t);
+  let beneficiaryHistory = [];
+  try { beneficiaryHistory = (await cash.beneficiaryHistory(t.merchant_id, { limit: 10 })).data; }
+  catch (e) { logger.warn('[cash-admin] beneficiary history failed', { err: e.message }); }
+  res.json({ ...cash.serializeTransfer(t, { admin: true }), context: { beneficiaryHistory, statusCheck: t._statusCheck || null } });
+});
+
+// ─── WAVE-6 : retraits incertains / réparations ───────────────────
+// Interroge l'opérateur pour tous les retraits `unknown` / `processing` (même logique que le cron)
+router.post('/reconcile/uncertain-payouts', cashAdmin, async (req, res) => {
+  const { reconcileUncertainPayouts } = require('../services/reconcile.service');
+  const graceMinutes = req.body?.graceMinutes !== undefined ? Number(req.body.graceMinutes) : null;
+  const r = await reconcileUncertainPayouts({ graceMinutes: Number.isFinite(graceMinutes) ? graceMinutes : null, limit: req.body?.limit || 200 });
+  await audit(req, 'CASH_RECONCILE_UNCERTAIN', 'system', null, { transfers: r.transfers.summary, transactions: { scanned: r.transactions.scanned, flagged: r.transactions.flagged } });
+  res.json(r);
+});
+
+// Encaissements `authorized` sans ligne settlement_queue (> 5 min) → enfilés (audit §2, job de réparation)
+router.post('/repair/settlement-queue', cashAdmin, async (req, res) => {
+  const { sweepAuthorizedWithoutQueue } = require('../services/settlement/settlement.repair');
+  const minAge = req.body?.minAgeMinutes !== undefined ? Number(req.body.minAgeMinutes) : 5;
+  const r = await sweepAuthorizedWithoutQueue({ minAgeMinutes: Number.isFinite(minAge) && minAge >= 0 ? minAge : 5, actor: `admin:${req.user?.sub || ''}` });
+  await audit(req, 'SETTLEMENT_QUEUE_REPAIR', 'system', null, { scanned: r.scanned, repaired: r.repaired, errors: r.errors, transactionIds: r.transactionIds });
+  res.json({ success: true, ...r });
+});
+
+// ─── WAVE-6 : vérification d'un compte bancaire marchand ─────────
+const VERIFY_METHODS = ['document', 'micro_deposit', 'manual'];
+router.post('/bank-accounts/:id/verify', cashAdmin, async (req, res) => {
+  const { method, reference, note } = req.body || {};
+  if (!VERIFY_METHODS.includes(method)) return fail(res, 422, `method: ${VERIFY_METHODS.join(' | ')}`, 'VALIDATION_ERROR');
+  if (!reference || !String(reference).trim()) return fail(res, 422, 'reference requis (document, référence du micro-virement ou du contrôle manuel)', 'VALIDATION_ERROR');
+  const cur = await query(
+    `SELECT ba.*, fi.name AS inst_name, m.email AS merchant_email, m.business_name
+     FROM bank_accounts ba LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
+     LEFT JOIN merchants m ON m.merchant_id = ba.owner_id
+     WHERE ba.account_id=$1 AND ba.owner_type='merchant'`, [req.params.id]);
+  const a = cur.rows[0];
+  if (!a) return fail(res, 404, 'Compte bancaire introuvable', 'NOT_FOUND');
+  if (a.status === 'verified') return fail(res, 409, 'Compte déjà vérifié', 'ALREADY_VERIFIED', { verifiedAt: a.verified_at || null });
+  if (a.status === 'removed') return fail(res, 409, 'Compte supprimé', 'INVALID_STATUS', { status: a.status });
+  const r = await query(
+    `UPDATE bank_accounts SET status='verified', verified_at=NOW(), verified_by=$2, verification_method=$3, verification_reference=$4, updated_at=NOW()
+     WHERE account_id=$1 AND status <> 'verified' RETURNING *`,
+    [a.account_id, actorId(req), method, String(reference).trim().slice(0, 128)]);
+  const row = r.rows[0];
+  if (!row) return fail(res, 409, 'Compte déjà vérifié', 'ALREADY_VERIFIED');
+  const newValues = { ...cash.maskBankAccount({ ...row, inst_name: a.inst_name }), method, reference: String(reference).trim().slice(0, 128), note: note || null };
+  await cash.recordBeneficiaryEvent({
+    merchantId: a.owner_id, actor: { type: 'admin', id: actorId(req), email: req.user?.email || null, role: req.user?.role || null },
+    eventType: 'bank_account_verified', entityType: 'bank_account', entityId: a.account_id,
+    oldValues: { status: a.status }, newValues, ip: req.ip,
+  }).catch((e) => logger.error('[cash-admin] beneficiary event failed', { err: e.message }));
+  await audit(req, 'BANK_ACCOUNT_VERIFY', 'bank_account', a.account_id, newValues, { status: a.status });
+  cash.notifyBeneficiaryChange({ email: a.merchant_email, business_name: a.business_name }, { eventType: 'bank_account_verified', summary: `${a.inst_name || 'Banque'} ${cash.maskNumber(a.account_number)}` }).catch(() => {});
+  res.json({ success: true, accountId: row.account_id, status: row.status, verifiedAt: row.verified_at, method, reference: row.verification_reference, bankName: a.inst_name || null, accountMasked: cash.maskNumber(row.account_number) });
+});
+
+// Comptes bancaires en attente de vérification
+router.get('/bank-accounts', cashAdmin, async (req, res) => {
+  const status = req.query.status ? String(req.query.status) : 'pending_verification';
+  const r = await query(
+    `SELECT ba.account_id, ba.owner_id AS merchant_id, ba.account_number, ba.account_name, ba.status, ba.created_at, ba.verified_at, ba.verification_method,
+            fi.name AS inst_name, m.business_name, m.email AS merchant_email
+     FROM bank_accounts ba LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
+     LEFT JOIN merchants m ON m.merchant_id = ba.owner_id
+     WHERE ba.owner_type='merchant' AND ba.status = $1 ORDER BY ba.created_at ASC LIMIT 200`, [status]);
+  res.json({ data: r.rows.map((a) => ({ ...cash.maskBankAccount(a), merchantId: a.merchant_id, merchant: a.business_name || null, merchantEmail: a.merchant_email || null, createdAt: a.created_at, verifiedAt: a.verified_at || null, verificationMethod: a.verification_method || null })), total: r.rows.length });
 });
 
 // ─── Actions ──────────────────────────────────────────────────────

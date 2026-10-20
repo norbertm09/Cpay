@@ -65,7 +65,7 @@ const PASSWORD = 'Aa1!' + require('crypto').randomBytes(8).toString('hex');
 const PASSWORD_HASH = bcrypt.hashSync(PASSWORD, 4);
 const TOTP_SECRET = speakeasy.generateSecret({ length: 20 }).base32;
 
-const merchantToken = (sub = 'user-1') => signToken({ sub, merchantId: MERCHANT_ID, type: 'merchant', email: 'm@test.io' });
+const merchantToken = (sub = 'user-1', role = 'owner') => signToken({ sub, merchantId: MERCHANT_ID, type: 'merchant', email: 'm@test.io', role }); // WAVE-6 : rôle owner requis pour PUT /wallet
 const adminToken = (role = 'ops_admin') => signToken({ sub: ADMIN_ID, type: 'admin', role, email: 'admin@test.io' });
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 const rows = (r) => ({ rows: r, rowCount: r.length });
@@ -582,7 +582,7 @@ describe('6. POST /merchant/cash/transfers, liste, détail, annulation', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ transferId: TRANSFER_ID, status: 'completed', type: 'withdraw' });
     expect(mockMtnStatus).toHaveBeenCalledWith('MTN-REF');
-    const [, p] = calls(mockDbQuery, /UPDATE merchant_transfers/)[0];
+    const [, p] = calls(mockDbQuery, /UPDATE merchant_transfers\s+SET status=/)[0]; // WAVE-6 : last_status_check_at est touché avant la transition
     expect(p[1]).toBe('completed'); expect(p[11]).toEqual(['processing']); expect(p[4]).toBe('FT-1');
     expect(calls(mockDbQuery, /cash_wallet_verified_at = NOW/)).toHaveLength(1);
   });
@@ -608,7 +608,7 @@ describe('7. Administration /admin/cash', () => {
     ]));
     const res = await request(app).get('/admin/cash/stats').set(bearer(adminToken('super_admin')));
     expect(res.status).toBe(200);
-    expect(res.body.queues).toEqual({ pendingManual: { count: 3, amount: 600000 }, awaitingFunds: { count: 2, amount: 400000 }, processing: { count: 1 } });
+    expect(res.body.queues).toEqual({ pendingManual: { count: 3, amount: 600000 }, awaitingFunds: { count: 2, amount: 400000 }, processing: { count: 1 }, unknown: { count: 0, amount: 0 }, needsReview: { count: 0 } }); // WAVE-6
     expect(res.body.today.collected).toEqual({ count: 12, amount: 80000 });
     expect(res.body.last7Days.transfersIn).toEqual({ count: 1, amount: 150000 });
     const [, params] = calls(mockDbQuery, /FROM merchant_transfers/)[0];

@@ -17,8 +17,11 @@ const logger = require('../../config/logger');
 
 // ─── Queue de settlement ──────────────────────────────────────────
 
-const enqueue = async ({ txnId, merchantId, amount, currency }) => {
-  await query(
+// WAVE-6 : `client` optionnel (pg client d'une transaction en cours) — finalize.service
+// enfile dans la MÊME transaction SQL que le passage à `authorized`.
+const enqueue = async ({ txnId, merchantId, amount, currency }, client = null) => {
+  const exec = client ? (text, params) => client.query(text, params) : query;
+  await exec(
     `INSERT INTO settlement_queue (transaction_id, merchant_id, amount, currency, queued_at)
      VALUES ($1, $2, $3, $4, NOW())
      ON CONFLICT (transaction_id) DO NOTHING`,
