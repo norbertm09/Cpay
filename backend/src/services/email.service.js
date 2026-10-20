@@ -1,4 +1,5 @@
 'use strict';
+const { smtpTlsOptions } = require('../config/smtp-tls');
 const nodemailer = require('nodemailer');
 
 let _transporter = null;
@@ -9,7 +10,8 @@ const getTransporter = () => {
     port:   parseInt(process.env.SMTP_PORT || '465'),
     secure: true,
     auth: { user: process.env.SMTP_USER || 'noreply@c-pay.global', pass: process.env.SMTP_PASS },
-    tls: { rejectUnauthorized: false },
+    requireTLS: true,
+    tls: smtpTlsOptions(),
   });
   return _transporter;
 };

@@ -25,6 +25,17 @@ const webhooks = require('./webhook-handlers');
 const { cardholderAuth, aliasUser } = require('../middleware/auth');
 const cardAuth = [cardholderAuth, aliasUser('actor')];
 
+// Legacy transfers are suspended until both legs, provider references and
+// compensation are reliable. Keep authentication and stop before any side effect.
+// Status polling and signed webhooks remain available for existing operations.
+router.post(['/card2momo', '/momo2card', '/momo2momo'], cardAuth, (_req, res) =>
+  res.status(410).json({
+    error: 'Transfert temporairement indisponible pendant la sécurisation du service',
+    code: 'FEATURE_DISABLED',
+  })
+);
+
+
 // ─── Helper : enregistrer transfert en DB ────────────────────────
 const logTransfer = async (client, { txnId, cardId, cardholderId, type, amount, fee, feeBearer, currency, status, description, metadata }) => {
   await client.query(

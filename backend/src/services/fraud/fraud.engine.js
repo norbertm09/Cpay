@@ -28,6 +28,16 @@ const evaluate = async ({ txnId, merchantId, deviceId, terminalId, amount, curre
     if (action === 'block') blockReason = reason;
   }
 
+  // Preserve an explicit block even if another check is unavailable. Otherwise,
+  // the orchestrator must apply the configured degraded policy.
+  const unavailable = checks.find((check) => check.status === 'rejected');
+  if (unavailable && !blockReason && maxScore < 80) {
+    const err = new Error('Contrôle antifraude indisponible');
+    err.code = 'FRAUD_UNAVAILABLE';
+    err.cause = unavailable.reason;
+    throw err;
+  }
+
   const action = blockReason || maxScore >= 80 ? 'block' : maxScore >= 40 ? 'review' : 'allow';
 
   if (action !== 'allow') {
@@ -44,20 +54,18 @@ const evaluate = async ({ txnId, merchantId, deviceId, terminalId, amount, curre
 
 const checkVelocity = async ({ merchantId, deviceId, terminalId }) => {
   const { query } = require('../../config/database');
-  try {
-    if (terminalId) {
-      const r = await query(
-        `SELECT COUNT(*)::int as cnt FROM transactions
-         WHERE terminal_id=$1 AND initiated_at > NOW()-INTERVAL '1 minute' AND status!='failed'`,
-        [terminalId]);
-      if (r.rows[0].cnt >= 5) return { ruleName:'velocity_terminal', score:100, action:'block', reason:`${r.rows[0].cnt} txn/min` };
-    }
-    const r2 = await query(
+  if (terminalId) {
+    const r = await query(
       `SELECT COUNT(*)::int as cnt FROM transactions
-       WHERE merchant_id=$1 AND status='failed' AND initiated_at>NOW()-INTERVAL '10 minutes'`,
-      [merchantId]);
-    if (r2.rows[0].cnt >= 5) return { ruleName:'card_testing', score:100, action:'block', reason:`${r2.rows[0].cnt} échecs en 10min` };
-  } catch {}
+       WHERE terminal_id=$1 AND initiated_at > NOW()-INTERVAL '1 minute' AND status!='failed'`,
+      [terminalId]);
+    if (r.rows[0].cnt >= 5) return { ruleName:'velocity_terminal', score:100, action:'block', reason:`${r.rows[0].cnt} txn/min` };
+  }
+  const r2 = await query(
+    `SELECT COUNT(*)::int as cnt FROM transactions
+     WHERE merchant_id=$1 AND status='failed' AND initiated_at>NOW()-INTERVAL '10 minutes'`,
+    [merchantId]);
+  if (r2.rows[0].cnt >= 5) return { ruleName:'card_testing', score:100, action:'block', reason:`${r2.rows[0].cnt} échecs en 10min` };
   return { ruleName:'velocity_ok', score:0, action:'allow', reason:null };
 };
 
@@ -70,11 +78,9 @@ const checkAmount = async ({ merchantId, amount, currency }) => {
 const checkDevice = async ({ merchantId, deviceId, terminalId }) => {
   if (!terminalId) return { ruleName:'device_no_terminal', score:15, action:'allow', reason:'Terminal non spécifié' };
   const { query } = require('../../config/database');
-  try {
-    const r = await query('SELECT status FROM terminals WHERE terminal_id=$1', [terminalId]);
-    if (!r.rows.length) return { ruleName:'device_unregistered', score:80, action:'review', reason:'Terminal non enregistré' };
-    if (r.rows[0].status === 'blocked') return { ruleName:'device_blocked', score:100, action:'block', reason:'Terminal bloqué' };
-  } catch {}
+  const r = await query('SELECT status FROM terminals WHERE terminal_id=$1', [terminalId]);
+  if (!r.rows.length) return { ruleName:'device_unregistered', score:80, action:'review', reason:'Terminal non enregistré' };
+  if (r.rows[0].status === 'blocked') return { ruleName:'device_blocked', score:100, action:'block', reason:'Terminal bloqué' };
   return { ruleName:'device_ok', score:0, action:'allow', reason:null };
 };
 
