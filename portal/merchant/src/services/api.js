@@ -155,6 +155,11 @@ export const detectApi = {
   phone: (phone, signal) => axios.post(`${apiBaseUrl}/api/v1/detect/phone`, { phone }, { signal }),
 };
 
+// Capacités réelles par pays (registre serveur, vague 6) : public, sans cookie, cache 60 s côté API.
+export const capabilitiesApi = {
+  summary: () => axios.get(`${apiBaseUrl}/api/v1/public/capabilities`, { withCredentials: false }),
+};
+
 // ─── Activité : transactions, règlements, reçus ───────────────────
 export const activityApi = {
   dashboard:        ()       => api.get('/dashboard'),
@@ -217,6 +222,8 @@ export const isFeatureUnavailable = (err) => {
   return st === 410 || st === 404 || err?.response?.data?.code === 'FEATURE_DISABLED';
 };
 export const isStepUp = (err) => err?.response?.status === 428 || err?.response?.data?.code === 'STEP_UP_REQUIRED';
+// 403 CAPABILITY_NOT_ACTIVE : moyen / opérateur non activé dans le pays du marchand (registre de capacités).
+export const isCapabilityBlocked = (err) => err?.response?.data?.code === 'CAPABILITY_NOT_ACTIVE';
 
 export { api, apiBaseUrl, setAccessToken, getAccessToken, authListeners, refreshAccessToken, decodeJwt, userFromClaims };
 export default api;

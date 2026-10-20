@@ -1,13 +1,15 @@
 // Message lisible pour une erreur d'API (codes du contrat caisse et routes marchand).
-import { isFeatureUnavailable } from '../services/api';
+import { isFeatureUnavailable, isCapabilityBlocked } from '../services/api';
 import { fmtMoney } from './format';
 
 export const FEATURE_UNAVAILABLE_MSG = 'Fonctionnalité en cours d’intégration';
+export const CAPABILITY_BLOCKED_MSG = 'Non disponible dans votre pays pour le moment';
 
 export const errorMessage = (err, ctx = {}) => {
   const d = err?.response?.data || {};
   const st = err?.response?.status;
   if (isFeatureUnavailable(err)) return FEATURE_UNAVAILABLE_MSG;
+  if (isCapabilityBlocked(err)) return d.message ? `${CAPABILITY_BLOCKED_MSG} : ${d.message}` : `${CAPABILITY_BLOCKED_MSG}.`;
   const available = d.available ?? d.details?.available;
   switch (d.code) {
     case 'INSUFFICIENT_BALANCE': return `Solde insuffisant${available != null ? ` (disponible : ${fmtMoney(available, ctx.currency)})` : ''}.`;
@@ -27,6 +29,7 @@ export const errorMessage = (err, ctx = {}) => {
     case 'INVALID_TOKEN': return 'Lien invalide ou expiré.';
     case 'UNSAFE_WEBHOOK_URL': return d.error || 'URL de webhook refusée (https:// public obligatoire).';
     case 'VALIDATION_ERROR': return d.error || 'Données invalides.';
+    case 'COUNTRY_NOT_OPEN': return d.error || 'Ce pays n’est pas encore ouvert à l’inscription.';
     default: break;
   }
   if (st === 423) return 'Compte temporairement verrouillé après plusieurs échecs. Réessayez dans 15 minutes.';

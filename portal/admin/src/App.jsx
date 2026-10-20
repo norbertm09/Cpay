@@ -26,6 +26,7 @@ import { BanksPage, BankDetailPage, AgenciesPage, AgentsPage, TenantsPage } from
 import ConnectorsPage from './pages/settings/ConnectorsPage';
 import NotificationsPage from './pages/settings/NotificationsPage';
 import { TerminalsPage, FeaturesPage, AdminsPage, AuditPage, MonitoringPage } from './pages/settings/SettingsPages';
+import CapabilitiesPage from './pages/settings/CapabilitiesPage';
 import AccountPage from './pages/account/AccountPage';
 
 // Mot de passe temporaire (mustChangePassword) : changement forcé avant d'entrer dans le back-office.
@@ -58,6 +59,7 @@ const Protected = () => {
         <Route path="/configuration/notifications" element={<RequireRole roles={PERMS.ops}><NotificationsPage /></RequireRole>} />
         <Route path="/configuration/terminaux" element={<TerminalsPage />} />
         <Route path="/configuration/fonctionnalites" element={<RequireRole roles={PERMS.ops}><FeaturesPage /></RequireRole>} />
+        <Route path="/configuration/capacites" element={<CapabilitiesPage />} />
         <Route path="/configuration/administrateurs" element={<RequireRole roles={PERMS.superOnly}><AdminsPage /></RequireRole>} />
         <Route path="/configuration/audit" element={<RequireRole roles={PERMS.superOnly}><AuditPage /></RequireRole>} />
         <Route path="/configuration/monitoring" element={<MonitoringPage />} />

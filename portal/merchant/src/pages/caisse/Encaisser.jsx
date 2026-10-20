@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
-import { cashApi, newIdempotencyKey, isFeatureUnavailable } from '../../services/api';
+import { cashApi, newIdempotencyKey, isFeatureUnavailable, isCapabilityBlocked } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
 import { useCashSummary } from '../../hooks/useCashSummary';
+import { useCapabilities } from '../../hooks/useCapabilities';
 import { Button, Card, PageHeader, Input, AmountInput, Segmented, Notice, KV, Icon, Skeleton } from '../../components';
 import { fmtMoney, fmtDateTime, fmtPhone, phoneDigits } from '../../utils/format';
 import { errorMessage } from '../../utils/errors';
@@ -22,6 +23,10 @@ export const Encaisser = () => {
   const { summary, state: sumState } = useCashSummary();
   const currency = summary?.currency || user?.currency || 'XAF';
   const cardAcceptance = summary?.profile?.cardAcceptance;
+  // Capacités réelles du pays (registre serveur) : méthode / opérateur non actifs désactivés, message explicite.
+  const cap = useCapabilities(user?.country);
+  const mmOpen = cap.isOpen('collect', 'mobile_money');
+  const cardOpen = cap.isOpen('collect', 'card');
   const dev = devParams();
   const [method, setMethod] = useState(dev?.get('method') || 'mobile_money');
   const [amount, setAmount] = useState(dev?.get('amount') || '');
@@ -72,7 +77,11 @@ export const Encaisser = () => {
   const altList = detect?.alternatives || [];
   const currencyMismatch = detectedOk && detect.currency && detect.currency !== currency;
   const phoneOk = phoneDigits(phone).length >= 8;
-  const canSubmit = amt > 0 && !loading && (method === 'card' || (phoneOk && !currencyMismatch && !detecting));
+  // Opérateur effectivement utilisé (détecté ou alternative choisie) : doit être actif dans le pays
+  const effectiveOperator = operator ? operator.toUpperCase() : detect?.operator;
+  const operatorClosed = method === 'mobile_money' && detectedOk && !!effectiveOperator && !cap.isOpen('collect', 'mobile_money', effectiveOperator);
+  const methodClosed = method === 'mobile_money' ? !mmOpen : !cardOpen;
+  const canSubmit = amt > 0 && !loading && !methodClosed && !operatorClosed && (method === 'card' || (phoneOk && !currencyMismatch && !detecting));
 
   const submit = async (e) => {
     e?.preventDefault();
@@ -88,7 +97,7 @@ export const Encaisser = () => {
       if (method === 'card') { setResult(data); setPhase('card'); }
       else { setResult({ ...data, customerPhone: body.customerPhone }); setPhase('pending'); }
     } catch (err) {
-      if (method === 'card' && isFeatureUnavailable(err)) setPhase('card_unavailable');
+      if (method === 'card' && (isFeatureUnavailable(err) || isCapabilityBlocked(err))) setPhase('card_unavailable');
       else toast.error(errorMessage(err, { currency }));
     } finally { setLoading(false); }
   };
@@ -103,9 +112,10 @@ export const Encaisser = () => {
     if (!detect.success) return <Notice tone="warn" className="mb-4">{detect.error || 'Numéro non reconnu'}{detect.countryName ? ` — ${detect.countryName}` : ''}</Notice>;
     return (
       <div className="mb-4">
-        <Notice tone={currencyMismatch ? 'error' : 'success'} icon="smartphone">
+        <Notice tone={currencyMismatch || operatorClosed ? 'error' : 'success'} icon="smartphone">
           <div><strong>{opLabel(detect.operator, detect.brand)}</strong> · {detect.countryName || countryName(detect.country)} · {detect.currency}</div>
           {currencyMismatch && <div className="mt-2">Ce numéro est en {detect.currency}, votre caisse est en {currency} : encaissement impossible.</div>}
+          {!currencyMismatch && operatorClosed && <div className="mt-2">{opLabel(effectiveOperator)} : {cap.message.toLowerCase()} (intégration en cours).</div>}
         </Notice>
         {altList.length > 0 && !currencyMismatch && (
           <div className="mt-3">
@@ -127,9 +137,10 @@ export const Encaisser = () => {
           <form onSubmit={submit} noValidate>
             <AmountInput label="Montant à encaisser" value={amount} onChange={v => { setAmount(v); setErrors(e => ({ ...e, amount: undefined })); }} currency={currency} autoFocus error={errors.amount} />
             <Segmented value={method} onChange={setMethod} ariaLabel="Moyen de paiement" options={[
-              { value: 'mobile_money', icon: 'smartphone', label: 'Mobile Money' },
-              { value: 'card', icon: 'card', label: 'Carte', sub: sumState === 'loading' ? undefined : cardAcceptance === 'unavailable' ? 'indisponible' : 'lien de paiement' },
+              { value: 'mobile_money', icon: 'smartphone', label: 'Mobile Money', sub: !mmOpen ? 'non disponible' : cap.isPilot('collect', 'mobile_money') ? 'pilote' : undefined, disabled: !mmOpen && method !== 'mobile_money' },
+              { value: 'card', icon: 'card', label: 'Carte', sub: !cardOpen ? 'non disponible' : sumState === 'loading' ? undefined : cardAcceptance === 'unavailable' ? 'indisponible' : 'lien de paiement', disabled: !cardOpen && method !== 'card' },
             ]} />
+            {methodClosed && <Notice tone="neutral" className="mb-4" icon="clock"><strong>{cap.message}.</strong> {method === 'card' ? 'Aucune passerelle carte n’est active dans votre pays (intégration en cours).' : 'Les opérateurs Mobile Money de votre pays sont en cours d’intégration.'}{cap.countryInfo ? ` Pays du compte : ${cap.countryInfo.name}.` : ''}</Notice>}
             {method === 'mobile_money' && (<>
               <Input label="Numéro Mobile Money du client" type="tel" inputMode="tel" value={phone} onChange={v => { setPhone(v); setErrors(e => ({ ...e, phone: undefined })); }} placeholder="+237 6XX XXX XXX" autoComplete="off" error={errors.phone} required />
               {detectBox()}

@@ -114,6 +114,12 @@ const loadPendingLink = async (shortId) => {
      WHERE pl.short_id=$1`, [shortId]);
   return r.rows[0] || null;
 };
+// WAVE-6 lot 2 : registre de capacités (services/capabilities/registry.js) — gardes montées AVANT les routes
+// financières, qui ne sont pas modifiées (middleware/capability.js, docs/WAVE-6-LOT2.md).
+const capability = require('./middleware/capability');
+const capabilityRoutes = require('./routes/capabilities.routes');
+const { adminAuth } = require('./middleware/auth');
+app.post('/api/v1/pay/:shortId/card', capability.payCardCapabilityGuard);
 app.post('/api/v1/pay/:shortId/card', publicPayLimiter, asyncHandler(async (req, res) => {
   if (req.body?.cardNum || req.body?.pan || req.body?.cvv) {
     return res.status(410).json({ error: 'Aucune donnée carte ne doit être envoyée à C-Pay', code: 'CARD_PAYMENT_DISABLED' });
@@ -304,6 +310,12 @@ app.post('/api/v1/consent/accept', verifyToken, asyncHandler(async (req, res) =>
 }));
 
 // WAVE-4 : caisse marchande (docs/CAISSE-API.md) — montée AVANT les routeurs admin / marchand
+// WAVE-6 lot 2 : capacités — lecture publique, matrice admin, gardes caisse / inscription / routes historiques
+app.use('/api/v1/public/capabilities', wrapRouterAsync(capabilityRoutes.publicRouter));
+app.use('/api/v1/admin/capabilities',  adminAuth, wrapRouterAsync(capabilityRoutes.adminRouter));
+app.post('/api/v1/merchant/auth/register', capability.registerCapabilityGuard);
+app.use('/api/v1/merchant/cash', merchantAuth, capability.capabilityGuard);
+app.post(['/api/v1/merchant/collect', '/api/v1/merchant/disburse'], merchantAuth, capability.legacyCapabilityGuard);
 app.use('/api/v1/admin/cash',    wrapRouterAsync(require('./routes/cash-admin.routes')));
 app.use('/api/v1/merchant/cash', wrapRouterAsync(require('./routes/cash.routes')));
 app.use('/api/v1/admin', wrapRouterAsync(adminRoutes));
@@ -343,6 +355,7 @@ app.use('/api/v1/bank',               wrapRouterAsync(bankRouter));
 app.use('/api/v1/agency',             wrapRouterAsync(agencyRouter));
 app.use('/api/v1/agent',              wrapRouterAsync(agentPortalRouter));
 
+app.post(['/api/v1/collect', '/api/v1/payout'], merchantAuth, capability.legacyCapabilityGuard); // WAVE-6 lot 2
 app.post('/api/v1/collect', merchantAuth, validatePaymentRequest, idempotency, asyncHandler(async (req, res) => {
   const { amount, customerPhone, emvPayload, aidDetected, description, deviceId } = req.body;
   const result = await orchestrator.processTransaction({

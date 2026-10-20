@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { cashApi, accountApi, newIdempotencyKey, isFeatureUnavailable, isStepUp } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
 import { useCashSummary } from '../../hooks/useCashSummary';
+import { useCapabilities } from '../../hooks/useCapabilities';
 import { useStepUp } from '../../hooks/useStepUp';
 import { useAsync } from '../../hooks/useAsync';
 import { Button, Card, PageHeader, Input, Select, AmountInput, Segmented, Notice, KV, KVList, StatusBadge, StepUpModal, FeatureUnavailable, Table, Modal, ConfirmDialog, Drawer } from '../../components';
@@ -21,6 +22,7 @@ export const Transferer = () => {
   const { summary, state: sumState, reload } = useCashSummary();
   const stepUp = useStepUp(user);
   const currency = summary?.currency || user?.currency || 'XAF';
+  const cap = useCapabilities(user?.country);
   const [direction, setDirection] = useState('wallet_to_bank');
   const [accountId, setAccountId] = useState('');
   const [addingAccount, setAddingAccount] = useState(false);
@@ -44,7 +46,8 @@ export const Transferer = () => {
   const belowMin = minT != null && amt > 0 && amt < Number(minT);
   const overBalance = direction === 'wallet_to_bank' && available != null && amt > Number(available);
   const amountError = belowMin ? `Montant minimum ${fmtMoney(minT, currency)}.` : overBalance ? 'Montant supérieur au solde disponible.' : null;
-  const canSubmit = amt > 0 && !loading && !amountError && (direction === 'bank_to_wallet' || !!account);
+  const directionClosed = !cap.isOpen('transfer', direction);
+  const canSubmit = amt > 0 && !loading && !amountError && !directionClosed && (direction === 'bank_to_wallet' || !!account);
   const fee = direction === 'wallet_to_bank' && amt > 0 ? previewFee(summary, amt, 'transfer') : null;
 
   const doCreate = useCallback(async (confirm) => {
@@ -110,9 +113,10 @@ export const Transferer = () => {
         <Card className="mb-4">
           <form onSubmit={submit} noValidate>
             <Segmented value={direction} onChange={d => { setDirection(d); setFundingUnavailable(false); }} ariaLabel="Sens du transfert" options={[
-              { value: 'wallet_to_bank', icon: 'bank', label: 'Wallet → Banque', sub: 'virer mon solde' },
-              { value: 'bank_to_wallet', icon: 'arrowDown', label: 'Banque → Wallet', sub: 'approvisionner' },
+              { value: 'wallet_to_bank', icon: 'bank', label: 'Wallet → Banque', sub: cap.isOpen('transfer', 'wallet_to_bank') ? 'virer mon solde' : 'non disponible', disabled: !cap.isOpen('transfer', 'wallet_to_bank') && direction !== 'wallet_to_bank' },
+              { value: 'bank_to_wallet', icon: 'arrowDown', label: 'Banque → Wallet', sub: cap.isOpen('transfer', 'bank_to_wallet') ? 'approvisionner' : 'non disponible', disabled: !cap.isOpen('transfer', 'bank_to_wallet') && direction !== 'bank_to_wallet' },
             ]} />
+            {directionClosed && <Notice tone="neutral" className="mb-4" icon="clock"><strong>{cap.message}.</strong> {direction === 'bank_to_wallet' ? 'Aucun compte de collecte C-Pay n’est encore ouvert pour votre devise.' : 'Le virement vers la banque n’est pas encore activé dans votre pays.'}</Notice>}
             {direction === 'wallet_to_bank' && (<>
               {accounts.state === 'loading' ? <p className="small muted mb-4">Chargement des comptes…</p> : accounts.state === 'error' ? <Notice tone="error" className="mb-4" action={<Button size="sm" onClick={accounts.reload}>Réessayer</Button>}>Comptes bancaires indisponibles.</Notice> : (
                 verified.length > 0

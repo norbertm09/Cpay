@@ -16,10 +16,22 @@ automatiquement le pays, la devise et l'opérateur, puis route le paiement.
 - XAF dans la CEMAC ; CDF en RD Congo. Aucun change automatique annoncé.
 - Trois familles de moyens : cartes bancaires, opérateurs de monnaie mobile et GIMAC/GIMACPAY, pour les encaissements, retraits et transferts selon les services activés.
 - Le Sénégal et la Côte d’Ivoire sont hors du périmètre de lancement actuel, même si des connecteurs historiques existent.
-- Détection actuellement implémentée dans ce périmètre : Cameroun, République du Congo, RD Congo. Gabon, Guinée équatoriale, Centrafrique et Tchad restent à intégrer techniquement.
-- La passerelle GIMAC C-Pay n’est pas encore intégrée. Ne jamais annoncer un paiement, retrait, transfert ou corridor GIMAC comme opérationnel avant activation.
+- Couverture réelle par pays (registre de capacités, consultable sur c-pay.global rubrique « Pays & opérateurs » et via
+  GET api.c-pay.global/api/v1/public/capabilities) : chaque moyen a un statut « Disponible » (active), « Pilote » (pilot,
+  ouverture restreinte) ou « En cours d'intégration » (planned / unavailable). Ne jamais présenter un moyen « en cours
+  d'intégration » comme disponible ; l'API refuse ces opérations (code CAPABILITY_NOT_ACTIVE).
+- Intégration technique présente (activation selon configuration et accords opérateurs) : Cameroun (MTN MoMo, Orange Money,
+  Express Union), République du Congo (MTN MoMo, Airtel Money), RD Congo (M-Pesa, Airtel Money, Orange Money, Africell Money).
+- Gabon (Airtel Money, Moov Money), Guinée équatoriale (GETESA, Muni), Centrafrique (Orange Money, Telecel Money) et Tchad
+  (Airtel Money, Moov Money) : numéros reconnus, mais encaissement, retrait et transfert Mobile Money « en cours
+  d'intégration » : aucune opération possible, et l'inscription marchande ouvrira à l'activation du premier opérateur.
+- La passerelle GIMAC / GIMACPAY C-Pay n’est pas encore intégrée (contrat, spécifications et tests partenaires requis) : statut
+  « en cours d'intégration » dans les six pays CEMAC. Ne jamais annoncer un paiement, retrait, transfert ou corridor GIMAC comme opérationnel.
+- Retrait et transfert par carte ne sont pas proposés. Le paiement par carte (lien hébergé) n'est disponible que dans les pays où
+  une passerelle carte est active.
 - La RD Congo n’est pas membre de la CEMAC. Ne pas lui attribuer automatiquement les services domestiques GIMAC.
-- La détection d’un numéro ne prouve ni un partenariat actif ni la disponibilité d’un service. Renvoyer au support pour la couverture réellement activée.
+- La détection d’un numéro ne prouve ni un partenariat actif ni la disponibilité d’un service. Renvoyer au support (ou à la
+  rubrique « Pays & opérateurs » du site) pour la couverture réellement activée.
 
 ## Produits
 - Encaissement Mobile Money (push de paiement sur le téléphone du client, confirmation par PIN côté client).

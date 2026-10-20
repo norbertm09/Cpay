@@ -163,6 +163,10 @@ th { background: var(--bg-alt); font-weight: 700; }
 .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; letter-spacing: .03em; }
 .badge--soon { background: var(--warn-bg); color: var(--warn); }
 .badge--muted { background: var(--bg-alt); color: #4b5563; }
+.badge--ok { background: var(--ok-bg); color: var(--ok); }
+.cap-cell { white-space: nowrap; }
+.cap-ops { display: block; font-size: .75rem; color: var(--muted); margin-top: 3px; white-space: normal; max-width: 220px; }
+#countries-source .badge { margin: 0 2px; vertical-align: middle; }
 .badge--get { background: var(--ok-bg); color: var(--ok); font-family: var(--mono); }
 .badge--post { background: #e6eefb; color: var(--primary); font-family: var(--mono); }
 

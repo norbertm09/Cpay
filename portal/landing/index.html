@@ -226,19 +226,20 @@
         </div>
         <div class="countries">
           <table>
-            <caption class="visually-hidden">Les sept pays du périmètre de lancement et leurs devises</caption>
-            <thead><tr><th scope="col">Pays</th><th scope="col">Indicatif</th><th scope="col">Devise</th><th scope="col">Zone</th></tr></thead>
-            <tbody>
-              <tr><th scope="row">Cameroun</th><td>+237</td><td>XAF</td><td>CEMAC</td></tr>
-              <tr><th scope="row">République centrafricaine</th><td>+236</td><td>XAF</td><td>CEMAC</td></tr>
-              <tr><th scope="row">République du Congo</th><td>+242</td><td>XAF</td><td>CEMAC</td></tr>
-              <tr><th scope="row">Gabon</th><td>+241</td><td>XAF</td><td>CEMAC</td></tr>
-              <tr><th scope="row">Guinée équatoriale</th><td>+240</td><td>XAF</td><td>CEMAC</td></tr>
-              <tr><th scope="row">Tchad</th><td>+235</td><td>XAF</td><td>CEMAC</td></tr>
-              <tr><th scope="row">RD Congo</th><td>+243</td><td>CDF</td><td>RD Congo</td></tr>
+            <caption class="visually-hidden">Les sept pays du périmètre de lancement, leurs devises et l'état des services</caption>
+            <thead><tr id="countries-head"><th scope="col">Pays</th><th scope="col">Indicatif</th><th scope="col">Devise</th><th scope="col">Zone</th></tr></thead>
+            <tbody id="countries-body">
+              <tr data-code="CM"><th scope="row">Cameroun</th><td>+237</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr data-code="CF"><th scope="row">République centrafricaine</th><td>+236</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr data-code="CG"><th scope="row">République du Congo</th><td>+242</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr data-code="GA"><th scope="row">Gabon</th><td>+241</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr data-code="GQ"><th scope="row">Guinée équatoriale</th><td>+240</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr data-code="TD"><th scope="row">Tchad</th><td>+235</td><td>XAF</td><td>CEMAC</td></tr>
+              <tr data-code="CD"><th scope="row">RD Congo</th><td>+243</td><td>CDF</td><td>RD Congo</td></tr>
             </tbody>
           </table>
         </div>
+        <p class="note" id="countries-source" aria-live="polite">États des services par pays : <span class="badge badge--ok">Disponible</span> <span class="badge badge--soon">Pilote</span> <span class="badge badge--muted">En cours d'intégration</span> — chargés depuis l'API C-Pay ; en l'absence de réponse, seul le périmètre est affiché, aucun service n'est présumé disponible.</p>
         <div class="grid grid--3 mt-5" aria-label="Moyens de paiement du lancement">
           <article class="card"><h3>Cartes bancaires</h3><p>Encaissement par carte. Retraits et transferts par carte selon les services et partenaires activés.</p></article>
           <article class="card"><h3>Monnaie mobile</h3><p>Encaissement, retrait et transfert avec les opérateurs pris en charge dans le pays concerné.</p></article>
