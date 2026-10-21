@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route, Link, useNavigate, Navigate, useLocation 
 import { Toaster, toast } from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
 
-const BASE = process.env.REACT_APP_API_BASE_URL || '';
+const BASE = import.meta.env.REACT_APP_API_BASE_URL || '';
 
 // Jeton d'acces (15 min) dans localStorage sous pt_token ; le refresh opaque
 // est dans le cookie HttpOnly cp_rt_partner (path /api/v1/partners/auth)
@@ -297,7 +297,7 @@ const ConsentModal = ({ userId, tenantName, onAccepted }) => {
     if (!cgu || !privacy) return toast.error('Acceptez les CGU et la politique de confidentialite');
     setSaving(true);
     try {
-      await fetch((process.env.REACT_APP_API_BASE_URL||'') + '/api/v1/consent/accept', {
+      await fetch((import.meta.env.REACT_APP_API_BASE_URL||'') + '/api/v1/consent/accept', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ userId, userType:'partner', portal:'partners', cguAccepted:true, privacyAccepted:true })
       });
@@ -610,7 +610,7 @@ const Layout = ({ children }) => {
   const [consentChecked, setConsentChecked] = useState(false);
   useEffect(()=>{
     if (user?.id && !consentChecked) {
-      fetch((process.env.REACT_APP_API_BASE_URL||'') + '/api/v1/consent/check?userId=' + user.id + '&userType=partner&portal=partners')
+      fetch((import.meta.env.REACT_APP_API_BASE_URL||'') + '/api/v1/consent/check?userId=' + user.id + '&userType=partner&portal=partners')
         .then(r=>r.json())
         .then(d=>{ if (!d.hasConsented) setShowConsent(true); setConsentChecked(true); })
         .catch(()=>setConsentChecked(true));

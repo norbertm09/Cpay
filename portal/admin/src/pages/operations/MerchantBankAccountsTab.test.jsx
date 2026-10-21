@@ -5,15 +5,15 @@ import { MemoryRouter } from 'react-router-dom';
 import CashPage from './CashPage';
 import { cashApi } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
-jest.mock('../../hooks/useAuth', () => ({
-  useAuth: jest.fn()
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: vi.fn()
 }));
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   cashApi: {
-    stats: jest.fn(),
-    bankAccounts: jest.fn(),
-    verifyBankAccount: jest.fn(),
-    rejectBankAccount: jest.fn()
+    stats: vi.fn(),
+    bankAccounts: vi.fn(),
+    verifyBankAccount: vi.fn(),
+    rejectBankAccount: vi.fn()
   }
 }));
 const account = {
@@ -57,7 +57,7 @@ const mount = async () => flush(() => root.render(<MemoryRouter future={{
 }} initialEntries={['/?tab=comptes-marchands']}><CashPage /></MemoryRouter>));
 beforeEach(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
-  jest.clearAllMocks();
+  vi.clearAllMocks();
   useAuth.mockReturnValue({
     admin: {
       role: 'ops_admin'

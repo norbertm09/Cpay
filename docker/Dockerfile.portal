@@ -2,20 +2,19 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 ARG APP_DIR
 ARG REACT_APP_API_BASE_URL=https://api.c-pay.global
+# Vite (vite.config.js, envPrefix REACT_APP_) lit toujours REACT_APP_API_BASE_URL au build.
 ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
-# Empeche CRA d'inliner le runtime chunk dans index.html.
-# Sans cela, index.html contient un <script> inline que la CSP
-# script-src 'self' bloque -> portail casse en mode enforce.
-ENV INLINE_RUNTIME_CHUNK=false
-# Les warnings ESLint ne doivent pas faire echouer le build en CI.
+# Sans effet avec Vite, conserve pour les scripts qui l'exportent encore.
 ENV CI=false
-# Build CRA : pas de source maps (memoire et temps) et tas Node borne pour les VPS modestes
-ENV GENERATE_SOURCEMAP=false
+# Tas Node borne pour les VPS modestes
 ENV NODE_OPTIONS=--max-old-space-size=2048
 COPY ${APP_DIR}/package*.json ./
-RUN npm install
+RUN npm ci --no-audit --no-fund
+COPY ${APP_DIR}/index.html ${APP_DIR}/vite.config.js ./
 COPY ${APP_DIR}/public ./public
 COPY ${APP_DIR}/src ./src
+# Build Vite : sortie build/, pas de source map ni de <script> inline (CSP script-src 'self'),
+# voir vite.config.js du portail.
 RUN npm run build
 
 FROM nginx:1.25-alpine

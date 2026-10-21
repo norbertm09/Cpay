@@ -10,6 +10,7 @@ import { useQuery } from '../hooks/useQuery';
 import { cashApi, crmApi, financeApi, supportApi, monitorApi } from '../services/api';
 import { roleLabel, hasRole, PERMS } from '../utils/roles';
 import { initials } from '../utils/format';
+import { version as appVersion } from '../../package.json';
 
 const envLabel = () => {
   const h = window.location.hostname;
@@ -80,7 +81,7 @@ export default function AppShell({ children }) {
         </nav>
         <div className="sidebar-foot">
           <Button variant="ghost" size="sm" icon={collapsed ? 'chevronRight' : 'chevronLeft'} onClick={toggleCollapsed} aria-label={collapsed ? 'Déplier le menu' : 'Replier le menu'} />
-          <span className="sidebar-version">v{process.env.REACT_APP_VERSION || require('../../package.json').version} · {health?.status === 'ok' ? 'API opérationnelle' : health?.status === 'degraded' ? 'API dégradée' : 'API injoignable'}</span>
+          <span className="sidebar-version">v{import.meta.env.REACT_APP_VERSION || appVersion} · {health?.status === 'ok' ? 'API opérationnelle' : health?.status === 'degraded' ? 'API dégradée' : 'API injoignable'}</span>
         </div>
       </aside>
 

@@ -6,7 +6,7 @@
  * (contrats : backend/src/routes/admin.routes.js, cash-admin.routes.js, crm-admin.routes.js, claims.routes.js, rails.routes.js).
  *
  *   node dev/mock-api.js                      # API sur http://127.0.0.1:4012
- *   MOCK_STATIC=build node dev/mock-api.js    # + sert le build CRA (SPA) sur la même origine
+ *   MOCK_STATIC=build node dev/mock-api.js    # + sert le build Vite (SPA) sur la même origine
  *   MOCK_SESSION=none                         # /auth/refresh répond 401 (page de connexion)
  *   MOCK_ROLE=ops_admin                       # rôle du compte simulé (défaut super_admin)
  *   MOCK_MFA=1                                # le login exige un code TOTP (n'importe quel code à 6 chiffres)
@@ -282,7 +282,7 @@ on('GET', '/api/v1/rails/visa-payouts/v3/payouts', async (req, res) => json(res,
 on('GET', '/api/v1/rails/mastercard-developers/services', async (req, res) => json(res, 200, { data: [{ id: 'send', name: 'Mastercard Send' }, { id: 'mdes', name: 'MDES Tokenization' }] }));
 on('GET', '/api/v1/rails/mastercard-developers/projects', async (req, res) => json(res, 200, { data: [{ id: 'prj-1', name: 'C-Pay Send', services: ['send'], environment: 'sandbox' }] }));
 
-// ─── Statique (build CRA) ─────────────────────────────────────────
+// ─── Statique (build Vite) ─────────────────────────────────────────
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.map': 'application/json', '.txt': 'text/plain' };
 const serveStatic = (req, res, pathname) => {
   if (!STATIC) return false;

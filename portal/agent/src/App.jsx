@@ -6,7 +6,7 @@ import axios from 'axios';
 import { BrowserRouter, Routes, Route, Link, useNavigate, Navigate } from 'react-router-dom';
 import { Toaster, toast } from 'react-hot-toast';
 
-const BASE = process.env.REACT_APP_API_BASE_URL || '';
+const BASE = import.meta.env.REACT_APP_API_BASE_URL || '';
 // Jeton d'acces (15 min) dans localStorage sous agt_token ; le refresh opaque
 // est dans le cookie HttpOnly cp_rt_agent (path /api/v1/agent/auth) pose par
 // le backend, d'ou withCredentials sur l'instance. Pas de /auth/me sur les
