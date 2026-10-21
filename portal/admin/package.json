@@ -9,6 +9,7 @@
     "react-router-dom": "^6.21.0",
     "axios": "^1.6.5"
   },
+  "devDependencies": { "typescript": "4.9.5" },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
