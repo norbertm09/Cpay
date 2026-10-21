@@ -1,0 +1,9 @@
+{{ define "cpay.subject" }}[C-Pay][{{ .Status }}] {{ reReplaceAll "(?s)^(.{0,80}).*$" "$1" .CommonLabels.alertname }}{{ end }}
+{{ define "cpay.html" }}
+<h2>C-Pay — {{ .Status }}</h2>
+{{ range .Alerts }}
+<p><b>{{ reReplaceAll "(?s)^(.{0,80}).*$" "$1" .Labels.alertname }}</b>
+({{ reReplaceAll "(?s)^(.{0,24}).*$" "$1" .Labels.severity }}) — {{ .Status }}<br>
+{{ reReplaceAll "(?s)^(.{0,240}).*$" "$1" .Annotations.summary }}</p>
+{{ end }}
+{{ end }}

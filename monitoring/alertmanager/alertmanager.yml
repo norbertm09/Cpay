@@ -1,15 +1,23 @@
+# Reference only: generate a private config with scripts/configure-monitoring.cjs.
+# REQUIRED values intentionally prevent use before explicit operator configuration.
 global:
   resolve_timeout: 5m
-
+  smtp_smarthost: 'REQUIRED_STARTTLS_HOST:587'
+  smtp_from: 'REQUIRED_FROM'
+  smtp_auth_username: 'REQUIRED_USER'
+  smtp_auth_password_file: '/REQUIRED_PRIVATE_PASSWORD_FILE'
+  smtp_require_tls: true
+  smtp_tls_config:
+    insecure_skip_verify: false
+    min_version: TLS12
 route:
-  receiver: default-webhook
+  receiver: ops-email
   group_by: ['alertname', 'service', 'severity']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-
 receivers:
-  - name: default-webhook
-    webhook_configs:
-      - url: http://api:3000/internal/alerts/prometheus
+  - name: ops-email
+    email_configs:
+      - to: 'REQUIRED_TO'
         send_resolved: true
