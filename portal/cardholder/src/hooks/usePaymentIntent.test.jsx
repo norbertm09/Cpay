@@ -53,6 +53,28 @@ test('explicit new intent is possible only after a known result', async () => {
   await act(async () => { await intent.execute({ ...payment, amount: 2000 }, async body => { expect(body.idempotencyKey).not.toBe(key); return {}; }); });
 });
 
+test('PIN refusal then uncertain corrected retry blocks a new intent across reload', async () => {
+  let key;
+  await act(async () => { await expect(intent.execute(payment, async body => {
+    key = body.idempotencyKey;
+    throw { response: { status: 422, data: { code: 'INVALID_PIN' } } };
+  })).rejects.toBeDefined(); });
+  expect(intent.canStartNew).toBe(true);
+  await act(async () => { await expect(intent.execute(payment, async body => {
+    expect(body.idempotencyKey).toBe(key);
+    expect(JSON.parse(sessionStorage.getItem(sessionStorage.key(0))).known).toBe(false);
+    throw new Error('response lost after debit');
+  })).rejects.toThrow('response lost after debit'); });
+  expect(intent.canStartNew).toBe(false);
+  unmount(); mount();
+  expect(intent.canStartNew).toBe(false);
+  act(() => expect(() => intent.startNew()).toThrow());
+  await act(async () => { await intent.execute(payment, async body => {
+    expect(body.idempotencyKey).toBe(key); return { txn: { txnId: 'existing-order' } };
+  }); });
+  expect(intent.canStartNew).toBe(true);
+});
+
 test('storage unavailable blocks sending and can recover without changing intent', async () => {
   const send = jest.fn();
   jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied'); });

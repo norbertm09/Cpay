@@ -45,6 +45,8 @@ export function usePaymentIntent({ cardholderId, cardId, currency }) {
     try { entry = read(scope); } catch (_) { set(state.entry, STORAGE_ERROR); throw new Error(STORAGE_ERROR); }
     if (entry && JSON.stringify(entry.payload) !== JSON.stringify(payload)) { set(entry, CONFLICT); throw new Error(CONFLICT); }
     entry = entry || { version: 1, key: newKey(), payload, known: false };
+    // A previous refusal says nothing about the outcome of this new attempt.
+    entry = { ...entry, known: false };
     try { sessionStorage.setItem(scope, JSON.stringify(entry)); } catch (_) { set(entry, STORAGE_ERROR); throw new Error(STORAGE_ERROR); }
     set(entry);
     active.current.add(scope);

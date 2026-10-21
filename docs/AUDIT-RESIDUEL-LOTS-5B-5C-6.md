@@ -52,7 +52,11 @@ Les marchands historiques SN/CI restent tolérés par défaut ; pour un périmè
 
 ## Limites et suite
 
-Validation locale fraîche : backend **777/777** (36 suites), app **15/15**, merchant **46/46**, admin **25/25** ; trois builds réussis. Recette navigateur **17/17**, harnais serveur **2/2**, configuration/protocole SMTP **14/14** ; promtool valide les neuf règles et les scénarios. Un timeout backend sous builds concurrents a été suivi d'un succès isolé du guard (23/23) puis d'une suite complète 777/777, sans augmenter les délais. La validation CI réelle est publiée sur le PR, séparément de ces résultats locaux.
+La revue indépendante a reproduit un défaut supplémentaire : après un refus PIN, une tentative corrigée dont la réponse était perdue conservait le statut « connu ». Le hook remet désormais `known:false` en stockage avant chaque envoi, sans changer la clé. Le test refus → reprise incertaine → rechargement interdit une nouvelle intention et vérifie le rejeu de la même clé.
+
+Deux points mineurs restent ouverts : ajouter un scénario protocole SMTP `535` (mauvais identifiant/mot de passe) ; préciser dans le runbook le montage du fichier de scrape à `/etc/prometheus/secrets/metrics_token` et sa correspondance avec `METRICS_TOKEN` côté backend. Le générateur valide le fichier fourni mais ne configure pas automatiquement Prometheus.
+
+Validation locale fraîche : backend **777/777** (36 suites), app **16/16**, merchant **46/46**, admin **25/25** ; trois builds réussis. Recette navigateur **17/17**, harnais serveur **2/2**, configuration/protocole SMTP **14/14** ; promtool valide les neuf règles et les scénarios. Un timeout backend sous builds concurrents a été suivi d'un succès isolé du guard (23/23) puis d'une suite complète 777/777, sans augmenter les délais. La validation CI réelle est publiée sur le PR, séparément de ces résultats locaux.
 
 La recette 5C utilise les vrais builds et des API simulées strictes ; les tests SQL vérifient séparément les écritures financières. Les essais SMTP 5B emploient un récepteur local sans transfert externe. VPN, relais réel, destinataires d'astreinte, accès opérateurs et GIMAC restent à valider en exploitation. Les autres portails et applications natives ne bénéficient pas de la même recette navigateur dans ce lot.
 
