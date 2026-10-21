@@ -1,0 +1,10 @@
+{
+  "name": "cpay-isolated-browser-recipes",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node --test harness.test.cjs && node run.cjs",
+    "test:browser": "node run.cjs"
+  },
+  "devDependencies": { "@playwright/test": "1.64.1" }
+}

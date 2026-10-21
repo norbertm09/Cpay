@@ -49,11 +49,17 @@ const observe = (name, labels, value) => {
 // ─── Middleware HTTP metrics ──────────────────────────────────────
 const httpMetrics = (req, res, next) => {
   if (req.path === '/metrics' || req.path === '/live') return next();
+  // Classify before Express trims router mounts; never retain a raw path in a
+  // metric label. Webhook secrets and arbitrary user identifiers are not labels.
+  const categories = ['webhooks', 'merchant', 'cardholder', 'admin', 'partners', 'auth', 'consent', 'capabilities', 'detection', 'pay'];
+  const path = categories.find(name => new RegExp(`^/api/v1/${name}(?:/|$)`).test(req.path))
+    || (['/health', '/ready'].includes(req.path) ? req.path.slice(1) : 'unmatched');
+  const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(req.method) ? req.method : 'OTHER';
   const start = Date.now();
   res.on('finish', () => {
     const labels = {
-      method: req.method,
-      path:   req.path.replace(/\/[0-9a-f-]{36}/gi, '/:id').replace(/\/\d+/g, '/:n'),
+      method,
+      path: req.route ? path : 'unmatched',
       status: String(res.statusCode),
     };
     inc('api_requests_total', labels);

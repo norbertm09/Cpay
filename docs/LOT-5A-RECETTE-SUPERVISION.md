@@ -67,10 +67,10 @@ La présence de fichiers de configuration dans Git ne démontre pas que Promethe
 les exporters sont déployés. Le compose applicatif ne les démarre pas. Ce lot ajoute des règles
 testées, sans déployer de nouvelle infrastructure et sans modifier le réseau privé de l'admin.
 
-**Le récepteur historique `http://api:3000/internal/alerts/prometheus` de la configuration
-Alertmanager ne correspond à aucune route backend. Ne pas le considérer comme opérationnel.**
-Le raccordement à un canal existant, son authentification et un test de livraison/résolution sont
-à traiter dans le lot suivant. Aucune alerte n'est déclarée livrée par ce lot.
+**Constat historique du lot 5A : le récepteur `http://api:3000/internal/alerts/prometheus`
+ne correspondait à aucune route backend.** Le [lot 5B](LOT-5B-ALERTES.md) remplace cette cible par
+le SMTP natif avec preuve locale de livraison/résolution. Son activation de production reste à
+configurer et valider par l'exploitation ; le lot 5A seul ne démontrait aucune livraison.
 Les alertes SMTP sur opérations incertaines du lot 4 restent un mécanisme séparé.
 
 Avant d'activer ces règles en production :

@@ -22,6 +22,11 @@ docker/certbot/
 node_modules/
 dist/
 build/
+monitoring/generated/
+monitoring/secrets/
+.cache/
+e2e/test-results/
+e2e/playwright-report/
 
 # Etat de deploiement ecrit par scripts/deploy.sh sur le serveur
 /.deployed
