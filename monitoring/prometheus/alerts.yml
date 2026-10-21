@@ -30,3 +30,55 @@ groups:
         for: 30s
         labels: { severity: critical }
         annotations: { summary: "PostgreSQL inaccessible" }
+
+  # Aggregate replicas: only one session can own the shared database lock.
+  # These rules assume one reconciliation database per job/env/service group.
+  - name: cplus-reconciliation
+    rules:
+      - alert: ReconciliationMetricsMissing
+        expr: |
+          (up{job="cplus-api"} == 1)
+          unless on(job, instance)
+          (reconciliation_enabled
+            and reconciliation_scheduled
+            and reconciliation_last_success_timestamp_seconds
+            and reconciliation_consecutive_failures
+            and process_uptime_seconds)
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Metriques de rapprochement absentes" }
+
+      - alert: ReconciliationNotScheduled
+        expr: |
+          (max by(job, env, service) (reconciliation_enabled{job="cplus-api"}) == 1)
+          and
+          (max by(job, env, service) (reconciliation_scheduled{job="cplus-api"}) == 0)
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "Rapprochement active mais aucun minuteur programme" }
+
+      - alert: ReconciliationStalled
+        expr: |
+          (max by(job, env, service) (reconciliation_enabled{job="cplus-api"}) == 1)
+          and (max by(job, env, service) (reconciliation_scheduled{job="cplus-api"}) == 1)
+          and (
+            ((max by(job, env, service) (reconciliation_last_success_timestamp_seconds{job="cplus-api"}) > 0)
+              and (time() - max by(job, env, service) (reconciliation_last_success_timestamp_seconds{job="cplus-api"}) > 600))
+            or
+            ((max by(job, env, service) (reconciliation_last_success_timestamp_seconds{job="cplus-api"}) == 0)
+              and (max by(job, env, service) (process_uptime_seconds{job="cplus-api"}
+                and on(job, instance) (reconciliation_scheduled{job="cplus-api"} == 1)) > 600))
+          )
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "Rapprochement sans succes depuis plus de 10 minutes" }
+
+      - alert: ReconciliationFailures
+        expr: |
+          (max by(job, env, service) (reconciliation_enabled{job="cplus-api"}) == 1)
+          and (max by(job, env, service) (reconciliation_scheduled{job="cplus-api"}) == 1)
+          and (max by(job, env, service) (reconciliation_consecutive_failures{job="cplus-api"}) >= 3)
+          and (time() - max by(job, env, service) (reconciliation_last_success_timestamp_seconds{job="cplus-api"}) > 300)
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Echecs repetes du rapprochement sans succes recent" }

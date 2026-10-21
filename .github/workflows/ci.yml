@@ -16,6 +16,22 @@ permissions:
   contents: read
 
 jobs:
+  monitoring:
+    name: Alertes de rapprochement (promtool)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Valider les regles Prometheus
+        run: >-
+          docker run --rm --entrypoint promtool
+          -v "$PWD/monitoring/prometheus:/rules:ro" -w /rules
+          prom/prometheus:v3.5.0 check rules alerts.yml
+      - name: Tester les scenarios des alertes
+        run: >-
+          docker run --rm --entrypoint promtool
+          -v "$PWD/monitoring/prometheus:/rules:ro" -w /rules
+          prom/prometheus:v3.5.0 test rules reconciliation.test.yml
+
   # ────────────────────────────────────────────────────────────────
   backend:
     name: Backend (syntaxe, jest, audit)

@@ -13,9 +13,11 @@ const mockStatus = jest.fn();
 const mockMtnCountry = jest.fn();
 const mockAirtel = jest.fn();
 const mockEmail = jest.fn();
+const mockSendPayout = jest.fn();
 let mockProvider, mockConfig;
 jest.mock('../services/mobilemoney/mobilemoney.router', () => ({
   getProvider: () => mockProvider, getConfig: (...a) => mockConfig(...a),
+  sendPayout: (...a) => mockSendPayout(...a),
   PROVIDERS: { orange_cm: true, moov_ci: true, airtel_cg: true, airtel_cd: true, mtn_cm: true, mtn_cg: true },
 }));
 jest.mock('../services/rails/mtn-momo.client', () => ({ getDisbursementStatus: (...a) => mockStatus(...a), getCollectionStatus: jest.fn() }));
@@ -39,6 +41,11 @@ beforeAll(async () => {
     CREATE TABLE settlement_batches(merchant_id uuid, currency text, total_net numeric);
     CREATE FUNCTION calc_fee(uuid,text,text,numeric) RETURNS numeric LANGUAGE SQL AS $$ SELECT 0::numeric $$;
     CREATE FUNCTION cpay_calculate_fee(uuid,text,text,numeric,text) RETURNS numeric LANGUAGE SQL AS $$ SELECT 0::numeric $$;
+    ALTER TABLE merchants ADD COLUMN merchant_status text DEFAULT 'active', ADD COLUMN kyb_level int DEFAULT 1;
+    ALTER TABLE merchant_transfers ALTER COLUMN transfer_id SET DEFAULT gen_random_uuid();
+    ALTER TABLE merchant_transfers ADD COLUMN description text, ADD COLUMN settlement_method text;
+    ALTER TABLE bank_accounts ADD COLUMN owner_id uuid, ADD COLUMN status text DEFAULT 'pending';
+    CREATE TABLE settlement_queue(id serial PRIMARY KEY, transaction_id uuid UNIQUE, merchant_id uuid, amount numeric, currency text, queued_at timestamptz DEFAULT NOW(), settled boolean DEFAULT false);
   `);
 }, 60000);
 afterAll(async () => { await mockPg.close(); });
@@ -50,7 +57,7 @@ beforeEach(async () => {
   mockMtnCountry.mockReset().mockResolvedValue({ status: 'PENDING' });
   mockAirtel.mockReset().mockResolvedValue({ success: false, failed: false, pending: true, rawStatus: 'TIP' });
   mockEmail.mockReset().mockResolvedValue({ success: true });
-  await mockPg.exec('TRUNCATE merchant_transfers, merchants, transactions, transaction_events, settlement_batches');
+  await mockPg.exec('TRUNCATE merchant_transfers, merchants, transactions, transaction_events, settlement_batches, settlement_queue, bank_accounts');
   await sql('INSERT INTO merchants(merchant_id,country,currency,business_name,email) VALUES($1,\'CG\',\'XAF\',\'Shop\',\'ops@example.test\')', [M]);
 });
 const transfer = async (extra = {}) => {
@@ -60,6 +67,9 @@ const transfer = async (extra = {}) => {
   return cash.getTransfer(id);
 };
 const balance = () => cash.computeAvailableBalance(sql, M);
+describe('lot 5A — financial service recipe', () => {
+  require('./fixtures/financial-recipe')({ sql, first, cash, merchantId: M, uuid, mockSendPayout, mockMtnCountry });
+});
 test('NOT_FOUND after grace retains funds and requests review rather than declaring a refusal', async () => {
   const t = await transfer();
   mockStatus.mockResolvedValue({ status: 'NOT_FOUND' });
