@@ -7,7 +7,7 @@
     "react-scripts": "5.0.1", "react-router-dom": "^6.21.0",
     "axios": "^1.6.5", "react-hot-toast": "^2.4.1"
   },
-  "scripts": { "start": "PORT=3002 react-scripts start", "build": "react-scripts build" },
+  "scripts": { "start": "PORT=3002 react-scripts start", "build": "react-scripts build", "test": "react-scripts test" },
   "proxy": "http://localhost:3000",
   "browserslist": { "production": [">0.2%", "not dead"], "development": ["last 1 chrome version"] }
 }

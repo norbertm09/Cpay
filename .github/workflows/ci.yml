@@ -85,8 +85,8 @@ jobs:
             echo "::notice::portal/${{ matrix.portal }} : pas de package-lock.json, npm install (non reproductible)"
             npm install --no-audit --no-fund
           fi
-      - name: Tests des portails merchant et admin
-        if: matrix.portal == 'merchant' || matrix.portal == 'admin'
+      - name: Tests des portails merchant, admin et cardholder
+        if: matrix.portal == 'merchant' || matrix.portal == 'admin' || matrix.portal == 'cardholder'
         run: npm test -- --watchAll=false --runInBand
         env:
           CI: 'true'

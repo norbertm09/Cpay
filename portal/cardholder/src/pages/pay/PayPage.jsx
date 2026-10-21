@@ -1,6 +1,7 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { usePaymentIntent } from '../../hooks/usePaymentIntent';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { Card, Button, Input, AmountInput, PinInput, Alert, Steps, Icon, Badge } from '../../components';
 import QrScanner from './QrScanner';
@@ -37,20 +38,25 @@ const parseTarget = (raw) => {
 };
 
 export default function PayPage() {
+  const { user } = useAuth();
+  return <PaymentForm key={JSON.stringify([user?.cardholderId || user?.userId, user?.card?.cardId, user?.card?.currency])} />;
+}
+
+function PaymentForm() {
   useDocumentTitle('Payer');
   const { user, patchCard } = useAuth();
   const navigate = useNavigate();
   const card = user?.card;
-  const [step, setStep] = useState(0);
+  const intent = usePaymentIntent({ cardholderId: user?.cardholderId || user?.userId, cardId: card?.cardId, currency: card?.currency });
+  const [step, setStep] = useState(intent.restored ? 2 : 0);
   const [mode, setMode] = useState('scan'); // scan | manual
   const [scanSupported, setScanSupported] = useState(true);
   const [manual, setManual] = useState('');
-  const [target, setTarget] = useState(null);
+  const [target, setTarget] = useState(intent.restored ? { kind: 'merchant', merchantId: intent.restored.merchantId } : null);
   const [payLink, setPayLink] = useState(null);
-  const [amount, setAmount] = useState('');
-  const [description, setDescription] = useState('');
+  const [amount, setAmount] = useState(intent.restored ? String(intent.restored.amount) : '');
+  const [description, setDescription] = useState(intent.restored?.description || '');
   const [pin, setPin] = useState('');
-  const paymentKey = useRef(null);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
@@ -86,7 +92,6 @@ export default function PayPage() {
     const ai = amountIssue(amount, { min: 100 });
     if (ai) { setErrors({ amount: ai }); return; }
     if (total > balance) { setErrors({ amount: `Solde insuffisant (frais inclus : ${formatMoney(total, card?.currency)}).` }); return; }
-    paymentKey.current = crypto.randomUUID();
     setErrors({}); setStep(2);
   };
 
@@ -94,17 +99,22 @@ export default function PayPage() {
     if (!isPin(pin)) { setErrors({ pin: 'Saisissez votre code PIN à 4 chiffres.' }); return; }
     setBusy(true); setFormError(''); setErrors({});
     try {
-      const data = await ops.pay({ merchantId: target.merchantId, amount: amountNum, description: description || undefined, pin, idempotencyKey: paymentKey.current });
+      const data = await intent.execute({ merchantId: target.merchantId, amount: amountNum, description: description || undefined }, body => ops.pay({ ...body, pin }));
       setResult(data);
       if (typeof data.newBalance === 'number') patchCard({ balance: data.newBalance });
       setPin('');
     } catch (err) {
-      setFormError(isFeatureDisabled(err) ? errorMessage(err) : errorMessage(err, 'Paiement refusé.'));
+      setFormError(!err.response || err.response.status >= 500
+        ? (err.message?.includes('session') || err.message?.includes('enregistrement') ? err.message : 'Résultat non confirmé. Reprenez ce même paiement ; ne créez pas un nouvel ordre.')
+        : isFeatureDisabled(err) ? errorMessage(err) : errorMessage(err, 'Paiement refusé.'));
       setPin('');
     } finally { setBusy(false); }
   };
 
-  const reset = () => { setStep(0); setTarget(null); setPayLink(null); setAmount(''); setDescription(''); setPin(''); setErrors({}); setFormError(''); setResult(null); setManual(''); };
+  const reset = () => {
+    try { intent.startNew(); } catch (err) { setFormError(err.message); return; }
+    setStep(0); setTarget(null); setPayLink(null); setAmount(''); setDescription(''); setPin(''); setErrors({}); setFormError(''); setResult(null); setManual('');
+  };
 
   const merchantLabel = useMemo(() => target?.name || (target?.merchantId ? `Commerçant ${String(target.merchantId).slice(0, 8)}…` : ''), [target]);
 
@@ -195,7 +205,7 @@ export default function PayPage() {
                 <div className="strong small">{merchantLabel}</div>
                 <div className="xs muted mono truncate">{target?.merchantId}</div>
               </div>
-              <Button size="sm" variant="ghost" onClick={() => setStep(0)}>Modifier</Button>
+              <Button size="sm" variant="ghost" disabled={intent.pending} onClick={() => setStep(0)}>Modifier</Button>
             </div>
             <AmountInput value={amount} onChange={(e) => { setAmount(e.target.value); setErrors({}); }} error={errors.amount} currency={card?.currency || 'XAF'} autoFocus
               hint={`Solde disponible : ${formatMoney(balance, card?.currency)} · frais ${(FEE_RATE * 100).toLocaleString('fr-FR')} %`} />
@@ -223,7 +233,10 @@ export default function PayPage() {
               {errors.pin ? <div className="field-error center" role="alert">{errors.pin}</div> : null}
             </div>
             <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={cardBlocked} icon="lock">Payer {formatMoney(total, card?.currency)}</Button>
-            <Button variant="ghost" onClick={() => setStep(1)} disabled={busy}>Modifier le montant</Button>
+            <Button variant="ghost" onClick={() => setStep(1)} disabled={busy || intent.pending}>Modifier le montant</Button>
+            {intent.pending ? <Alert tone="info">Paiement enregistré. La reprise conserve le même ordre et ne crée pas un second paiement.</Alert> : null}
+            {intent.canStartNew ? <Button variant="secondary" onClick={reset} disabled={busy}>Nouveau paiement</Button> : null}
+            {intent.error ? <Alert tone="danger">{intent.error}</Alert> : null}
           </form>
         ) : null}
       </Card>
