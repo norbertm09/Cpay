@@ -3,9 +3,10 @@ import toast from 'react-hot-toast';
 import { activityApi, cashApi } from '../../services/api';
 import { Drawer, Button, Input, KVList, StatusBadge, Skeleton, Notice } from '../../components';
 import { fmtMoney, fmtDateTime, fmtRelative, fmtPhone, phoneDigits } from '../../utils/format';
-import { typeLabel, methodLabel, statusLabel, opLabel, TRANSFER_STATUS_HELP, CASH_IN_TYPES } from '../../utils/labels';
+import { typeLabel, methodLabel, statusLabel, opLabel, CASH_IN_TYPES } from '../../utils/labels';
 import { printDoc } from '../../utils/actions';
 import { errorMessage } from '../../utils/errors';
+import { TransferRecovery, transferNetValue } from '../caisse/TransferRecovery';
 import { FundingInstructions } from '../caisse/shared';
 
 // Détail d'une ligne du journal : transaction (encaissement, décaissement) ou
@@ -41,11 +42,11 @@ export const TransactionDrawer = ({ row, currency, onClose }) => {
     (t.description || row.description) && ['Description', t.description || row.description], t.device_id && ['Terminal', t.device_id, { mono: true }],
   ] : kind === 'transfer' ? [
     ['Date', fmtDateTime(t.createdAt || row.createdAt)], ['Type', typeLabel(row.type)], ['Référence', t.reference || row.reference, { mono: true }],
-    ['Montant', fmtMoney(t.amount ?? row.amount, cur)], t.fee != null && ['Frais', fmtMoney(t.fee, cur)], t.net != null && ['Net', fmtMoney(t.net, cur)],
+    ['Montant', fmtMoney(t.amount ?? row.amount, cur)], t.fee != null && ['Frais', fmtMoney(t.fee, cur)], t.net != null && ['Net', transferNetValue({ ...t, status: t.status || row.status }, cur)],
     ['Statut', statusLabel(t.status || row.status)], t.wallet && ['Wallet', `${opLabel(t.wallet.operator)} ${fmtPhone(t.wallet.phone)}`], t.bankAccount && ['Compte', `${t.bankAccount.bankName || ''} ${t.bankAccount.accountMasked || ''}`],
     t.bankReference && ['Référence bancaire', t.bankReference, { mono: true }], t.completedAt && ['Terminé le', fmtDateTime(t.completedAt)], t.description && ['Libellé', t.description], t.errorMessage && ['Motif', t.errorMessage, { tone: 'error' }],
   ] : [
-    ['Date', fmtDateTime(row.createdAt)], ['Type', typeLabel(row.type)], ['Référence', row.reference, { mono: true }], ['Montant', fmtMoney(row.amount, cur)], ['Frais', fmtMoney(row.fee, cur)], ['Net', fmtMoney(row.net, cur)], ['Statut', statusLabel(row.status)], row.counterparty && ['Contrepartie', row.counterparty], row.method && ['Moyen', methodLabel(row.method)],
+    ['Date', fmtDateTime(row.createdAt)], ['Type', typeLabel(row.type)], ['Référence', row.reference, { mono: true }], ['Montant', fmtMoney(row.amount, cur)], ['Frais', fmtMoney(row.fee, cur)], ['Net', ['withdraw', 'transfer_out', 'payout'].includes(row.type) ? transferNetValue(row, cur) : fmtMoney(row.net, cur)], ['Statut', statusLabel(row.status)], row.counterparty && ['Contrepartie', row.counterparty], row.method && ['Moyen', methodLabel(row.method)],
   ];
   const printRows = rows.filter(Boolean).map(([k, v]) => [k, typeof v === 'string' ? v : String(v)]);
   const sendSms = async () => {
@@ -65,7 +66,7 @@ export const TransactionDrawer = ({ row, currency, onClose }) => {
         <span style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700 }} className={inn ? 'success' : ''}>{inn ? '+' : '−'} {fmtMoney(row.amount, cur)}</span>
         <StatusBadge status={t.status || row.status} />
       </div>
-      {TRANSFER_STATUS_HELP[t.status || row.status] && kind === 'transfer' && <p className="small text-2 mb-3">{TRANSFER_STATUS_HELP[t.status || row.status]}</p>}
+      {kind === 'transfer' && <TransferRecovery transfer={{ ...t, transferId: t.transferId || row.id }} onUpdated={setDetail} />}
       {loading ? <div className="stack"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div> : (<>
         {kind === 'transfer' && t.status === 'awaiting_funds' && t.instructions && <div className="mb-4"><FundingInstructions transfer={t} currency={cur} /></div>}
         <KVList boxed rows={rows} />

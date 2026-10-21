@@ -228,7 +228,7 @@ describe('1. Résultat opérateur incertain → statut unknown, réservation con
     expect(await available()).toBe(50000);
   });
 
-  test('« introuvable » chez l’opérateur : jamais failed avant CASH_UNKNOWN_GRACE_MINUTES', async () => {
+  test('« introuvable » chez l’opérateur : reste réservé et demande une revue après CASH_UNKNOWN_GRACE_MINUTES', async () => {
     mockSendPayout.mockResolvedValue({ approved: false, responseCode: '96', retryable: true });
     const r = await withdraw({});
     mockGetStatus.mockResolvedValue({ available: true, status: 'NOT_FOUND' });
@@ -236,9 +236,9 @@ describe('1. Résultat opérateur incertain → statut unknown, réservation con
     expect(out.status).toBe('unknown'); expect(out._statusCheck).toBe('not_found_in_grace');
     process.env.CASH_UNKNOWN_GRACE_MINUTES = '0';
     out = await cash.refreshPayoutStatus(await cash.getTransfer(r.body.transferId));
-    expect(out.status).toBe('failed');
-    expect(out.events.at(-1)).toMatchObject({ type: 'failed', reason: 'not_found_after_grace' });
-    expect(await available()).toBe(100000);
+    expect(out.status).toBe('unknown');
+    expect(out.events.at(-1)).toMatchObject({ type: 'needs_review', reason: 'not_found_after_grace' });
+    expect(await available()).toBe(50000);
     // erreur réseau au poll : statut conservé
     mockSendPayout.mockResolvedValue({ approved: false, responseCode: '96', retryable: true });
     const r2 = await withdraw({});
@@ -277,7 +277,7 @@ describe('1. Résultat opérateur incertain → statut unknown, réservation con
     expect(rr.transactions).toMatchObject({ scanned: 1, flagged: 1 });
     expect(mockEmail).toHaveBeenCalledTimes(2);
     expect(await count(`SELECT COUNT(*)::int AS n FROM transaction_events WHERE transaction_id=$1 AND event_type='PAYOUT_NEEDS_REVIEW'`, [txn])).toBe(1);
-    expect((await reconcile.reconcileUncertainPayouts({})).transactions.scanned).toBe(0);
+    expect((await reconcile.reconcileUncertainPayouts({})).transactions.scanned).toBe(1);
     // admin : rejet manuel impossible tant que unknown (REJECTABLE inchangé) ; mark-executed non plus → décision ops documentée
     const rej = await request(app).post(`/admin/cash/transfers/${r.body.transferId}/reject`).set(admin()).send({ reason: 'test' });
     expect(rej.status).toBe(409);

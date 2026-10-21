@@ -12,6 +12,7 @@ import { errorMessage } from '../../utils/errors';
 import { opLabel, statusLabel } from '../../utils/labels';
 import { printDoc } from '../../utils/actions';
 import { devParams } from '../../utils/dev';
+import { TransferRecovery, transferNetValue } from './TransferRecovery';
 import { WalletForm, previewFee } from './shared';
 
 // Retirer : solde disponible -> wallet Mobile Money enregistré (step-up, limite journalière).
@@ -59,7 +60,7 @@ export const Retirer = () => {
   const canSubmit = amt > 0 && (intent.pending || (!!wallet && !amountError && !withdrawClosed));
 
   const run = useCallback((confirm) => intent.execute({ amount: amt, description: description || undefined, confirm }, cashApi.withdraw)
-    .then(({ data }) => { setResult(data); reload(); toast.success('Retrait lancé'); })
+    .then(({ data }) => { setResult(data); reload(); if (['unknown', 'processing'].includes(data.status)) toast('Retrait enregistré — en cours de confirmation'); else toast.success('Retrait lancé'); })
     .catch(err => {
       if (isStepUp(err)) throw err;
       const code = err.response?.data?.code;
@@ -92,15 +93,16 @@ export const Retirer = () => {
             <h2>Retrait {statusLabel(result.status).toLowerCase()}</h2>
             <div className="amount">{fmtMoney(result.amount, currency)}</div>
           </div>
+          <TransferRecovery transfer={result} onUpdated={fresh => { setResult(fresh); reload(); }} />
           <div className="kv-box mb-4">
             <KV label="Référence" value={result.reference} mono />
             <KV label="Statut" value={<StatusBadge status={result.status} />} />
             <KV label="Frais" value={fmtMoney(result.fee, currency)} />
-            <KV label="Net envoyé" value={fmtMoney(result.net, currency)} tone="success" />
+            <KV label={result.status === 'completed' ? 'Net envoyé' : 'Net'} value={transferNetValue(result, currency)} tone={result.status === 'completed' ? 'success' : undefined} />
             <KV label="Wallet" value={`${opLabel(result.wallet?.operator, result.wallet?.operatorLabel)} ${fmtPhone(result.wallet?.phone)}`} />
           </div>
           <div className="form-actions">
-            <Button icon="print" onClick={() => printDoc('Retrait', [['Référence', result.reference], ['Date', fmtDateTime(new Date())], ['Montant', fmtMoney(result.amount, currency)], ['Frais', fmtMoney(result.fee, currency)], ['Net', fmtMoney(result.net, currency)], ['Wallet', `${opLabel(result.wallet?.operator)} ${result.wallet?.phone || ''}`], ['Statut', statusLabel(result.status)]])}>Imprimer</Button>
+            <Button icon="print" onClick={() => printDoc('Retrait', [['Référence', result.reference], ['Date', fmtDateTime(new Date())], ['Montant', fmtMoney(result.amount, currency)], ['Frais', fmtMoney(result.fee, currency)], ['Net', transferNetValue(result, currency)], ['Wallet', `${opLabel(result.wallet?.operator)} ${result.wallet?.phone || ''}`], ['Statut', statusLabel(result.status)]])}>Imprimer</Button>
             <Button variant="primary" icon="plus" onClick={newOperation}>Nouveau retrait</Button>
           </div>
         </Card>

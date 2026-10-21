@@ -43,23 +43,23 @@ const main = async () => {
   const skipRepair   = process.argv.includes('--skip-repair');
   const asJson       = process.argv.includes('--json');
 
-  const { reconcilePending, reconcileUncertainPayouts } = require('../src/services/reconcile.service');
-  const { sweepAuthorizedWithoutQueue } = require('../src/services/settlement/settlement.repair');
+  const { createReconciliationJob } = require('../src/services/reconciliation-job');
   const { pool } = require('../src/config/database');
+  const job = createReconciliationJob({ enabled: false });
   const started = Date.now();
-  const r = await reconcilePending({ maxAgeHours, limit, minAgeMinutes });
-  let payouts = null; let repair = null;
-  if (!skipPayouts) {
-    try { payouts = await reconcileUncertainPayouts({ graceMinutes, alertHours, limit }); }
-    catch (e) { payouts = { error: e.message }; console.error('[reconcile] retraits incertains : erreur', e.message); }
+  const result = await job.run({ maxAgeHours, minAgeMinutes, limit, graceMinutes, alertHours, skipPayouts, skipRepair });
+  await job.stop();
+  if (result.skipped) {
+    console.log(JSON.stringify({ skipped: result.skipped }));
+    await pool.end(); return;
   }
-  if (!skipRepair) {
-    try { repair = await sweepAuthorizedWithoutQueue({ minAgeMinutes: 5, actor: 'script:reconcile-pending' }); }
-    catch (e) { repair = { error: e.message }; console.error('[reconcile] réparation file de règlement : erreur', e.message); }
-  }
+  if (result.outcome !== 'success') process.exitCode = 1;
+  const r = result.stages.pending?.summary ? result.stages.pending : { summary: { scanned: 0, authorized: 0, failed: 0, still_pending: 0, skipped: 0, errors: 1 }, results: [] };
+  const payouts = result.stages.payouts || null;
+  const repair = result.stages.repair || null;
 
   if (asJson) {
-    console.log(JSON.stringify({ at: new Date().toISOString(), durationMs: Date.now() - started, params: { maxAgeHours, minAgeMinutes, limit, graceMinutes, alertHours }, ...r, uncertainPayouts: payouts, settlementRepair: repair }));
+    console.log(JSON.stringify({ at: new Date().toISOString(), durationMs: Date.now() - started, params: { maxAgeHours, minAgeMinutes, limit, graceMinutes, alertHours }, outcome: result.outcome, ...r, uncertainPayouts: payouts, settlementRepair: repair }));
   } else {
     const s = r.summary;
     console.log(`[reconcile] ${new Date().toISOString()} scanned=${s.scanned} authorized=${s.authorized} failed=${s.failed} still_pending=${s.still_pending} skipped=${s.skipped} errors=${s.errors} (${Date.now() - started} ms)`);
@@ -81,7 +81,7 @@ const main = async () => {
   if (pool && typeof pool.end === 'function') await pool.end().catch(() => {});
 };
 
-main().then(() => process.exit(0)).catch((err) => {
+main().then(() => process.exit(process.exitCode || 0)).catch((err) => {
   console.error('[reconcile] erreur fatale:', err.message);
   process.exit(1);
 });

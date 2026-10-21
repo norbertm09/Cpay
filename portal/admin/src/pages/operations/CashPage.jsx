@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import DataTable from '../../components/DataTable';
-import { Button, Card, PageHeader, Tabs, Stat, FiltersBar, SearchInput, Select, Chips, StatusBadge, Badge, Modal, Field, Input, Switch, EmptyState, Skeleton, Callout } from '../../components/ui';
+import { Button, Card, PageHeader, Tabs, Stat, FiltersBar, SearchInput, Select, Chips, StatusBadge, Badge, Modal, Field, Input, Switch, EmptyState, Skeleton, Callout, ErrorState } from '../../components/ui';
 import { useQuery, useDebounce } from '../../hooks/useQuery';
 import { useUrlState } from '../../hooks/useParams';
 import { useAuth } from '../../hooks/useAuth';
@@ -11,10 +11,12 @@ import { errorMessage } from '../../utils/errors';
 import toast from '../../utils/toast';
 import CashTransferDrawer from './CashTransferDrawer';
 import MerchantBankAccountsTab from './MerchantBankAccountsTab';
+import CashReconciliationHealth from './CashReconciliationHealth';
+import CashTransferRecovery, { hasUncertainOutcome } from './CashTransferRecovery';
 import { MerchantLink } from '../merchants/MerchantsPage';
 
 const LIMIT = 25;
-const STATUSES = [['awaiting_funds', 'Fonds attendus'], ['pending_manual', 'À exécuter'], ['pending', 'En attente'], ['processing', 'En cours'], ['completed', 'Terminé'], ['failed', 'Échoué'], ['cancelled', 'Annulé'], ['rejected', 'Rejeté']];
+const STATUSES = [['awaiting_funds', 'Fonds attendus'], ['pending_manual', 'À exécuter'], ['pending', 'En attente'], ['processing', 'En cours'], ['unknown', 'Issue inconnue'], ['completed', 'Terminé'], ['failed', 'Échoué'], ['cancelled', 'Annulé'], ['rejected', 'Rejeté']];
 const DIRECTIONS = [['wallet_to_bank', 'Wallet → banque'], ['bank_to_wallet', 'Banque → wallet'], ['withdraw', 'Retrait wallet']];
 
 const dest = (t) => (t.bankAccount ? `${t.bankAccount.bankName || ''} ${t.bankAccount.accountMasked || ''}`.trim() : t.wallet ? `${t.wallet.operator || ''} ${t.wallet.phone || ''}`.trim() : t.direction === 'bank_to_wallet' ? 'Compte de collecte C-Pay' : '—');
@@ -23,19 +25,29 @@ const dest = (t) => (t.bankAccount ? `${t.bankAccount.bankName || ''} ${t.bankAc
 function QueuesTab({ stats, onOpen, tick }) {
   const { get, set } = useUrlState({ queue: 'pending_manual' });
   const queue = get('queue');
-  const list = useQuery(() => cashApi.transfers({ status: queue, limit: 50, offset: 0 }).then((r) => r.data), [queue, tick]);
+  const list = useQuery(() => cashApi.transfers({ ...(queue === 'needs_review' ? { needsReview: 1 } : { status: queue }), limit: 50, offset: 0 }).then((r) => r.data), [queue, tick]);
   const q = stats?.queues || {};
+  const queueInfo = {
+    pending_manual: ['Virements à exécuter', 'Le marchand a demandé un virement vers sa banque : émettez-le depuis la banque de C-Pay puis marquez-le exécuté avec la référence.'],
+    awaiting_funds: ['Ordres d’approvisionnement à confirmer', 'Confirmez la réception effective des fonds pour créditer le solde du marchand.'],
+    processing: ['Paiements en cours de confirmation', 'Les fonds restent réservés. Le paiement attend une confirmation de la banque ou de l’opérateur.'],
+    unknown: ['Paiements à issue inconnue', 'Les fonds restent réservés. Une issue inconnue ne confirme ni le paiement ni son échec. Consultez les derniers contrôles sans émettre de nouveau paiement.'],
+    needs_review: ['Opérations à examiner', 'Le contrôle automatique a signalé ces opérations. Vérifiez les preuves et le dernier statut obtenu ; les fonds restent réservés tant que l’issue du paiement est incertaine.'],
+  };
+  const [title, description] = queueInfo[queue] || queueInfo.pending_manual;
   return (
     <div className="stack-lg">
       <div className="grid grid-3">
         <Stat label="Virements wallet → banque à exécuter" value={fmtNumber(q.pendingManual?.count)} sub={fmtMoney(q.pendingManual?.amount)} icon="banknote" tone={q.pendingManual?.count ? 'warn' : ''} small />
         <Stat label="Approvisionnements en attente de fonds" value={fmtNumber(q.awaitingFunds?.count)} sub={fmtMoney(q.awaitingFunds?.amount)} icon="wallet" tone={q.awaitingFunds?.count ? 'warn' : ''} small />
-        <Stat label="En cours sur rail bancaire / opérateur" value={fmtNumber(q.processing?.count)} sub="suivi automatique" icon="clock" tone="cyan" small />
+        <Stat label="En cours sur rail bancaire / opérateur" value={fmtNumber(q.processing?.count)} sub="fonds réservés · paiement non confirmé" icon="clock" tone="cyan" small />
+        <Stat label="Paiements à issue inconnue" value={fmtNumber(q.unknown?.count)} sub={q.unknown ? fmtMoney(q.unknown.amount) + ' réservés' : 'fonds réservés'} icon="clock" tone="warn" small />
+        <Stat label="Opérations à examiner" value={fmtNumber(q.needsReview?.count)} sub="examen requis" icon="alert" tone="warn" small />
       </div>
-      <Card flush title={queue === 'pending_manual' ? 'Virements à exécuter' : 'Ordres d’approvisionnement à confirmer'}
-        sub={queue === 'pending_manual' ? 'Le marchand a demandé un virement vers sa banque : émettez-le depuis la banque de C-Pay puis marquez-le exécuté avec la référence.' : 'Le marchand annonce un virement vers le compte de collecte C-Pay : confirmez la réception (montant + référence) pour créditer son solde.'}
-        actions={<Chips value={queue} onChange={(v) => set({ queue: v || 'pending_manual' })} items={[{ value: 'pending_manual', label: 'À exécuter', count: q.pendingManual?.count }, { value: 'awaiting_funds', label: 'Fonds attendus', count: q.awaitingFunds?.count }, { value: 'processing', label: 'En cours', count: q.processing?.count }]} />}>
-        {list.loading && !list.data ? <div className="card-body"><Skeleton lines={4} /></div> : !(list.data?.data || []).length ? <EmptyState icon="check" title="File vide" description="Aucune opération n’attend d’action pour cette file." /> : (
+      <CashReconciliationHealth />
+      <Card flush title={title} sub={description}
+        actions={<Chips value={queue} onChange={(v) => set({ queue: v || 'pending_manual' })} items={[{ value: 'pending_manual', label: 'À exécuter', count: q.pendingManual?.count }, { value: 'awaiting_funds', label: 'Fonds attendus', count: q.awaitingFunds?.count }, { value: 'processing', label: 'En cours', count: q.processing?.count }, { value: 'unknown', label: 'Issue inconnue', count: q.unknown?.count }, { value: 'needs_review', label: 'À examiner', count: q.needsReview?.count }]} />}>
+        {list.loading ? <div className="card-body"><Skeleton lines={4} /></div> : list.error ? <div role="alert"><ErrorState error={errorMessage(list.error)} onRetry={list.forbidden ? undefined : list.reload} /></div> : !(list.data?.data || []).length ? <EmptyState icon="check" title="File vide" description="Aucune opération n’attend d’action pour cette file." /> : (
           <div style={{ padding: '0 16px' }}>
             {list.data.data.map((t) => { const d = directionOf(t); return (
               <div key={t.transferId} className="queue-item">
@@ -43,12 +55,13 @@ function QueuesTab({ stats, onOpen, tick }) {
                   <div style={{ minWidth: 0 }}>
                     <div className="row-wrap"><span className="mono strong">{t.reference}</span><Badge tone={d.tone}>{d.label}</Badge><StatusBadge status={t.status} /></div>
                     <div className="small mt-2"><MerchantLink id={t.merchantId} name={t.merchant} /> <span className="muted">· {dest(t)}</span></div>
+                    <CashTransferRecovery transfer={t} compact />
                     <div className="xs muted">créé {fmtAgo(t.createdAt)} · {fmtDateTime(t.createdAt)}{t.expiresAt ? ` · expire le ${fmtDateTime(t.expiresAt)}` : ''}</div>
                   </div>
                 </div>
                 <div className="row" style={{ gap: 12 }}>
-                  <div className="right"><div className="amount">{fmtMoney(t.amount, t.currency)}</div>{t.fee ? <div className="xs muted">net {fmtMoney(t.net, t.currency)}</div> : null}</div>
-                  <Button variant="primary" size="sm" onClick={() => onOpen(t)}>Traiter</Button>
+                  <div className="right"><div className="amount">{fmtMoney(t.amount, t.currency)}</div>{t.fee ? <div className="xs muted">{hasUncertainOutcome(t) ? 'net prévu' : 'net'} {fmtMoney(t.net, t.currency)}</div> : null}</div>
+                  <Button variant="primary" size="sm" onClick={() => onOpen(t)}>{hasUncertainOutcome(t) || t.needsReview ? 'Consulter' : 'Traiter'}</Button>
                 </div>
               </div>
             ); })}
@@ -165,8 +178,8 @@ export default function CashPage() {
         actions={<Button icon="refresh" onClick={stats.refresh} loading={stats.loading && !!s}>Actualiser</Button>} />
       <div className="grid grid-4">
         <Stat label="Encaissé aujourd’hui" value={fmtMoney(s?.today?.collected?.amount)} sub={`${fmtNumber(s?.today?.collected?.count)} op. · 7 j ${fmtMoney(s?.last7Days?.collected?.amount)}`} icon="trending" tone="accent" small />
-        <Stat label="Retiré (wallet)" value={fmtMoney(s?.today?.withdrawn?.amount)} sub={vol('withdrawn')} icon="wallet" tone="success" small />
-        <Stat label="Wallet → banque" value={fmtMoney(s?.today?.transfersOut?.amount)} sub={vol('transfersOut')} icon="bank" small />
+        <Stat label="Retraits demandés" value={fmtMoney(s?.today?.withdrawn?.amount)} sub={vol('withdrawn')} icon="wallet" tone="success" small />
+        <Stat label="Transferts demandés vers banque" value={fmtMoney(s?.today?.transfersOut?.amount)} sub={vol('transfersOut')} icon="bank" small />
         <Stat label="Banque → wallet" value={fmtMoney(s?.today?.transfersIn?.amount)} sub={vol('transfersIn')} icon="arrowDown" tone="cyan" small />
       </div>
       <Tabs value={tab} onChange={(v) => set({ tab: v, page: '', status: '', queue: '' })} items={[

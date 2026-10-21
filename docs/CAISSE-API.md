@@ -138,9 +138,11 @@ du wallet n'a pas de rail de paiement sortant configuré.
   - `unknown` (vague 6) : résultat opérateur incertain (timeout, réseau, 5xx, réponse illisible) pour un retrait /
     décaissement. Les fonds restent **réservés** (comptés comme `pending`/`processing` dans le solde) ; la réponse
     `POST /withdraw` est `201 { "status": "unknown", "outcome": "unknown", "message" }`. `GET /transfers/:id` interroge
-    l'opérateur : `SUCCESSFUL` → `completed`, `FAILED` → `failed` (fonds libérés) ; « introuvable » ne vaut échec
-    qu'après `CASH_UNKNOWN_GRACE_MINUTES` (30 min). Après `CASH_UNKNOWN_ALERT_HOURS` (2 h) le transfert est marqué
-    `needsReview` et les opérations sont alertées ; la clôture est alors manuelle (§8). Un `unknown` n'est ni
+    l'opérateur : succès explicite → `completed`, refus explicite → `failed` (fonds libérés).
+    « Introuvable » reste incertain, même après `CASH_UNKNOWN_GRACE_MINUTES` (30 min) : le délai déclenche
+    une revue, jamais une libération automatique. Les retraits `unknown` **ou** `processing` trop anciens
+    (`CASH_UNKNOWN_ALERT_HOURS`, défaut 2 h) sont marqués `needsReview` et les opérations sont alertées.
+    La consultation du statut continue après le signalement. Un `unknown` n'est ni
     annulable par le marchand ni rejetable par l'admin tant que l'opérateur n'a pas répondu.
   - `failed` n'est posé que sur un **refus explicite** de l'opérateur (`502 GATEWAY_ERROR { "outcome": "declined", "transferId" }`).
 - `GET /merchant/cash/transfers?direction&status&limit&offset` → `{ "data": [ {transfer…} ], "total" }` ;
@@ -164,6 +166,7 @@ que les autres routes (pas d'auth par cookie). Entrées : `collect|transfer_in` 
 | GET | `/admin/cash/stats` | volumes du jour / 7 j, files d'attente (`pending_manual`, `awaiting_funds`) |
 | GET | `/admin/cash/transfers?status&direction&merchantId&q&needsReview&limit&offset` | liste (`status=uncertain` = `unknown,processing` ; `needsReview=1`) |
 | GET | `/admin/cash/transfers/:id` | détail + journal des changements ; rafraîchit `processing`/`unknown` ; `needsReview`, `unknownSince`, `requestPayload`, `context.beneficiaryHistory` |
+| GET | `/admin/cash/reconcile/status` | état du worker de ce processus : planification, exécution, dernier succès, échecs et résumés des trois traitements ; aucune donnée fournisseur sensible |
 | POST | `/admin/cash/reconcile/uncertain-payouts` `{ graceMinutes? }` | interroge l'opérateur pour tous les retraits `unknown`/`processing` (même logique que le cron) |
 | POST | `/admin/cash/repair/settlement-queue` `{ minAgeMinutes? }` | enfile les encaissements `authorized` sans ligne `settlement_queue` (> 5 min) |
 | GET | `/admin/cash/bank-accounts?status=pending_verification` | comptes marchands masqués ; cette file inclut `pending` historique. Filtres `verified` et `rejected`, méthode/référence de contrôle et motif de refus renvoyés ; maximum 200 lignes |
@@ -231,3 +234,61 @@ utilisent pour désactiver à l'avance les méthodes non disponibles ; `GET /api
 matrice complète avec les prérequis. Les `GET` de la caisse ne sont jamais filtrés ; un corps invalide reste traité par
 la route (`422 VALIDATION_ERROR`). L'inscription (`POST /merchant/auth/register`) est refusée (`422 COUNTRY_NOT_OPEN`)
 pour un pays sans encaissement `active|pilot` ou hors périmètre (SN, CI).
+
+
+## 11. Reprise automatique des opérations incertaines (lot 4)
+
+L'API lance au démarrage puis toutes les 120 secondes un cycle couvrant les transactions en attente,
+les retraits/décaissements incertains et la réparation des encaissements confirmés sans file de règlement.
+Les trois traitements sont indépendants : un échec n'empêche pas les suivants, mais le cycle n'est déclaré
+réussi que si chacun des traitements exécutés a réussi sans erreur signalée. La réparation écrit sa ligne
+et son événement dans une même transaction ; les reprises n'ajoutent pas une seconde ligne ni une seconde trace.
+
+`RECONCILE_ENABLED=false` désactive uniquement le minuteur ; `RECONCILE_INTERVAL_SECONDS` accepte 30 à
+3600 secondes (défaut 120). Le worker et le CLI `node scripts/reconcile-pending.js` (lancé depuis `backend`) partagent un verrou
+consultatif PostgreSQL : une seule exécution par base, sans chevauchement local. Le CLI retourne un code
+non nul si un traitement échoue ; une exécution ignorée car un autre worker détient le verrou est signalée.
+Les endpoints manuels existants restent utilisables ; les transitions et traces sont protégées contre les reprises.
+Si un cron externe est retenu, désactiver le minuteur embarqué et superviser les codes de sortie du CLI.
+**`DB_POOL_MAX` doit être au moins 2** (défaut 20), car le verrou garde une connexion pendant que les services
+utilisent le pool. Une taille de 1 produit un échec visible plutôt qu'un blocage. À l'arrêt, le minuteur est
+arrêté et le cycle en cours est attendu avant la fermeture du pool ; si le processus est tué, PostgreSQL
+libère son verrou et le prochain cycle reprend depuis les états persistés.
+
+Le suivi utilise exclusivement les fonctions réellement intégrées : statut MTN dans son pays, et
+`queryDisbursement` Airtel avec sa référence fournisseur (CG/XAF et CD/CDF uniquement, conformément aux en-têtes réellement implémentés). Aucune consultation n'est tentée dans un autre
+pays en remplacement d'une configuration manquante. Les intégrations sans consultation de statut
+(Orange/Vodacom dans leur état actuel), sans référence exploitable ou sans configuration conservent les
+fonds réservés et sont orientées vers les opérations. Aucun nouvel endpoint opérateur n'est supposé.
+Une référence enregistrée pour un agrégateur n'est pas consultée via un compte opérateur direct : sans adaptateur de statut compatible, l'ordre reste à examiner.
+Une référence perdue avant réception de la réponse fournisseur n'est pas reconstruite artificiellement.
+Les opérations anciennes et déjà signalées continuent d'être examinées ; le signalement ne vaut pas clôture.
+
+Les alertes sur les retraits âgés réutilisent `ADMIN_ALERT_EMAIL` et `CASH_UNKNOWN_ALERT_HOURS`. Une erreur
+SMTP permet une reprise de notification ; un verrou de notification interrompu expire après cinq minutes,
+et l'événement de revue reste unique. L'e-mail suit une garantie de reprise, pas d'envoi exactement une fois :
+un arrêt après livraison mais avant enregistrement de son résultat peut produire une notification répétée. Une indisponibilité de statut,
+un timeout ou un `NOT_FOUND` ne déclenche ni nouveau paiement ni remboursement ni libération des fonds.
+Les callbacks et consultations de statut partagent les transitions conditionnelles existantes : une réponse
+tardive ne réouvre pas une opération finalisée.
+
+Le marchand peut actualiser le résultat d'un retrait/transfert dans son écran ou son journal avec un
+`GET` sur **le même ordre**. `unknown` signifie « résultat incertain », `processing` « en cours de confirmation » ;
+le net n'est présenté comme envoyé qu'après confirmation. Une nouvelle intention reste un acte explicite,
+distinct de la reprise de l'ordre. L'admin dispose des files « Résultat incertain » et « À examiner », du
+montant réservé, des dates de création d'incertitude et de dernier contrôle, sans action de rejet forcé sur
+ces opérations. Les totaux d'ordres demandés ne sont pas présentés comme des fonds confirmés versés.
+
+Supervision : `GET /admin/cash/reconcile/status` et le bandeau admin concernent **le processus interrogé**,
+et sont remis à zéro au redémarrage ; en déploiement multi-instance, consulter les métriques de l'instance
+qui détient le verrou. `/metrics`, protégé par `METRICS_TOKEN`, expose `reconciliation_runs_total` par résultat,
+`reconciliation_enabled`, `reconciliation_scheduled`, `reconciliation_running`, `reconciliation_last_success_timestamp_seconds`,
+`reconciliation_last_finished_timestamp_seconds` et `reconciliation_consecutive_failures`.
+Alerter sur des échecs consécutifs ou un dernier succès anormalement ancien, en tenant compte de la durée
+du cycle, des minuteurs désactivés et des instances non exécutantes. Contrôler aussi les files `unknown`/`needsReview` et leurs dates.
+Les libellés des métriques restent bornés ; aucune clé d'opération n'est utilisée comme label.
+
+Déploiement : backend et portails marchand/admin ensemble, avec la sauvegarde standard. Aucune migration
+supplémentaire dans ce lot. Vérifier le premier cycle réussi, ses trois étapes et l'actualisation d'un ordre
+existant en recette. Ne pas relancer une transaction réelle pour tester une coupure. Les tests locaux simulent
+les frontières fournisseurs/SMTP et ne prouvent pas l'accès réel aux comptes opérateurs en production.

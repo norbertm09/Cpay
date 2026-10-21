@@ -11,7 +11,8 @@ import { useAsync } from '../../hooks/useAsync';
 import { Button, Card, PageHeader, Input, Select, AmountInput, Segmented, Notice, KV, KVList, StatusBadge, StepUpModal, FeatureUnavailable, Table, Modal, ConfirmDialog, Drawer } from '../../components';
 import { fmtMoney, fmtDateTime, fmtRelative } from '../../utils/format';
 import { errorMessage } from '../../utils/errors';
-import { TRANSFER_STATUS_HELP, dirLabel } from '../../utils/labels';
+import { dirLabel } from '../../utils/labels';
+import { TransferRecovery, transferNetValue } from './TransferRecovery';
 import { BankAccountForm, FundingInstructions, previewFee } from './shared';
 
 const CANCELLABLE = ['awaiting_funds', 'pending_manual'];
@@ -65,7 +66,8 @@ export const Transferer = () => {
     const { data } = await intent.execute(body, cashApi.createTransfer);
     setResult(data); setFundingUnavailable(false);
     reload(); transfers.reload();
-    toast.success(direction === 'bank_to_wallet' ? 'Ordre d’approvisionnement créé' : 'Transfert lancé');
+    if (['unknown', 'processing'].includes(data.status)) toast('Transfert enregistré — en cours de confirmation');
+    else toast.success(direction === 'bank_to_wallet' ? 'Ordre d’approvisionnement créé' : 'Transfert lancé');
   }, [direction, amt, description, accountId, reload, transfers, intent.execute]);
 
   const submit = async (e) => {
@@ -114,9 +116,9 @@ export const Transferer = () => {
       {result && (
         <Card className="mb-4">
           <div className="row-between mb-3"><div><div className="xs muted">{dirLabel(result.direction)}</div><h2>Réf. <span className="mono">{result.reference}</span></h2></div><StatusBadge status={result.status} /></div>
-          {TRANSFER_STATUS_HELP[result.status] && <p className="small text-2 mb-3">{TRANSFER_STATUS_HELP[result.status]}</p>}
+          <TransferRecovery transfer={result} onUpdated={fresh => { setResult(fresh); reload(); transfers.reload(); }} />
           {result.status === 'awaiting_funds' ? <FundingInstructions transfer={result} currency={currency} /> : (
-            <KVList boxed rows={[['Montant', fmtMoney(result.amount, currency)], result.fee != null && ['Frais', fmtMoney(result.fee, currency)], result.net != null && ['Net viré', fmtMoney(result.net, currency), { tone: 'success' }], result.bankAccount && ['Compte', `${result.bankAccount.bankName || ''} ${result.bankAccount.accountMasked || ''}`]]} />
+            <KVList boxed rows={[['Montant', fmtMoney(result.amount, currency)], result.fee != null && ['Frais', fmtMoney(result.fee, currency)], result.net != null && [result.status === 'completed' ? 'Net viré' : 'Net', transferNetValue(result, currency), { tone: result.status === 'completed' ? 'success' : undefined }], result.bankAccount && ['Compte', `${result.bankAccount.bankName || ''} ${result.bankAccount.accountMasked || ''}`]]} />
           )}
           <Button variant="primary" block className="mt-4" icon="plus" onClick={newOperation}>Nouveau transfert</Button>
         </Card>
@@ -159,9 +161,9 @@ export const Transferer = () => {
         <Drawer title={dirLabel(detail.direction || detail.type)} subtitle={`Réf. ${detail.reference}`} onClose={() => setDetail(null)}
           footer={CANCELLABLE.includes(detail.status) ? <Button variant="danger" onClick={() => setToCancel(detail)}>Annuler ce transfert</Button> : null}>
           <div className="row-between mb-3"><span className="strong">{fmtMoney(detail.amount, detail.currency || currency)}</span><StatusBadge status={detail.status} /></div>
-          {TRANSFER_STATUS_HELP[detail.status] && <p className="small text-2 mb-3">{TRANSFER_STATUS_HELP[detail.status]}</p>}
+          <TransferRecovery transfer={detail} onUpdated={fresh => { setDetail(fresh); reload(); transfers.reload(); }} />
           {detail.status === 'awaiting_funds' && detail.instructions ? <FundingInstructions transfer={detail} currency={currency} /> : (
-            <KVList boxed rows={[['Date', fmtDateTime(detail.createdAt)], detail.fee != null && ['Frais', fmtMoney(detail.fee, currency)], detail.net != null && ['Net', fmtMoney(detail.net, currency)], detail.bankAccount && ['Compte', `${detail.bankAccount.bankName || ''} ${detail.bankAccount.accountMasked || ''}`], detail.wallet && ['Wallet', `${detail.wallet.operator || ''} ${detail.wallet.phone || ''}`], detail.description && ['Libellé', detail.description], detail.bankReference && ['Référence bancaire', detail.bankReference, { mono: true }], detail.completedAt && ['Terminé le', fmtDateTime(detail.completedAt)], detail.errorMessage && ['Motif', detail.errorMessage, { tone: 'error' }]]} />
+            <KVList boxed rows={[['Date', fmtDateTime(detail.createdAt)], detail.fee != null && ['Frais', fmtMoney(detail.fee, currency)], detail.net != null && ['Net', transferNetValue(detail, currency)], detail.bankAccount && ['Compte', `${detail.bankAccount.bankName || ''} ${detail.bankAccount.accountMasked || ''}`], detail.wallet && ['Wallet', `${detail.wallet.operator || ''} ${detail.wallet.phone || ''}`], detail.description && ['Libellé', detail.description], detail.bankReference && ['Référence bancaire', detail.bankReference, { mono: true }], detail.completedAt && ['Terminé le', fmtDateTime(detail.completedAt)], detail.errorMessage && ['Motif', detail.errorMessage, { tone: 'error' }]]} />
           )}
         </Drawer>
       )}
