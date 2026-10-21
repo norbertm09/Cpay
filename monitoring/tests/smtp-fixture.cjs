@@ -5,7 +5,7 @@ const tls = require('node:tls');
 const { once } = require('node:events');
 async function startSmtpFixture({ cert, key, transientRejects = 0 }) {
   const messages = [], sockets = new Set();
-  const result = { messages, rejections: 0, tlsConnections: 0 };
+  const result = { messages, rejections: 0, tlsConnections: 0, authFailures: 0 }; // authFailures: 535 replies (bad credentials)
   const secureContext = tls.createSecureContext({ cert, key, minVersion: 'TLSv1.2' });
   const server = net.createServer(raw => {
     sockets.add(raw); raw.on('close', () => sockets.delete(raw)); raw.on('error', () => {});
@@ -14,6 +14,7 @@ async function startSmtpFixture({ cert, key, transientRejects = 0 }) {
     const auth = encoded => {
       const fields = Buffer.from(encoded || '', 'base64').toString('utf8').split('\0');
       state.authed = state.secure && fields.at(-2) === 'fixture' && fields.at(-1) === 'local-fixture-password';
+      if (!state.authed) result.authFailures++;
       reply(state.authed ? '235 Authentication successful' : '535 Authentication failed');
     };
     const onData = chunk => {

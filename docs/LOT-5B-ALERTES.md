@@ -56,20 +56,85 @@ node --test monitoring/tests/alert-delivery.test.cjs
 
 Les tests créent une clé et un certificat temporaires, leur propre configuration OpenSSL et un
 SMTP loopback sans transfert sortant. Ils lancent le vrai Alertmanager et `amtool check-config`,
-puis démontrent : email firing suivi d'un resolved, certificat inconnu rejeté, refus SMTP temporaire
-suivi d'une livraison après reprise. Les fichiers privés et processus sont nettoyés en fin de test.
+puis démontrent : email firing suivi d'un resolved, certificat inconnu rejeté, identifiants refusés
+(`535`, vague 7) et refus SMTP temporaire suivi d'une livraison après reprise. Les fichiers privés et
+processus sont nettoyés en fin de test.
+
+Scénario `535` (mauvais identifiant ou mot de passe) : le fichier mot de passe contient une valeur
+fausse ; le fixture répond `535 Authentication failed` à chaque `AUTH` (après STARTTLS uniquement).
+Comportement attendu et vérifié : aucun message livré, aucun repli en clair, erreur explicite dans
+le journal d'Alertmanager (texte `535`, jamais le secret), compteurs
+`alertmanager_notification_requests_failed_total{integration="email"}` puis
+`alertmanager_notifications_failed_total{integration="email"}` incrémentés, et nouvelles tentatives
+bornées par le backoff exponentiel d'Alertmanager (au plus dix `AUTH` sur cinq secondes dans la
+recette, pas de boucle serrée). Un `535` ne se résout jamais seul : corriger les identifiants et
+recharger la configuration. Côté backend, le même `535` est remonté par les services e-mail avec le
+code `EAUTH` et sans nouvelle tentative (`backend/src/tests/wave7-smtp-fixture.test.js`).
 Les adresses `example.test` ne reçoivent aucun email externe.
 
 `ALERTMANAGER_BIN` et `AMTOOL_BIN` peuvent désigner les binaires de cette même version déjà installés.
 Un outil manquant fait échouer la recette ; aucun test de livraison n'est ignoré silencieusement.
 La CI exécute les mêmes vérifications en complément des règles et scénarios promtool du lot 5A.
 
+## Scrape Prometheus : fichier secret `metrics_token`
+
+Le générateur (`scripts/configure-monitoring.cjs`) **valide** seulement que le fichier désigné par
+`MONITORING_METRICS_TOKEN_FILE` existe et n'est pas vide ; il **ne configure pas Prometheus** et ne
+monte rien. Le raccordement du scrape protégé est une étape d'exploitation distincte, décrite ici.
+
+| Élément | Valeur | Rôle |
+|---|---|---|
+| `backend/.env` → `METRICS_TOKEN` | secret | `backend/src/config/metrics.js` : sans valeur, `/metrics` répond 404 ; sinon comparaison en temps constant de l'en-tête `Authorization: Bearer <token>` (403 sinon). Jamais en query string. |
+| `MONITORING_METRICS_TOKEN_FILE` (hôte) | fichier privé contenant **exactement** le même token | Validé par le générateur ; c'est ce fichier qu'il faut monter dans le conteneur Prometheus. |
+| `/etc/prometheus/secrets/metrics_token` (conteneur) | point de montage, lecture seule | `monitoring/prometheus/prometheus.yml`, job `cplus-api` : `authorization.credentials_file`. Prometheus lit le fichier à chaque scrape et retire les blancs de début/fin. |
+
+Règles sur le fichier :
+
+- une seule ligne, UTF-8 sans BOM ; un saut de ligne final est toléré (Prometheus le retire), tout
+  autre caractère rend le token différent de `METRICS_TOKEN` et le scrape passe à `403` ;
+- propriétaire `65534` (`nobody`, utilisateur de l'image `prom/prometheus`) en mode `0400`, ou
+  groupe `65534` en mode `0440` ; jamais lisible par tous, jamais dans Git, un build, un log ni une URL ;
+- rotation : changer `METRICS_TOKEN` et le fichier dans la même intervention, redémarrer l'API puis
+  recharger Prometheus ; entre les deux, le scrape est `DOWN` (`APIDown` après 30 s).
+
+Montage : `monitoring/docker-compose.monitoring.yml` (référence, non démarré automatiquement) monte
+`${MONITORING_METRICS_TOKEN_FILE}` sur `/etc/prometheus/secrets/metrics_token:ro` et exécute Prometheus
+sous l'uid `65534`. Avec un autre orchestrateur, reproduire ce chemin exact ou adapter
+`credentials_file` dans `prometheus.yml`.
+
+Vérification (depuis la racine du dépôt, variables du fichier privé chargées ; aucune commande
+n'affiche le token) :
+
+```sh
+# 1. Même valeur des deux côtés (sortie vide = identique)
+cmp <(tr -d '[:space:]' < "$MONITORING_METRICS_TOKEN_FILE") \
+    <(grep '^METRICS_TOKEN=' backend/.env | cut -d= -f2- | tr -d '[:space:]"') && echo "token identique"
+# 2. Fichier visible et privé dans le conteneur (propriétaire/mode, taille > 0)
+docker compose -f monitoring/docker-compose.monitoring.yml --env-file <privé> exec prometheus \
+  sh -c 'ls -ln /etc/prometheus/secrets/metrics_token && wc -c < /etc/prometheus/secrets/metrics_token'
+# 3. Configuration valide dans le conteneur (promtool exige la présence de credentials_file :
+#    le lancer sur l'hôte échoue si /etc/prometheus/secrets/ n'y existe pas)
+docker compose -f monitoring/docker-compose.monitoring.yml --env-file <privé> exec prometheus \
+  promtool check config /etc/prometheus/prometheus.yml
+# 4. L'API accepte le token du fichier : 200 attendu (403 = token différent, 404 = METRICS_TOKEN absent)
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $(tr -d '[:space:]' < "$MONITORING_METRICS_TOKEN_FILE")" http://127.0.0.1:3001/metrics
+# 5. Cible UP côté Prometheus
+curl -s http://127.0.0.1:9090/api/v1/targets \
+  | jq -r '.data.activeTargets[] | select(.labels.job=="cplus-api") | "\(.health) \(.lastError)"'
+```
+
+Un `403` au point 4 ou `down` au point 5 avec `server returned HTTP status 403` signifie un token
+différent (espaces, guillemets, BOM, rotation partielle) ; `404` signifie que l'API n'a pas de
+`METRICS_TOKEN`. Ne jamais contourner en passant le token en query string ou en désactivant l'auth.
+
 ## Activation et retour arrière
 
 1. L'exploitant confirme le relais STARTTLS, le destinataire ops et les fichiers secrets.
 2. Valider la configuration générée avec `amtool` et les règles avec `promtool`.
-3. Confirmer que Prometheus/Alertmanager sont effectivement déployés et que le scrape protégé est `UP`.
-   Le compose applicatif et `scripts/deploy.sh` ne les activent pas automatiquement.
+3. Confirmer que Prometheus/Alertmanager sont effectivement déployés et que le scrape protégé est `UP`
+   (section « Scrape Prometheus » ci-dessus). Le compose applicatif et `scripts/deploy.sh` ne les activent
+   pas automatiquement ; `monitoring/docker-compose.monitoring.yml` est une référence à valider.
 4. Charger la configuration validée par le mécanisme d'exploitation retenu. Une notification réelle
    de test doit être explicitement autorisée, reçue et résolue avant de déclarer le canal opérationnel.
 5. Conserver la dernière configuration valide pour revenir en arrière. Une configuration qui ciblait
