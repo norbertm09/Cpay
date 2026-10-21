@@ -111,6 +111,37 @@ jobs:
           if-no-files-found: error
 
   # ────────────────────────────────────────────────────────────────
+  browser-recipes:
+    name: Recette navigateur isolee (app, merchant, admin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            e2e/package-lock.json
+            portal/cardholder/package-lock.json
+            portal/merchant/package-lock.json
+            portal/admin/package-lock.json
+      - name: Installer les dependances verrouillees
+        run: |
+          for portal in cardholder merchant admin; do npm ci --prefix "portal/$portal" --no-audit --no-fund; done
+          npm ci --prefix e2e --no-audit --no-fund
+      - name: Installer Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Construire les trois interfaces du commit avec API locale
+        run: |
+          for portal in cardholder merchant admin; do npm run build --prefix "portal/$portal"; done
+        env:
+          CI: 'false'
+          REACT_APP_API_BASE_URL: ''
+      - name: Tester les parcours et le blocage reseau
+        run: npm test --prefix e2e
+
   landing:
     name: Vitrine (HTML, liens, JS)
     runs-on: ubuntu-latest

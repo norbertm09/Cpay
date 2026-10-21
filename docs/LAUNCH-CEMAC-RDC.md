@@ -6,7 +6,7 @@ Trois familles de moyens : cartes bancaires, opérateurs de monnaie mobile et GI
 
 ## Écarts techniques identifiés
 
-- `backend/src/services/detection/detection.engine.js` ne définit actuellement dans ce périmètre que CM, CG et CD. CF, GA, GQ et TD ne sont pas encore intégrés. Ne pas confondre la liste commerciale des pays et la disponibilité réelle des opérateurs.
+- Mise à jour du 21 octobre 2026 : la détection et le registre de capacités couvrent les sept pays. Les connecteurs mobile money CF, GA, GQ et TD restent planifiés. Voir la matrice et les limites de preuve dans [l'audit résiduel](AUDIT-RESIDUEL-LOTS-5B-5C-6.md). Ne pas confondre pays détecté et opérateur disponible.
 - `backend/src/services/gateways/gimac.gateway.js` contient un TODO et lève une erreur : aucune connexion GIMAC opérationnelle n’est démontrée dans ce dépôt. Avant activation, obtenir les spécifications et accès officiels du partenaire, implémenter les appels/callbacks et tester encaissement, retrait, transfert et rapprochement.
 - Les retraits carte ne sont pas pris en charge par l’orchestrateur général ; ne pas annoncer leur disponibilité générale.
 - Les parcours de transferts et de bénéficiaires actuels restent ceux du code ; la présente PR ne raccorde pas les banques à GIMAC et ne crée pas de nouveaux flux financiers.
