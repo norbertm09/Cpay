@@ -48,6 +48,14 @@ Les trois sous-projets sont décrits séparément pour pouvoir les implémenter 
 
 ## État de cette conception
 
-Le regroupement des lots a été approuvé dans la conversation. Cette conception écrite est à relire
-avant le plan d'implémentation, conformément au parcours architectural Superpowers. Aucun code de
-produit, aucune dépendance et aucun outil de recette n'ont été modifiés à ce stade.
+Le regroupement et cette conception écrite ont été approuvés dans la conversation. Les plans sont
+disponibles pour revue avant exécution :
+
+- [Lot 6 — corrections et audit](../plans/2026-10-21-lot6-residual-audit.md).
+- [Lot 5B — livraison des alertes](../plans/2026-10-21-lot5b-alert-delivery.md).
+- [Lot 5C — recette navigateur](../plans/2026-10-21-lot5c-browser-recipe.md).
+
+Ordre recommandé : corrections de reprise/métriques du lot 6, lot 5B, lot 5C, puis clôture du rapport
+d'audit et validation globale. Le lot 5B est indépendant des corrections frontend ; la recette 5C
+doit tester le comportement app corrigé. Aucun code de produit, aucune dépendance et aucun outil de
+recette n'ont été modifiés à ce stade.
