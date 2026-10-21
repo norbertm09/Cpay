@@ -57,7 +57,7 @@ export const Retirer = () => {
   const withdrawClosed = !cap.isOpen('withdraw', 'mobile_money') || (wallet?.operator ? !cap.isOpen('withdraw', 'mobile_money', String(wallet.operator).toUpperCase()) : false);
   // A saved order may already have debited the balance. Let its existing key
   // retrieve the result; execute still rejects any changed business payload.
-  const canSubmit = amt > 0 && (intent.pending || (!!wallet && !amountError && !withdrawClosed));
+  const canSubmit = amt > 0 && (intent.pending || (sumState === 'ok' && !!wallet && !amountError && !withdrawClosed));
 
   const run = useCallback((confirm) => intent.execute({ amount: amt, description: description || undefined, confirm }, cashApi.withdraw)
     .then(({ data }) => { setResult(data); reload(); if (['unknown', 'processing'].includes(data.status)) toast('Retrait enregistré — en cours de confirmation'); else toast.success('Retrait lancé'); })
@@ -80,6 +80,7 @@ export const Retirer = () => {
   return (
     <div className="narrow">
       <PageHeader title="Retirer" subtitle="Transférez votre solde disponible vers votre wallet Mobile Money. Chaque retrait exige une confirmation forte." actions={<Button size="sm" variant="ghost" to="/compte/tarifs" icon="tag">Voir les frais</Button>} />
+      {sumState === 'error' && <Notice tone="error" className="mb-4">Impossible de charger le solde disponible. <Button size="sm" onClick={reload}>Réessayer</Button></Notice>}
       {(intent.pending || intent.error) && <Notice tone={intent.error ? 'error' : 'info'} className="mb-4">
         {intent.error || 'Opération enregistrée dans cet onglet. Réessayez avec les mêmes paramètres pour retrouver son résultat.'}
         {intent.pending && <Button size="sm" onClick={() => restore(intent.payload)}>Reprendre les paramètres</Button>}

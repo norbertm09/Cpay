@@ -10,7 +10,7 @@ function payloadOf(body) {
 }
 function read(scope) {
   const raw = sessionStorage.getItem(scope);
-  if (!raw) return null;
+  if (raw === null) return null;
   const data = JSON.parse(raw);
   if (data?.version !== 1 || typeof data.key !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(data.key) || typeof data.known !== 'boolean') throw new Error(STORAGE_ERROR);
   return { version: 1, key: data.key, payload: payloadOf(data.payload), known: data.known };

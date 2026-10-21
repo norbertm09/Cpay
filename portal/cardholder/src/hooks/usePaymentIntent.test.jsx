@@ -60,9 +60,9 @@ test('storage unavailable blocks sending and can recover without changing intent
   expect(send).not.toHaveBeenCalled();
 });
 
-test('corrupt storage is not silently replaced by a new intention', async () => {
+test.each(['{broken', '', '{}', 'null'])('corrupt storage %j is not silently replaced by a new intention', async raw => {
   await act(async () => { await expect(intent.execute(payment, async () => { throw new Error('offline'); })).rejects.toThrow(); });
-  const key = sessionStorage.key(0); sessionStorage.setItem(key, '{broken');
+  const key = sessionStorage.key(0); sessionStorage.setItem(key, raw);
   unmount(); mount();
   const send = jest.fn();
   await act(async () => { await expect(intent.execute(payment, send)).rejects.toThrow(); });

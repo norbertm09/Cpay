@@ -25,7 +25,7 @@ test('secret webhook segments, arbitrary IDs and query strings never appear in m
 });
 
 test('one hundred unknown paths produce a single bounded request series', async () => {
-  for (let n = 0; n < 100; n++) await request(app).get(`/arbitrary-${n}-fixture`);
+  for (let n = 0; n < 100; n++) await request(app).get(n % 2 ? `/api/v1/merchant/no-route/${n}` : `/arbitrary-${n}-fixture`);
   const { text } = await metrics();
   expect(text).not.toContain('arbitrary-');
   const lines = text.split('\n').filter(l => l.startsWith('api_requests_total') && l.includes('status="404"'));

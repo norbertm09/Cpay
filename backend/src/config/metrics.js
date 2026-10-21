@@ -59,7 +59,7 @@ const httpMetrics = (req, res, next) => {
   res.on('finish', () => {
     const labels = {
       method,
-      path,
+      path: req.route ? path : 'unmatched',
       status: String(res.statusCode),
     };
     inc('api_requests_total', labels);

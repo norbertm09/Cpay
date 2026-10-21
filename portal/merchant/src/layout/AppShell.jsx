@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useAsync } from '../hooks/useAsync';
-import { cashApi, authApi, consentApi } from '../services/api';
+import { useCashSummary } from '../hooks/useCashSummary';
+import { authApi, consentApi } from '../services/api';
 import { Icon, Button, Notice } from '../components';
 import { fmtMoney } from '../utils/format';
 import { NAV, areaFor } from './nav';
@@ -36,7 +37,7 @@ export const AppShell = ({ children }) => {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('cpay_sidebar') === 'collapsed'; } catch (e) { return false; } });
   const [openGroups, setOpenGroups] = useState({ [area.key]: true });
   const userMenuRef = useRef(null);
-  const { data: summary } = useAsync(() => cashApi.summary(), [pathname.split('/')[1]]);
+  const { summary, state: cashState } = useCashSummary([pathname.split('/')[1]]);
   const { data: twoFa } = useAsync(() => authApi.twoFaStatus(), []);
 
   useEffect(() => { setMenuOpen(false); setUserMenu(false); setOpenGroups(g => ({ ...g, [area.key]: true })); }, [pathname, area.key]);
@@ -57,8 +58,8 @@ export const AppShell = ({ children }) => {
         <Brand />
         <span className="tb-spacer" />
         {summary?.balance && (
-          <Link to="/" className="tb-balance" aria-label={`Solde disponible ${fmtMoney(summary.balance.available, currency)}`}>
-            <span className="lbl">Solde disponible</span>
+          <Link to="/" className="tb-balance" aria-label={`${cashState === 'ok' ? 'Solde disponible' : 'Dernier solde connu'} ${fmtMoney(summary.balance.available, currency)}`}>
+            <span className="lbl">{cashState === 'ok' ? 'Solde disponible' : 'Dernier solde connu'}</span>
             <span className="val">{fmtMoney(summary.balance.available, currency)}</span>
           </Link>
         )}
