@@ -10,6 +10,7 @@ import { directionOf } from '../../utils/status';
 import { errorMessage } from '../../utils/errors';
 import toast from '../../utils/toast';
 import CashTransferDrawer from './CashTransferDrawer';
+import MerchantBankAccountsTab from './MerchantBankAccountsTab';
 import { MerchantLink } from '../merchants/MerchantsPage';
 
 const LIMIT = 25;
@@ -172,10 +173,12 @@ export default function CashPage() {
         { value: 'files', label: 'Files d’attente', icon: 'inbox', count: s ? (s.queues?.pendingManual?.count || 0) + (s.queues?.awaitingFunds?.count || 0) : null },
         { value: 'transferts', label: 'Tous les transferts', icon: 'swap' },
         { value: 'comptes', label: 'Comptes de collecte', icon: 'bank' },
+        { value: 'comptes-marchands', label: 'Comptes marchands', icon: 'bank' },
       ]} />
       {tab === 'files' && <QueuesTab stats={s} onOpen={setSel} tick={tick} />}
       {tab === 'transferts' && <TransfersTab onOpen={setSel} tick={tick} />}
       {tab === 'comptes' && <AccountsTab />}
+      {tab === 'comptes-marchands' && <MerchantBankAccountsTab />}
       {sel && <CashTransferDrawer id={sel.transferId} initial={sel} onClose={() => setSel(null)} onChanged={() => { stats.refresh(); setTick((t) => t + 1); }} />}
     </div>
   );

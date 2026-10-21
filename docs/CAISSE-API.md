@@ -99,7 +99,12 @@ toujours `null` : le numéro du client n'est pas conservé en clair.
   "actor": { "type", "id", "email", "role" }, "oldValues", "newValues", "ip", "createdAt" } ], "total" }`.
 - Comptes bancaires (`/merchant/bank-accounts`) : `POST` et `DELETE /:accountId` exigent le rôle `owner` **et**
   `confirm` (step-up) ; un nouveau compte est créé `status: "pending_verification"`, `usable: false`, et devient
-  utilisable (`verified`) après vérification par les opérations C-Pay (§8). `GET` liste `status`, `usable`, `verifiedAt`.
+  utilisable (`verified`) après vérification par les opérations C-Pay (§8). `GET` liste `status`, `usable`, `verifiedAt`
+  et `rejectionReason` (motif de refus, sinon `null`). Les comptes `pending` historiques sont aussi en attente.
+  Le portail réserve ajout et suppression au propriétaire et ouvre la confirmation forte (mot de passe ou TOTP).
+  Le `DELETE` transmet un corps JSON `{ "confirm": { "password": "…" } }` ou `{ "confirm": { "code": "…" } }`.
+  Un `428` laisse la fenêtre ouverte pour renouveler la confirmation ; aucun secret n'est persisté.
+  Un compte refusé reste inutilisable : le propriétaire peut le retirer puis soumettre des coordonnées corrigées.
 
 ## 4. Retirer — `POST /merchant/cash/withdraw`
 ```json
@@ -161,17 +166,35 @@ que les autres routes (pas d'auth par cookie). Entrées : `collect|transfer_in` 
 | GET | `/admin/cash/transfers/:id` | détail + journal des changements ; rafraîchit `processing`/`unknown` ; `needsReview`, `unknownSince`, `requestPayload`, `context.beneficiaryHistory` |
 | POST | `/admin/cash/reconcile/uncertain-payouts` `{ graceMinutes? }` | interroge l'opérateur pour tous les retraits `unknown`/`processing` (même logique que le cron) |
 | POST | `/admin/cash/repair/settlement-queue` `{ minAgeMinutes? }` | enfile les encaissements `authorized` sans ligne `settlement_queue` (> 5 min) |
-| GET | `/admin/cash/bank-accounts?status=pending_verification` | comptes bancaires marchands à vérifier |
-| POST | `/admin/cash/bank-accounts/:id/verify` `{ method: "document\|micro_deposit\|manual", reference }` | `pending_verification` → `verified` (audit, `beneficiary_events`, e-mail au marchand) ; déjà vérifié → `409 ALREADY_VERIFIED` |
+| GET | `/admin/cash/bank-accounts?status=pending_verification` | comptes marchands masqués ; cette file inclut `pending` historique. Filtres `verified` et `rejected`, méthode/référence de contrôle et motif de refus renvoyés ; maximum 200 lignes |
+| POST | `/admin/cash/bank-accounts/:id/verify` `{ method: "document\|micro_deposit\|manual", reference, note? }` | `pending_verification` ou `pending` → `verified` ; référence de 1 à 128 caractères, note facultative de 1000 caractères maximum ; déjà vérifié → `409 ALREADY_VERIFIED` |
+| POST | `/admin/cash/bank-accounts/:id/reject` `{ reason }` | compte en attente → `rejected` ; motif obligatoire de 5 à 500 caractères après suppression des espaces aux extrémités |
 | POST | `/admin/cash/transfers/:id/confirm-funds` `{ amountReceived, bankReference }` | `awaiting_funds` → `completed`, crédite le solde |
 | POST | `/admin/cash/transfers/:id/mark-executed` `{ bankReference }` | `pending_manual` → `completed` |
 | POST | `/admin/cash/transfers/:id/reject` `{ reason }` | `awaiting_funds`, `pending_manual`, `pending_settlement` → `rejected` (libère les fonds) ; autre statut → `409 INVALID_STATUS` |
 | GET/POST/PATCH | `/admin/cash/platform-accounts` | comptes de collecte C-Pay par devise (`currency`, `bankName`, `accountName`, `accountNumber`, `iban`, `swift`, `active`) |
 
+Le portail admin expose **Caisse → Comptes marchands** aux rôles `ops_admin` et `super_admin`.
+La décision demande une méthode et une référence de contrôle, ou un motif de refus ; l'interface n'envoie
+aucune décision tant que ces informations sont absentes. Les numéros restent masqués. Les pièces et les
+micro-dépôts doivent avoir été contrôlés hors de ce formulaire : choisir une méthode ne lance pas de contrôle bancaire.
+Un compte vérifié, refusé ou supprimé ne peut plus recevoir une nouvelle décision (`409`). Après un conflit,
+la liste est rechargée. La décision, l'événement bénéficiaire et l'audit sont atomiques : si une trace échoue,
+la transaction est annulée et l'API retourne `503 BANK_ACCOUNT_DECISION_UNAVAILABLE`. L'e-mail est envoyé
+après validation de la transaction, sans conditionner celle-ci à la disponibilité du SMTP.
+
 Chaque action admin écrit un audit log et un événement sur le transfert. `GET /admin/cash/stats` expose en plus
 `queues.unknown { count, amount }` et `queues.needsReview { count }`.
 
-## 9. Données (`backend/database/009_wave4_cash.sql` et `011_wave6_integrity.sql`, idempotentes)
+## 9. Données (migrations 009, 011 et 012, idempotentes)
+Lot 3 (`012_bank_account_validation.sql`) : élargit `bank_accounts.status` à `VARCHAR(32)` lorsque
+la colonne existante est plus étroite (`VARCHAR(16)` dans 009). Le statut `pending_verification` exige
+20 caractères. Les colonnes `TEXT` ou déjà plus larges sont préservées ; aucune donnée ni migration
+antérieure n'est modifiée. Appliquer 012 avant de publier les nouveaux portails. Le déploiement standard
+exécute les migrations avant le redémarrage des services ; conserver la sauvegarde préalable et ne pas
+utiliser `--skip-migrations`. En cas de retour au code précédent, laisser l'élargissement de colonne en place.
+Cette migration ciblée ne corrige pas la reconstruction complète sur base vierge signalée dans l'audit.
+
 Vague 6 (`011_wave6_integrity.sql`) : `merchant_transfers.request_payload`, `unknown_since`, `needs_review`,
 `last_status_check_at`, `review_alerted_at` ; `idempotency_keys.in_progress`, `last_error`, `failed_at`, `resource_type`,
 `resource_id` ; index unique `settlement_queue(transaction_id)` ; `bank_accounts.verified_at`, `verified_by`,

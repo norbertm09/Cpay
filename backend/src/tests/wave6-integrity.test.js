@@ -119,6 +119,7 @@ beforeAll(async () => {
   `);
   await mockPg.exec(m010);
   await mockPg.exec(m011);
+  await mockPg.exec(fs.readFileSync(path.join(__dirname, '../../database/012_bank_account_validation.sql'), 'utf8'));
 }, 60000);
 afterAll(async () => { if (mockPg) await mockPg.close(); });
 
@@ -459,6 +460,77 @@ describe('4. Job de réparation settlement_queue', () => {
 describe('5. Bénéficiaires : rôle owner, step-up, vérification des comptes bancaires, historique', () => {
   beforeEach(() => reset());
   const bankBody = { institutionId: INST, accountNumber: '12345678901', accountName: 'Boutique SARL' };
+
+  const addPendingBankAccount = async () => {
+    const r = await request(app).post('/merchant/bank-accounts').set(owner()).send({ ...bankBody, confirm });
+    expect(r.status).toBe(201); return r.body.accountId;
+  };
+  test('pending account can be rejected with a traced reason and remains unusable', async () => {
+    const id = await addPendingBankAccount();
+    const r = await request(app).post(`/admin/cash/bank-accounts/${id}/reject`).set(admin()).send({ reason: 'Titulaire différent du justificatif' });
+    expect(r.status).toBe(200); expect(r.body.status).toBe('rejected');
+    const ev = await one(`SELECT * FROM beneficiary_events WHERE event_type='bank_account_rejected'`);
+    expect(ev).toMatchObject({ entity_id: id, actor_id: ADMIN, actor_role: 'ops_admin' });
+    expect(ev.new_values.reason).toBe('Titulaire différent du justificatif');
+    expect(await count(`SELECT COUNT(*)::int AS n FROM audit_logs WHERE action='BANK_ACCOUNT_REJECT'`)).toBe(1);
+    const list = await request(app).get('/merchant/bank-accounts').set(owner());
+    expect(list.body.data[0]).toMatchObject({ status: 'rejected', usable: false, rejectionReason: 'Titulaire différent du justificatif' });
+    const pay = await request(app).post('/merchant/cash/transfers').set(owner()).send({ direction: 'wallet_to_bank', accountId: id, amount: 20000, confirm });
+    expect(pay.status).toBe(404); expect(pay.body.code).toBe('BANK_ACCOUNT_NOT_FOUND'); expect(mockSendPayout).not.toHaveBeenCalled();
+    expect(mockEmail).toHaveBeenCalledWith(expect.objectContaining({ subject: expect.stringContaining('refusé') }));
+  });
+  test('rejection requires operations role, a pending account and a bounded reason', async () => {
+    const id = await addPendingBankAccount();
+    const url = `/admin/cash/bank-accounts/${id}/reject`;
+    expect((await request(app).post(url).set(admin('support_agent')).send({ reason: 'Compte invalide' })).status).toBe(403);
+    for (const reason of ['', 'abc', 'x'.repeat(501), { reason: 'invalid type' }]) {
+      expect((await request(app).post(url).set(admin()).send({ reason })).status).toBe(422);
+    }
+    expect((await one('SELECT status FROM bank_accounts WHERE account_id=$1',[id])).status).toBe('pending_verification');
+    await sql(`UPDATE bank_accounts SET status='removed' WHERE account_id=$1`,[id]);
+    expect((await request(app).post(url).set(admin()).send({ reason: 'Compte invalide' })).status).toBe(409);
+  });
+  test('admin pending queue includes historical pending accounts and decision evidence is returned', async () => {
+    const first = await addPendingBankAccount();
+    const second = await addPendingBankAccount();
+    await sql("UPDATE bank_accounts SET status='pending' WHERE account_id=$1",[second]);
+    const queue = await request(app).get('/admin/cash/bank-accounts').set(admin());
+    expect(queue.body.data.map(a=>a.accountId).sort()).toEqual([first,second].sort());
+    expect(queue.body.data.every(a=>a.accountMasked.endsWith('8901') && !a.accountNumber)).toBe(true);
+    const decision = await request(app).post(`/admin/cash/bank-accounts/${second}/verify`).set(admin()).send({method:'manual',reference:'CHECK-123'});
+    expect(decision.status).toBe(200);
+    const verified = await request(app).get('/admin/cash/bank-accounts?status=verified').set(admin());
+    expect(verified.body.data[0]).toMatchObject({accountId:second,verificationMethod:'manual',verificationReference:'CHECK-123'});
+    expect((await request(app).get('/admin/cash/bank-accounts?status=anything').set(admin())).status).toBe(422);
+    expect((await request(app).get('/admin/cash/bank-accounts').set(admin('support_agent'))).status).toBe(403);
+  });
+  test('a rejection cannot be turned into verification without a new submission', async () => {
+    const id = await addPendingBankAccount();
+    expect((await request(app).post(`/admin/cash/bank-accounts/${id}/reject`).set(admin()).send({ reason: 'Pièce non conforme' })).status).toBe(200);
+    const r = await request(app).post(`/admin/cash/bank-accounts/${id}/verify`).set(admin()).send({ method: 'document', reference: 'DOC-42' });
+    expect(r.status).toBe(409); expect((await one('SELECT status FROM bank_accounts WHERE account_id=$1',[id])).status).toBe('rejected');
+  });
+  test.each(['verify','reject'])('bank %s rolls back when mandatory decision trace fails', async action => {
+    const id = await addPendingBankAccount();
+    await mockPg.exec(`CREATE FUNCTION deny_bank_trace() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'trace unavailable'; END $$;
+      CREATE TRIGGER deny_bank_trace BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION deny_bank_trace();`);
+    try {
+      const r = await request(app).post(`/admin/cash/bank-accounts/${id}/${action}`).set(admin()).send(action==='verify' ? { method: 'document', reference: 'DOC-42' } : { reason: 'Pièce non conforme' });
+      expect(r.status).toBe(503);
+      expect((await one('SELECT status FROM bank_accounts WHERE account_id=$1',[id])).status).toBe('pending_verification');
+      expect(await count(`SELECT COUNT(*)::int AS n FROM beneficiary_events WHERE event_type IN ('bank_account_verified','bank_account_rejected')`)).toBe(0);
+    } finally { await mockPg.exec('DROP TRIGGER deny_bank_trace ON audit_logs; DROP FUNCTION deny_bank_trace()'); }
+  });
+  test('concurrent verification and rejection record exactly one decision', async () => {
+    const id = await addPendingBankAccount();
+    const responses = await Promise.all([
+      request(app).post(`/admin/cash/bank-accounts/${id}/verify`).set(admin()).send({method:'document',reference:'DOC-42'}),
+      request(app).post(`/admin/cash/bank-accounts/${id}/reject`).set(admin()).send({reason:'Pièce non conforme'}),
+    ]);
+    expect(responses.map(r=>r.status).sort()).toEqual([200,409]);
+    expect(await count(`SELECT COUNT(*)::int AS n FROM beneficiary_events WHERE event_type IN ('bank_account_verified','bank_account_rejected')`)).toBe(1);
+    expect(await count(`SELECT COUNT(*)::int AS n FROM audit_logs WHERE action IN ('BANK_ACCOUNT_VERIFY','BANK_ACCOUNT_REJECT')`)).toBe(1);
+  });
 
   test('PUT /cash/wallet : cashier → 403 INSUFFICIENT_ROLE ; owner sans confirm → 428 ; owner + mot de passe → 200 + historique + audit + e-mail', async () => {
     let r = await request(app).put('/merchant/cash/wallet').set(cashier()).send({ operator: 'mtn_momo', phone: '+237670000001', confirm });

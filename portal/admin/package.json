@@ -12,8 +12,17 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "mock": "node dev/mock-api.js"
+    "mock": "node dev/mock-api.js",
+    "test": "react-scripts test"
   },
   "proxy": "http://localhost:3000",
-  "browserslist": { "production": [">0.2%", "not dead"], "development": ["last 1 chrome version"] }
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead"
+    ],
+    "development": [
+      "last 1 chrome version"
+    ]
+  }
 }

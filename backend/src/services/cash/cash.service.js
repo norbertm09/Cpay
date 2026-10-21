@@ -802,7 +802,7 @@ async function notifyBeneficiaryChange(merchant, { eventType, summary, ip }) {
   if (!merchant || !merchant.email) return false;
   const labels = {
     wallet_updated: 'Wallet de retrait modifié', bank_account_added: 'Compte bancaire ajouté',
-    bank_account_removed: 'Compte bancaire supprimé', bank_account_verified: 'Compte bancaire vérifié',
+    bank_account_removed: 'Compte bancaire supprimé', bank_account_verified: 'Compte bancaire vérifié', bank_account_rejected: 'Compte bancaire refusé',
   };
   try {
     const email = require('../notifications/email.service');
