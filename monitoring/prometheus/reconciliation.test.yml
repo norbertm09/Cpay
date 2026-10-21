@@ -1,0 +1,177 @@
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+tests:
+  - name: recovery clears alerts and stale replica failures are suppressed
+    interval: 1m
+    input_series:
+      - series: 'reconciliation_enabled{job="cplus-api",instance="a"}'
+        values: '1x25'
+      - series: 'reconciliation_scheduled{job="cplus-api",instance="a"}'
+        values: '1x25'
+      - series: 'reconciliation_last_success_timestamp_seconds{job="cplus-api",instance="a"}'
+        values: '60x17 1080+60x7'
+      - series: 'reconciliation_consecutive_failures{job="cplus-api",instance="b"}'
+        values: '8x25'
+      - series: 'process_uptime_seconds{job="cplus-api",instance="a"}'
+        values: '0+60x25'
+    alert_rule_test:
+      - eval_time: 17m
+        alertname: ReconciliationStalled
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: critical }
+            exp_annotations: { summary: "Rapprochement sans succes depuis plus de 10 minutes" }
+      - eval_time: 19m
+        alertname: ReconciliationStalled
+        exp_alerts: []
+      - eval_time: 19m
+        alertname: ReconciliationFailures
+        exp_alerts: []
+  - name: restart without first success gets a fresh startup grace
+    interval: 1m
+    input_series:
+      - series: 'reconciliation_enabled{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_scheduled{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_last_success_timestamp_seconds{job="cplus-api",instance="a"}'
+        values: '0+60x9 0x10'
+      - series: 'process_uptime_seconds{job="cplus-api",instance="a"}'
+        values: '0+60x9 0+60x10'
+    alert_rule_test:
+      - eval_time: 19m
+        alertname: ReconciliationStalled
+        exp_alerts: []
+  - name: partial metric loss cannot look healthy
+    interval: 1m
+    input_series:
+      - series: 'up{job="cplus-api",instance="a"}'
+        values: '1x10'
+      - series: 'reconciliation_enabled{job="cplus-api",instance="a"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ReconciliationMetricsMissing
+        exp_alerts:
+          - exp_labels: { job: cplus-api, instance: a, severity: warning }
+            exp_annotations: { summary: "Metriques de rapprochement absentes" }
+  - name: healthy worker and idle replica do not alert
+    interval: 1m
+    input_series:
+      - series: 'up{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_enabled{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_scheduled{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_last_success_timestamp_seconds{job="cplus-api",instance="a"}'
+        values: '0+60x20'
+      - series: 'reconciliation_consecutive_failures{job="cplus-api",instance="a"}'
+        values: '0x20'
+      - series: 'reconciliation_last_success_timestamp_seconds{job="cplus-api",instance="b"}'
+        values: '0x20'
+      - series: 'reconciliation_consecutive_failures{job="cplus-api",instance="b"}'
+        values: '8x20'
+      - series: 'process_uptime_seconds{job="cplus-api",instance="a"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReconciliationStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ReconciliationFailures
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ReconciliationNotScheduled
+        exp_alerts: []
+  - name: no first success alerts after startup grace and persistence
+    interval: 1m
+    input_series:
+      - series: 'reconciliation_enabled{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_scheduled{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_last_success_timestamp_seconds{job="cplus-api",instance="a"}'
+        values: '0x20'
+      - series: 'process_uptime_seconds{job="cplus-api",instance="a"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ReconciliationStalled
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: ReconciliationStalled
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: critical }
+            exp_annotations: { summary: "Rapprochement sans succes depuis plus de 10 minutes" }
+  - name: stale last success alerts
+    interval: 1m
+    input_series:
+      - series: 'reconciliation_enabled{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_scheduled{job="cplus-api",instance="a"}'
+        values: '1x20'
+      - series: 'reconciliation_last_success_timestamp_seconds{job="cplus-api",instance="a"}'
+        values: '60x20'
+      - series: 'process_uptime_seconds{job="cplus-api",instance="a"}'
+        values: '0+60x20'
+      - series: 'reconciliation_consecutive_failures{job="cplus-api",instance="a"}'
+        values: '3x20'
+    alert_rule_test:
+      - eval_time: 17m
+        alertname: ReconciliationStalled
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: critical }
+            exp_annotations: { summary: "Rapprochement sans succes depuis plus de 10 minutes" }
+      - eval_time: 17m
+        alertname: ReconciliationFailures
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: warning }
+            exp_annotations: { summary: "Echecs repetes du rapprochement sans succes recent" }
+  - name: intentional disable does not alert
+    interval: 1m
+    input_series:
+      - series: 'reconciliation_enabled{job="cplus-api",instance="a"}'
+        values: '0x20'
+      - series: 'reconciliation_scheduled{job="cplus-api",instance="a"}'
+        values: '0x20'
+      - series: 'reconciliation_last_success_timestamp_seconds{job="cplus-api",instance="a"}'
+        values: '0x20'
+      - series: 'reconciliation_consecutive_failures{job="cplus-api",instance="a"}'
+        values: '9x20'
+      - series: 'process_uptime_seconds{job="cplus-api",instance="a"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReconciliationStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ReconciliationFailures
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ReconciliationNotScheduled
+        exp_alerts: []
+  - name: enabled but unscheduled worker alerts
+    interval: 1m
+    input_series:
+      - series: 'reconciliation_enabled{job="cplus-api",instance="a"}'
+        values: '1x10'
+      - series: 'reconciliation_scheduled{job="cplus-api",instance="a"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ReconciliationNotScheduled
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: critical }
+            exp_annotations: { summary: "Rapprochement active mais aucun minuteur programme" }
+  - name: missing worker metrics is visible even when API scrape succeeds
+    interval: 1m
+    input_series:
+      - series: 'up{job="cplus-api",instance="a"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ReconciliationMetricsMissing
+        exp_alerts:
+          - exp_labels: { job: cplus-api, instance: a, severity: warning }
+            exp_annotations: { summary: "Metriques de rapprochement absentes" }
