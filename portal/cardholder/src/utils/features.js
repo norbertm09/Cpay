@@ -3,7 +3,8 @@
 // variable d'environnement de build (REACT_APP_FEATURE_<NOM>=true) ; l'ecran
 // correspondant garde de toute facon le repli « en cours d'integration »
 // si l'API repond 410.
-const flag = (name) => process.env[`REACT_APP_FEATURE_${name}`] === 'true';
+// Vite (envPrefix REACT_APP_) remplace import.meta.env par l'objet complet au build : l'acces dynamique reste statique.
+const flag = (name) => import.meta.env[`REACT_APP_FEATURE_${name}`] === 'true';
 
 export const FEATURES = Object.freeze({
   topup: flag('TOPUP'),

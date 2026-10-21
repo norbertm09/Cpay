@@ -9,13 +9,20 @@
  *   mfa@c-pay.global  / Demo1234      -> 2FA (code 123456)
  *   temp@c-pay.global / Temp1234      -> mot de passe temporaire (changement force)
  * Code PIN des cartes : 1234.
- * Variables : PORT (4011), MOCK_GTP=1 (service cartes reseau actif), MOCK_CONSENT=0 (modale CGU).
+ * Variables : PORT (4011), MOCK_GTP=1 (service cartes reseau actif), MOCK_CONSENT=0 (modale CGU),
+ *   MOCK_STATIC=build (sert aussi le bundle Vite en repli SPA : meme origine, le cookie de refresh
+ *   circule sans CORS, c'est le mode des captures d'ecran et de la recette navigateur).
+ * Session : le jeton d'acces n'est jamais persiste par le portail ; la connexion pose le cookie
+ * HttpOnly cp_rt_cardholder et POST /auth/refresh (cookie seul) rend un nouveau jeton (rotation).
  */
 'use strict';
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const PORT = parseInt(process.env.PORT, 10) || 4011;
+const STATIC = process.env.MOCK_STATIC ? path.resolve(process.env.MOCK_STATIC) : null;
 const GTP_ON = process.env.MOCK_GTP === '1';
 const CONSENTED = process.env.MOCK_CONSENT !== '0';
 const PIN = '1234';
@@ -267,15 +274,30 @@ on('GET', '/api/v1/consent/check', async (req, res, b, q, u) => json(res, 200, {
 on('POST', '/api/v1/consent/accept', async (req, res, b, q, u) => { consents.add(u.id); json(res, 200, { success: true }); });
 on('GET', '/api/v1/pay/:shortId/status', async (req, res, b, q, u, p) => { if (p.shortId === 'ABC123') return json(res, 200, { shortId: 'ABC123', amount: 15000, currency: 'XAF', status: 'pending' }); json(res, 404, { error: 'Lien invalide', code: 'LINK_NOT_FOUND' }); }, false);
 
+// ─── Statique (bundle Vite, repli SPA sur index.html) ─────────────
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.txt': 'text/plain' };
+const serveStatic = (req, res, pathname) => {
+  if (!STATIC || req.method !== 'GET' || pathname.startsWith('/api/')) return false;
+  let file = path.join(STATIC, decodeURIComponent(pathname));
+  if (!file.startsWith(STATIC)) return false;
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(STATIC, 'index.html');
+  if (!fs.existsSync(file)) return false;
+  // Meme CSP que la production (script-src 'self') : un script inline casserait le portail.
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'" });
+  fs.createReadStream(file).pipe(res);
+  return true;
+};
+
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin || '*';
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
   res.setHeader('Vary', 'Origin');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   const url = new URL(req.url, `http://${req.headers.host}`);
+  if (serveStatic(req, res, url.pathname)) return undefined;
   const route = routes.find((r) => r.method === req.method && r.re.test(url.pathname));
   if (!route) return json(res, 404, { error: `Route inconnue : ${req.method} ${url.pathname}` });
   const user = readJwt(req);
@@ -287,4 +309,4 @@ const server = http.createServer(async (req, res) => {
   catch (e) { json(res, 500, { error: e.message }); }
   process.stdout.write(`${new Date().toISOString().slice(11, 19)} ${req.method} ${url.pathname} -> ${res.statusCode}\n`);
 });
-server.listen(PORT, '127.0.0.1', () => process.stdout.write(`Mock API C-Pay porteur : http://127.0.0.1:${PORT}  (GTP ${GTP_ON ? 'actif' : 'inactif'}, consentement ${CONSENTED ? 'accepté' : 'à recueillir'})\n`));
+server.listen(PORT, '127.0.0.1', () => process.stdout.write(`Mock API C-Pay porteur : http://127.0.0.1:${PORT}  (GTP ${GTP_ON ? 'actif' : 'inactif'}, consentement ${CONSENTED ? 'accepté' : 'à recueillir'}${STATIC ? `, statique ${STATIC}` : ''})\n`));

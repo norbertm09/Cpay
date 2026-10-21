@@ -1,18 +1,25 @@
 # C-Pay — Portail porteur (`portal/cardholder`)
 
-Application React (CRA, React 18, react-router 6, axios, react-hot-toast) servie sur
+Application React (Vite 5, React 18, react-router 6, axios, react-hot-toast) servie sur
 `app.c-pay.global` / `card.c-pay.global` pour les **porteurs** de cartes C-Pay (consommateurs,
 mobile d'abord). Aucune bibliothèque UI : design system maison en CSS (variables), icônes SVG inline.
 
 ## Démarrer
 
 ```bash
-npm install                 # pas de lockfile versionné
-npm start                   # http://localhost:3002, proxy API -> http://localhost:3000
-CI=false npm run build      # build de production dans build/
+npm ci                      # lockfile versionné (npm install pour le régénérer)
+npm run dev                 # http://localhost:3003, proxy /api -> http://localhost:3000 (API_PROXY_TARGET pour changer)
+npm run build               # build de production Vite dans build/ (sans source maps, sans script inline)
+npm run preview             # sert build/ sur http://localhost:3003
+npm test                    # tests unitaires (vitest, jsdom)
 ```
 
-Variable `REACT_APP_API_BASE_URL` : origine de l'API (vide = même origine, via le proxy CRA).
+Outillage : Vite 5 + `@vitejs/plugin-react` (`vite.config.js`, entrée `index.html` à la racine ->
+`src/index.jsx`). Les variables de build gardent le préfixe `REACT_APP_` (`envPrefix`) et se lisent
+via `import.meta.env.REACT_APP_*`. `build/index.html` ne contient aucun `<script>` inline
+(`build.modulePreload.polyfill = false`) : compatible avec la CSP `script-src 'self'` de nginx.
+
+Variable `REACT_APP_API_BASE_URL` : origine de l'API (vide = même origine, via le proxy Vite).
 Drapeaux optionnels (`true` pour activer l'écran complet, sinon état « en cours d'intégration ») :
 `REACT_APP_FEATURE_TOPUP`, `REACT_APP_FEATURE_UNLOAD`, `REACT_APP_FEATURE_GTP_TOPUP`,
 `REACT_APP_FEATURE_GTP_UNLOAD`, `REACT_APP_FEATURE_EXTERNAL_CARD_PAYMENT` (voir `src/utils/features.js`).
@@ -46,8 +53,9 @@ Profil ; Aide via la barre haute et le menu compte), barre latérale sur ordinat
 ```
 src/
   App.jsx                 routeur fin, gardes (RequireAuth / PublicOnly), redirections
-  index.js                point d'entrée (importe styles/index.css)
-  services/               api.js (axios, jeton ch_token, refresh single-flight par cookie cp_rt_cardholder,
+  index.jsx               point d'entrée (importe styles/index.css)
+  services/               api.js (axios, jeton d'accès en mémoire, refresh single-flight par cookie HttpOnly
+                          cp_rt_cardholder, verrou Web Locks inter-onglets, BroadcastChannel cpay-cardholder-session,
                           403 toast), auth.js, cards.js, operations.js, support.js, profile.js
   hooks/                  useAuth (AuthProvider, /auth/me), useAsync, useForm, useMediaQuery, useDocumentTitle
   utils/                  format (monnaie, dates FR, téléphone), errors (mapping FEATURE_DISABLED…),
@@ -72,6 +80,19 @@ dev/mock-api.js           API factice (Node pur) pour le développement et les c
   `.tabs`, `.list-item`, `.table`, `.kv`, `.modal`, `.drawer`, `.vcard` (carte virtuelle de marque), `.feature-off`.
 - Utilisable dès 360 px ; impression des reçus via `@media print`.
 
+## Session (vague 7)
+
+- Jeton d'accès (JWT 15 min) **en mémoire uniquement** (plus de `ch_token` dans `localStorage`) ;
+  un rechargement le redemande par `POST auth/refresh` (cookie HttpOnly `cp_rt_cardholder`,
+  path `/api/v1/cardholder/auth`, SameSite=Strict en production) avant d'afficher quoi que ce soit.
+- 401 sur une route protégée -> refresh single-flight -> rejeu ; échec -> retour à `/connexion`.
+- Multi-onglets : `BroadcastChannel('cpay-cardholder-session')` (repli : évènement `storage` sur un
+  drapeau non sensible) propage `login`/`logout` ; le refresh passe par un verrou `navigator.locks`
+  pour que deux onglets restaurés ensemble ne réutilisent pas le même refresh (le backend révoquerait tout).
+- Onglet remis au premier plan avec un jeton expirant sous 90 s : renouvellement anticipé.
+- `sessionStorage` ne garde que l'intention de paiement (`usePaymentIntent`, clé d'idempotence + montant,
+  jamais de PIN ni de jeton).
+
 ## API utilisée (`/api/v1/cardholder` sauf mention)
 
 Auth : `POST auth/login`, `auth/2fa/validate`, `auth/refresh`, `auth/register`, `auth/logout`,
@@ -91,8 +112,13 @@ Profil : `PATCH profile`, `GET kyc`, `POST kyc/documents`. Hors préfixe : `GET 
 ```bash
 node dev/mock-api.js                      # http://127.0.0.1:4011 (PORT=… pour changer)
 MOCK_GTP=1 MOCK_CONSENT=0 node dev/mock-api.js   # service cartes réseau actif, modale CGU affichée
-REACT_APP_API_BASE_URL=http://127.0.0.1:4011 npm start
+API_PROXY_TARGET=http://127.0.0.1:4011 npm run dev        # dev : le proxy Vite garde la même origine (cookie de refresh OK)
+npm run build && MOCK_STATIC=build node dev/mock-api.js   # recette : le mock sert aussi build/ (SPA, CSP script-src 'self')
 ```
+
+Le portail et le mock doivent partager la même origine (proxy Vite ou `MOCK_STATIC`) : le cookie de
+refresh est `SameSite` et le jeton d'accès n'est plus persisté, un appel cross-site perdrait la session
+au rechargement.
 
 Comptes : `demo@c-pay.global / Demo1234` (compte riche en opérations), `mfa@c-pay.global / Demo1234`
 (2FA, code `123456`), `temp@c-pay.global / Temp1234` (mot de passe temporaire). PIN des cartes : `1234`.

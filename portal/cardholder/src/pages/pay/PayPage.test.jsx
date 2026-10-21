@@ -1,17 +1,18 @@
 import React, { act } from 'react';
+import { webcrypto } from 'node:crypto';
+import { vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
 import { Simulate } from 'react-dom/test-utils';
 import { MemoryRouter } from 'react-router-dom';
 import PayPage from './PayPage';
 import * as ops from '../../services/operations';
 
-jest.mock('../../hooks/useAuth', () => ({ useAuth: () => ({ user: {
+vi.mock('../../hooks/useAuth', () => ({ useAuth: () => ({ user: {
   cardholderId: 'actor-fixture', card: { cardId: 'card-fixture', balance: 5000, currency: 'XAF', status: 'active' },
-}, patchCard: jest.fn() }) }));
-jest.mock('../../services/operations', () => ({ pay: jest.fn(), payLinkStatus: jest.fn() }));
-jest.mock('./QrScanner', () => () => null);
-jest.mock('../../components', () => {
-  const R = require('react');
+}, patchCard: vi.fn() }) }));
+vi.mock('../../services/operations', () => ({ pay: vi.fn(), payLinkStatus: vi.fn() }));
+vi.mock('./QrScanner', () => ({ default: () => null }));
+vi.mock('../../components', () => {
   return {
     Card: ({ children }) => <div>{children}</div>, Alert: ({ children }) => <div role="alert">{children}</div>,
     Button: ({ children, type = 'button', onClick, disabled }) => <button type={type} onClick={onClick} disabled={disabled}>{children}</button>,
@@ -22,7 +23,7 @@ jest.mock('../../components', () => {
   };
 });
 global.IS_REACT_ACT_ENVIRONMENT = true;
-Object.defineProperty(window, 'crypto', { value: require('crypto').webcrypto, configurable: true });
+Object.defineProperty(window, 'crypto', { value: webcrypto, configurable: true });
 let root, host;
 function mount() { host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); act(() => root.render(<MemoryRouter><PayPage /></MemoryRouter>)); }
 function unmount() { act(() => root.unmount()); host.remove(); }
