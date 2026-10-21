@@ -188,6 +188,9 @@ export const financeApi = {
 
 // ─── Caisse (vague 4) — docs/CAISSE-API.md §8, rôles super_admin / ops_admin ──
 export const cashApi = {
+  bankAccounts: (params) => api.get('/cash/bank-accounts', { params, ...quiet }),
+  verifyBankAccount: (id, data) => api.post(`/cash/bank-accounts/${id}/verify`, data),
+  rejectBankAccount: (id, reason) => api.post(`/cash/bank-accounts/${id}/reject`, { reason }),
   stats: () => api.get('/cash/stats', quiet),
   transfers: (params) => api.get('/cash/transfers', { params, ...quiet }),
   transfer: (id) => api.get(`/cash/transfers/${id}`),

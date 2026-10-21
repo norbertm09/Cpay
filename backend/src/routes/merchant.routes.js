@@ -887,7 +887,10 @@ router.get('/bank-accounts', merchantAuth, async (req, res) => {
     const r = await query(
       `SELECT ba.account_id, ba.account_number, ba.account_name, ba.iban,
               ba.status, ba.is_default, ba.verified_at, ba.created_at, fi.name AS inst_name, fi.code AS inst_code,
-              fi.type AS inst_type, fi.country
+              fi.type AS inst_type, fi.country,
+              (SELECT ev.new_values->>'reason' FROM beneficiary_events ev
+               WHERE ev.entity_id=ba.account_id AND ev.merchant_id=ba.owner_id AND ev.event_type='bank_account_rejected'
+               ORDER BY ev.created_at DESC LIMIT 1) AS rejection_reason
        FROM bank_accounts ba
        LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
        WHERE ba.owner_type='merchant' AND ba.owner_id=$1 AND ba.status != 'removed'
@@ -901,6 +904,7 @@ router.get('/bank-accounts', merchantAuth, async (req, res) => {
         status: a.status,
         usable: a.status === 'verified',          // WAVE-6 : seul un compte vérifié reçoit un transfert
         verifiedAt: a.verified_at || null,
+        rejectionReason: a.status === 'rejected' ? a.rejection_reason || null : null,
         isDefault: a.is_default,
         institution: { name: a.inst_name, code: a.inst_code,
                        type: a.inst_type, country: a.country },

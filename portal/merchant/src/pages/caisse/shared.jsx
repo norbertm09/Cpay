@@ -74,10 +74,12 @@ export const WalletForm = ({ user, initial, onSaved, onCancel }) => {
 
 // Ajout d'un compte bancaire (POST /bank-accounts).
 export const BankAccountForm = ({ user, onSaved, onCancel }) => {
+  const stepUp = useStepUp(user);
+  const owner = user?.role === 'owner';
   const [institutions, setInstitutions] = useState(null);
   const [form, setForm] = useState({ institutionId: '', accountNumber: '', accountName: '', iban: '' });
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
+  const [confirmationAccount, setConfirmationAccount] = useState(null);
   useEffect(() => {
     authApi.institutions(user?.country || 'CG')
       .then(r => setInstitutions((r.data.institutions || []).filter(i => ['bank', 'microfinance', 'cooperative'].includes(i.type))))
@@ -86,19 +88,20 @@ export const BankAccountForm = ({ user, onSaved, onCancel }) => {
   const f = k => v => { setForm(p => ({ ...p, [k]: v })); setErrors(e => ({ ...e, [k]: undefined })); };
   const save = async (e) => {
     e?.preventDefault();
+    if (!owner) return;
     const er = {};
     if (!form.institutionId) er.institutionId = 'Choisissez la banque.';
     if (form.accountName.trim().length < 2) er.accountName = 'Titulaire requis.';
     if (form.accountNumber.replace(/\s/g, '').length < 8) er.accountNumber = 'Numéro de compte invalide.';
     setErrors(er); if (Object.keys(er).length) return;
-    setSaving(true);
-    try {
-      const { data } = await accountApi.addBankAccount({ institutionId: form.institutionId, accountNumber: form.accountNumber.trim(), accountName: form.accountName.trim(), iban: form.iban.trim() || undefined });
-      toast.success('Compte bancaire ajouté'); onSaved(data);
-    } catch (err) { toast.error(errorMessage(err)); }
-    finally { setSaving(false); }
+    setConfirmationAccount({ ...form });
+    stepUp.request(async (confirm) => {
+      const { data } = await accountApi.addBankAccount({ institutionId: form.institutionId, accountNumber: form.accountNumber.trim(), accountName: form.accountName.trim(), iban: form.iban.trim() || undefined, confirm });
+      toast.success('Compte bancaire ajouté — en attente de vérification Cpay'); onSaved(data);
+    });
   };
   return (
+    <>
     <form onSubmit={save} noValidate>
       <Select label="Banque" value={form.institutionId} onChange={f('institutionId')} placeholder={institutions === null ? 'Chargement…' : '— Choisir —'} error={errors.institutionId} required
         options={(institutions || []).map(i => ({ value: i.institution_id, label: `${i.name}${i.type !== 'bank' ? ` (${i.type})` : ''}` }))}
@@ -106,8 +109,10 @@ export const BankAccountForm = ({ user, onSaved, onCancel }) => {
       <Input label="Titulaire du compte" value={form.accountName} onChange={f('accountName')} placeholder="NOM DE L’ENTREPRISE" error={errors.accountName} required />
       <Input label="Numéro de compte" value={form.accountNumber} onChange={f('accountNumber')} inputMode="numeric" placeholder="30011 00012 12345678901 23" error={errors.accountNumber} mono required />
       <Input label="IBAN (facultatif)" value={form.iban} onChange={v => f('iban')(String(v).toUpperCase())} placeholder="CG39 ..." mono />
-      <div className="form-actions">{onCancel && <Button onClick={onCancel}>Annuler</Button>}<Button type="submit" variant="primary" loading={saving}>Ajouter</Button></div>
+      <div className="form-actions">{onCancel && <Button onClick={onCancel}>Annuler</Button>}<Button type="submit" variant="primary" disabled={!owner || !!stepUp.state}>Ajouter</Button></div>
     </form>
+      {stepUp.state && <StepUpModal {...stepUp.state} title="Confirmer l’ajout du compte bancaire" onConfirm={stepUp.confirm} onClose={stepUp.close} summary={<KV label="Compte" value={`${confirmationAccount?.accountName} · ${confirmationAccount?.accountNumber}`} />} />}
+    </>
   );
 };
 

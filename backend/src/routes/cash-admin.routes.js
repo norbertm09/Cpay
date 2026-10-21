@@ -17,7 +17,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { query } = require('../config/database');
+const { query, withTransaction } = require('../config/database');
 const { requireRole } = require('../middleware/auth');
 const logger = require('../config/logger');
 const cash = require('../services/cash/cash.service');
@@ -162,46 +162,86 @@ router.post('/repair/settlement-queue', cashAdmin, async (req, res) => {
 
 // ─── WAVE-6 : vérification d'un compte bancaire marchand ─────────
 const VERIFY_METHODS = ['document', 'micro_deposit', 'manual'];
-router.post('/bank-accounts/:id/verify', cashAdmin, async (req, res) => {
-  const { method, reference, note } = req.body || {};
-  if (!VERIFY_METHODS.includes(method)) return fail(res, 422, `method: ${VERIFY_METHODS.join(' | ')}`, 'VALIDATION_ERROR');
-  if (!reference || !String(reference).trim()) return fail(res, 422, 'reference requis (document, référence du micro-virement ou du contrôle manuel)', 'VALIDATION_ERROR');
-  const cur = await query(
-    `SELECT ba.*, fi.name AS inst_name, m.email AS merchant_email, m.business_name
-     FROM bank_accounts ba LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
-     LEFT JOIN merchants m ON m.merchant_id = ba.owner_id
-     WHERE ba.account_id=$1 AND ba.owner_type='merchant'`, [req.params.id]);
-  const a = cur.rows[0];
-  if (!a) return fail(res, 404, 'Compte bancaire introuvable', 'NOT_FOUND');
-  if (a.status === 'verified') return fail(res, 409, 'Compte déjà vérifié', 'ALREADY_VERIFIED', { verifiedAt: a.verified_at || null });
-  if (a.status === 'removed') return fail(res, 409, 'Compte supprimé', 'INVALID_STATUS', { status: a.status });
-  const r = await query(
-    `UPDATE bank_accounts SET status='verified', verified_at=NOW(), verified_by=$2, verification_method=$3, verification_reference=$4, updated_at=NOW()
-     WHERE account_id=$1 AND status <> 'verified' RETURNING *`,
-    [a.account_id, actorId(req), method, String(reference).trim().slice(0, 128)]);
-  const row = r.rows[0];
-  if (!row) return fail(res, 409, 'Compte déjà vérifié', 'ALREADY_VERIFIED');
-  const newValues = { ...cash.maskBankAccount({ ...row, inst_name: a.inst_name }), method, reference: String(reference).trim().slice(0, 128), note: note || null };
-  await cash.recordBeneficiaryEvent({
-    merchantId: a.owner_id, actor: { type: 'admin', id: actorId(req), email: req.user?.email || null, role: req.user?.role || null },
-    eventType: 'bank_account_verified', entityType: 'bank_account', entityId: a.account_id,
-    oldValues: { status: a.status }, newValues, ip: req.ip,
-  }).catch((e) => logger.error('[cash-admin] beneficiary event failed', { err: e.message }));
-  await audit(req, 'BANK_ACCOUNT_VERIFY', 'bank_account', a.account_id, newValues, { status: a.status });
-  cash.notifyBeneficiaryChange({ email: a.merchant_email, business_name: a.business_name }, { eventType: 'bank_account_verified', summary: `${a.inst_name || 'Banque'} ${cash.maskNumber(a.account_number)}` }).catch(() => {});
-  res.json({ success: true, accountId: row.account_id, status: row.status, verifiedAt: row.verified_at, method, reference: row.verification_reference, bankName: a.inst_name || null, accountMasked: cash.maskNumber(row.account_number) });
-});
+const BANK_STATUSES = ['pending_verification', 'pending', 'verified', 'rejected', 'removed'];
 
-// Comptes bancaires en attente de vérification
+// Row lock and mandatory audit/event writes share one transaction: no untraced
+// decision and no resurrection of an account concurrently removed by its owner.
+const bankDecision = (decision) => async (req, res) => {
+  const verified = decision === 'verified';
+  const { method, reference, note, reason } = req.body || {};
+  if (verified && (!VERIFY_METHODS.includes(method) || typeof reference !== 'string' || !reference.trim() || reference.trim().length > 128)) {
+    return fail(res, 422, 'Méthode de contrôle et référence (1 à 128 caractères) requises', 'VALIDATION_ERROR');
+  }
+  if (verified && note != null && (typeof note !== 'string' || note.length > 1000)) return fail(res, 422, 'Note limitée à 1000 caractères', 'VALIDATION_ERROR');
+  if (!verified && (typeof reason !== 'string' || reason.trim().length < 5 || reason.trim().length > 500)) {
+    return fail(res, 422, 'Motif requis : 5 à 500 caractères', 'VALIDATION_ERROR');
+  }
+  if (!UUID_RE.test(req.params.id)) return fail(res, 404, 'Compte bancaire introuvable', 'NOT_FOUND');
+  try {
+    const result = await withTransaction(async (client) => {
+      const exec = (...args) => client.query(...args);
+      const cur = await exec(
+        `SELECT ba.*, fi.name AS inst_name, m.email AS merchant_email, m.business_name
+         FROM bank_accounts ba LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
+         LEFT JOIN merchants m ON m.merchant_id = ba.owner_id
+         WHERE ba.account_id=$1 AND ba.owner_type='merchant' FOR UPDATE OF ba`, [req.params.id]);
+      const a = cur.rows[0];
+      if (!a) return { error: [404, 'Compte bancaire introuvable', 'NOT_FOUND'] };
+      if (!['pending_verification', 'pending'].includes(a.status)) {
+        return { error: [409, a.status === 'verified' ? 'Compte déjà vérifié' : 'Ce compte ne peut plus être traité', a.status === 'verified' ? 'ALREADY_VERIFIED' : 'INVALID_STATUS'], status: a.status };
+      }
+      const updated = verified ? await exec(
+        `UPDATE bank_accounts SET status='verified', verified_at=NOW(), verified_by=$2, verification_method=$3, verification_reference=$4, updated_at=NOW()
+         WHERE account_id=$1 AND status IN ('pending_verification','pending') RETURNING *`,
+        [a.account_id, actorId(req), method, reference.trim()]) : await exec(
+        `UPDATE bank_accounts SET status='rejected', updated_at=NOW()
+         WHERE account_id=$1 AND status IN ('pending_verification','pending') RETURNING *`, [a.account_id]);
+      const row = updated.rows[0];
+      if (!row) return { error: [409, 'Compte déjà traité', 'INVALID_STATUS'] };
+      const eventType = verified ? 'bank_account_verified' : 'bank_account_rejected';
+      const values = { ...cash.maskBankAccount({ ...row, inst_name: a.inst_name }),
+        ...(verified ? { method, reference: reference.trim(), note: note?.trim() || null } : { reason: reason.trim() }) };
+      await cash.recordBeneficiaryEvent({
+        merchantId: a.owner_id, actor: { type: 'admin', id: actorId(req), email: req.user?.email || null, role: req.user?.role || null },
+        eventType, entityType: 'bank_account', entityId: a.account_id,
+        oldValues: { status: a.status }, newValues: values, ip: req.ip, exec,
+      });
+      await exec(
+        `INSERT INTO audit_logs (actor_type, actor_id, actor_email, action, entity_type, entity_id, old_values, new_values, ip_address)
+         VALUES ('admin',$1,$2,$3,'bank_account',$4,$5,$6,$7)`,
+        [actorId(req), req.user?.email || null, verified ? 'BANK_ACCOUNT_VERIFY' : 'BANK_ACCOUNT_REJECT', a.account_id,
+          JSON.stringify({ status: a.status }), JSON.stringify(values), req.ip || null]);
+      return { account: a, row, eventType, values };
+    });
+    if (result.error) return fail(res, ...result.error, { status: result.status || null });
+    const { account, row, eventType, values } = result;
+    // Notification is best effort, after the decision has committed.
+    cash.notifyBeneficiaryChange({ email: account.merchant_email, business_name: account.business_name },
+      { eventType, summary: `${account.inst_name || 'Banque'} ${cash.maskNumber(row.account_number)}` }).catch(() => {});
+    return res.json({ success: true, ...values, verifiedAt: row.verified_at || null });
+  } catch (err) {
+    logger.error('[cash-admin] bank decision rolled back', { err: err.message, accountId: req.params.id });
+    return fail(res, 503, 'Décision non enregistrée : réessayez après vérification du statut', 'BANK_ACCOUNT_DECISION_UNAVAILABLE');
+  }
+};
+router.post('/bank-accounts/:id/verify', cashAdmin, bankDecision('verified'));
+router.post('/bank-accounts/:id/reject', cashAdmin, bankDecision('rejected'));
+
+// Masked bank accounts, including historical pending entries in the pending queue.
 router.get('/bank-accounts', cashAdmin, async (req, res) => {
   const status = req.query.status ? String(req.query.status) : 'pending_verification';
+  if (!BANK_STATUSES.includes(status)) return fail(res, 422, 'Statut de compte bancaire invalide', 'VALIDATION_ERROR');
+  const statuses = status === 'pending_verification' ? ['pending_verification', 'pending'] : [status];
   const r = await query(
-    `SELECT ba.account_id, ba.owner_id AS merchant_id, ba.account_number, ba.account_name, ba.status, ba.created_at, ba.verified_at, ba.verification_method,
-            fi.name AS inst_name, m.business_name, m.email AS merchant_email
+    `SELECT ba.account_id, ba.owner_id AS merchant_id, ba.account_number, ba.account_name, ba.status, ba.created_at, ba.verified_at, ba.verification_method, ba.verification_reference,
+            fi.name AS inst_name, m.business_name, m.email AS merchant_email,
+            (SELECT ev.new_values->>'reason' FROM beneficiary_events ev
+             WHERE ev.entity_id=ba.account_id AND ev.merchant_id=ba.owner_id AND ev.event_type='bank_account_rejected'
+             ORDER BY ev.created_at DESC LIMIT 1) AS rejection_reason
      FROM bank_accounts ba LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
      LEFT JOIN merchants m ON m.merchant_id = ba.owner_id
-     WHERE ba.owner_type='merchant' AND ba.status = $1 ORDER BY ba.created_at ASC LIMIT 200`, [status]);
-  res.json({ data: r.rows.map((a) => ({ ...cash.maskBankAccount(a), merchantId: a.merchant_id, merchant: a.business_name || null, merchantEmail: a.merchant_email || null, createdAt: a.created_at, verifiedAt: a.verified_at || null, verificationMethod: a.verification_method || null })), total: r.rows.length });
+     WHERE ba.owner_type='merchant' AND ba.status = ANY($1::text[]) ORDER BY ba.created_at ASC LIMIT 200`, [statuses]);
+  res.json({ data: r.rows.map((a) => ({ ...cash.maskBankAccount(a), merchantId: a.merchant_id, merchant: a.business_name || null, merchantEmail: a.merchant_email || null, createdAt: a.created_at, verifiedAt: a.verified_at || null, verificationMethod: a.verification_method || null, verificationReference: a.verification_reference || null, rejectionReason: a.status === 'rejected' ? a.rejection_reason || null : null })), total: r.rows.length });
 });
 
 // ─── Actions ──────────────────────────────────────────────────────
