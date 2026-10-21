@@ -341,7 +341,7 @@ describe('Reconciliation', () => {
     db2.query.mockReset();
     db2.query.mockResolvedValue({ rows: [], rowCount: 1 });
     const { reconcileOne } = require('../services/reconcile.service');
-    const r = await reconcileOne({ transaction_id: 'T-1', type: 'collect', amount: '5000', currency: 'XAF', detected_operator: 'mtn', gateway_payment_id: 'REF-1' });
+    const r = await reconcileOne({ transaction_id: 'T-1', type: 'collect', amount: '5000', currency: 'XAF', detected_operator: 'mtn', detected_country: 'CG', gateway_payment_id: 'REF-1' });
     expect(r.updated).toBe('authorized');
     const upd = db2.query.mock.calls.find(([s]) => /UPDATE transactions SET status='authorized'/.test(s));
     expect(upd[0]).toMatch(/AND status='pending'/);
@@ -357,8 +357,9 @@ describe('Reconciliation', () => {
     db2.query.mockReset();
     db2.query.mockResolvedValue({ rows: [], rowCount: 1 });
     const { reconcileOne } = require('../services/reconcile.service');
-    const r = await reconcileOne({ transaction_id: 'T-1', type: 'collect', amount: '5000', currency: 'XAF', detected_operator: 'mtn', gateway_payment_id: 'REF-1' });
+    const r = await reconcileOne({ transaction_id: 'T-1', type: 'collect', amount: '5000', currency: 'XAF', detected_operator: 'mtn', detected_country: 'CG', gateway_payment_id: 'REF-1' });
     expect(r.still).toBe('pending');
+    expect(r.mismatch).toBe(true);
     expect(db2.query.mock.calls.filter(([s]) => /UPDATE/.test(s))).toHaveLength(0);
   });
 });

@@ -37,6 +37,11 @@ const audit = async (req, action, entityType, entityId, newValues, oldValues = n
   } catch (e) { logger.warn('[cash-admin] audit log failed', { action, err: e.message }); }
 };
 
+// Process-local scheduler health; no provider credentials or raw error details.
+router.get('/reconcile/status', cashAdmin, (_req, res) => {
+  res.json(require('../services/reconciliation-job').getStatus());
+});
+
 // ─── Stats ────────────────────────────────────────────────────────
 router.get('/stats', cashAdmin, async (req, res) => {
   const mt = await query(

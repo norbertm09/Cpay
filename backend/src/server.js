@@ -865,6 +865,7 @@ app.use(notFound);
 app.use(errorHandler(logger));
 
 let server;
+let reconciliationJob;
 
 const start = async () => {
   try {
@@ -884,21 +885,16 @@ const start = async () => {
 
   server = app.listen(PORT, () => logger.info(`C-Pay ${require('../package.json').version} API started on :${PORT}`));
 
-  // Reconciliation automatique des transactions pending (toutes les 2 min)
-  try {
-    const { reconcilePending } = require('./services/reconcile.service');
-    setInterval(() => {
-      reconcilePending({ maxAgeHours: 6, limit: 50 })
-        .then(r => { if (r.summary.authorized || r.summary.failed) logger.info('[cron reconcile]', r.summary); })
-        .catch(e => logger.error('[cron reconcile] ' + e.message));
-    }, 120000);
-    logger.info('Cron reconciliation actif (120s)');
-  } catch (e) { logger.error('Cron reconcile init: ' + e.message); }
+  // Shared with the CLI: one run per database, all recovery stages, graceful drain.
+  reconciliationJob = require('./services/reconciliation-job').getJob();
+  reconciliationJob.start();
+
 };
 
 const shutdown = async (signal) => {
   logger.info('Shutdown requested', { signal });
   if (server) await new Promise((resolve) => server.close(resolve));
+  if (reconciliationJob) await reconciliationJob.stop();
   await require('./config/database').pool.end();
   logger.info('Shutdown complete');
   process.exit(0);

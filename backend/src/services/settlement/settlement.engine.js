@@ -21,13 +21,14 @@ const logger = require('../../config/logger');
 // enfile dans la MÊME transaction SQL que le passage à `authorized`.
 const enqueue = async ({ txnId, merchantId, amount, currency }, client = null) => {
   const exec = client ? (text, params) => client.query(text, params) : query;
-  await exec(
+  const inserted = await exec(
     `INSERT INTO settlement_queue (transaction_id, merchant_id, amount, currency, queued_at)
      VALUES ($1, $2, $3, $4, NOW())
-     ON CONFLICT (transaction_id) DO NOTHING`,
+     ON CONFLICT (transaction_id) DO NOTHING RETURNING transaction_id`,
     [txnId, merchantId, amount, currency]
   );
   logger.debug('Settlement: enqueued', { txnId });
+  return (inserted.rowCount || inserted.rows?.length || 0) > 0;
 };
 
 // ─── Job de settlement (J+1 : règle tout ce qui a été mis en file AVANT le jour courant) ───

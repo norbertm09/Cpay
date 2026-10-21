@@ -9,8 +9,9 @@ export const opLabel = (op, explicit) => explicit || OPERATOR_LABELS[String(op |
 
 export const STATUS = {
   authorized: ['Confirmé', 'success'], completed: ['Terminé', 'success'], paid: ['Payé', 'success'], active: ['Actif', 'success'], verified: ['Vérifié', 'success'], approved: ['Approuvé', 'success'], regle: ['Réglé', 'success'], resolved: ['Résolu', 'success'],
+  unknown: ['Résultat incertain', 'warn'],
   pending_verification: ['En attente de vérification', 'warn'],
-  pending: ['En attente', 'warn'], processing: ['En cours', 'warn'], pending_manual: ['En attente d’exécution', 'warn'], pending_settlement: ['En attente d’exécution', 'warn'], awaiting_funds: ['En attente de votre virement', 'info'], in_progress: ['En cours', 'warn'], open: ['Ouvert', 'info'], pending_merchant: ['Réponse attendue', 'warn'], submitted: ['Soumis', 'warn'], en_cours: ['En cours', 'warn'],
+  pending: ['En attente', 'warn'], processing: ['En cours de confirmation', 'warn'], pending_manual: ['En attente d’exécution', 'warn'], pending_settlement: ['En attente d’exécution', 'warn'], awaiting_funds: ['En attente de votre virement', 'info'], in_progress: ['En cours', 'warn'], open: ['Ouvert', 'info'], pending_merchant: ['Réponse attendue', 'warn'], submitted: ['Soumis', 'warn'], en_cours: ['En cours', 'warn'],
   failed: ['Échoué', 'error'], cancelled: ['Annulé', 'neutral'], rejected: ['Rejeté', 'error'], expired: ['Expiré', 'neutral'], refunded: ['Remboursé', 'neutral'], reversed: ['Annulé', 'neutral'], inactive: ['Désactivé', 'neutral'], blocked: ['Bloqué', 'error'], closed: ['Fermé', 'neutral'], echec: ['Échec', 'error'], non_regle: ['Non réglé', 'neutral'], removed: ['Supprimé', 'neutral'],
 };
 export const statusLabel = (s) => (STATUS[s] || [s || '—'])[0];
@@ -25,7 +26,8 @@ export const METHOD_LABELS = { mobile_money: 'Mobile Money', card: 'Carte', card
 export const methodLabel = (m) => METHOD_LABELS[m] || m || '—';
 
 export const TRANSFER_STATUS_HELP = {
-  processing: 'En cours d’exécution par le rail de paiement (opérateur ou banque).',
+  unknown: 'En cours de confirmation : les fonds restent réservés. Le résultat du paiement est incertain ; ne relancez pas ce paiement.',
+  processing: 'En cours de confirmation par le rail de paiement (opérateur ou banque) : les fonds restent réservés. Ne relancez pas ce paiement.',
   pending_manual: 'Exécuté par nos opérations sous 1 jour ouvré.',
   pending_settlement: 'Exécuté par nos opérations sous 1 jour ouvré.',
   awaiting_funds: 'Effectuez le virement avec la référence indiquée ; votre solde sera crédité à réception.',

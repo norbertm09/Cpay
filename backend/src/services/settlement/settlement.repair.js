@@ -11,7 +11,7 @@
  *
  * Appelé par scripts/reconcile-pending.js et POST /admin/cash/repair/settlement-queue.
  */
-const { query } = require('../../config/database');
+const { query, withTransaction } = require('../../config/database');
 const logger = require('../../config/logger');
 const { enqueue } = require('./settlement.queue');
 
@@ -38,11 +38,24 @@ async function sweepAuthorizedWithoutQueue({ minAgeMinutes = 5, limit = 500, act
   const errors = [];
   for (const t of r.rows) {
     try {
-      await enqueue({ txnId: t.transaction_id, merchantId: t.merchant_id, amount: Number(t.amount), currency: t.currency });
-      await query(
-        `INSERT INTO transaction_events (transaction_id, merchant_id, event_type, payload) VALUES ($1,$2,'SETTLEMENT_QUEUE_REPAIRED',$3)`,
-        [t.transaction_id, t.merchant_id, JSON.stringify({ by: actor, amount: Number(t.amount), currency: t.currency, authorizedAt: t.completed_at || t.initiated_at })]);
-      repaired.push(t.transaction_id);
+      const applied = await withTransaction(async (client) => {
+        const locked = await client.query(
+          `SELECT transaction_id, merchant_id, amount, currency, completed_at, initiated_at
+           FROM transactions WHERE transaction_id=$1 AND status='authorized'
+             AND type::text=ANY($2::text[]) AND settlement_batch_id IS NULL
+             AND COALESCE(settlement_status,'') NOT IN ('regle','soumis','en_cours','echec')
+           FOR UPDATE`, [t.transaction_id, SETTLEABLE_TYPES]);
+        const current = locked.rows[0];
+        if (!current) return false;
+        const inserted = await enqueue({ txnId: current.transaction_id, merchantId: current.merchant_id,
+          amount: Number(current.amount), currency: current.currency }, client);
+        if (!inserted) return false;
+        await client.query(
+          `INSERT INTO transaction_events (transaction_id, merchant_id, event_type, payload) VALUES ($1,$2,'SETTLEMENT_QUEUE_REPAIRED',$3)`,
+          [current.transaction_id, current.merchant_id, JSON.stringify({ by: actor, amount: Number(current.amount), currency: current.currency, authorizedAt: current.completed_at || current.initiated_at })]);
+        return true;
+      });
+      if (applied) repaired.push(t.transaction_id);
     } catch (e) {
       errors.push({ txn: t.transaction_id, error: e.message });
       logger.error('settlement repair: enqueue failed', { txn: t.transaction_id, err: e.message });

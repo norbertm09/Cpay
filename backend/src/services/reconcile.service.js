@@ -13,7 +13,7 @@
 //   * jamais `failed` sur erreur provider/reseau : on laisse pending
 //   * montant/devise du provider compares a la transaction avant 'authorized'
 // ─────────────────────────────────────────────────────────────────
-const { query } = require('../config/database');
+const { query, withTransaction } = require('../config/database');
 const logger = require('../config/logger');
 
 const airtelCfg = () => ({
@@ -28,6 +28,21 @@ const airtelDisbCfg = () => ({
   apiSecret: process.env.AIRTEL_CG_DISB_CLIENT_SECRET,
   env:       process.env.AIRTEL_CG_ENV,
 });
+
+const airtelStatusConfig = async (t, product) => {
+  const gateway = /^airtel_([a-z]{2})$/i.exec(t.gateway_name || '');
+  const country = String(gateway?.[1] || t.detected_country || '').toUpperCase();
+  const currency = String(t.currency || '').toUpperCase();
+  if (!((country === 'CG' && currency === 'XAF') || (country === 'CD' && currency === 'CDF'))) {
+    throw new Error('Airtel status unavailable: country/currency headers unsupported');
+  }
+  // Persisted gateway identifies router-originated orders; historical CG rails
+  // keep their product-specific credentials instead of switching accounts.
+  if (!gateway && country === 'CG') return product === 'collection' ? airtelCfg() : airtelDisbCfg();
+  const config = await require('./mobilemoney/mobilemoney.router').getConfig(`airtel_${country.toLowerCase()}`);
+  if (!config?.apiKey || !config?.apiSecret) throw new Error('Airtel status unavailable: original country not configured');
+  return config;
+};
 
 const opKind = (detectedOperator) => {
   const op = String(detectedOperator || '').toLowerCase();
@@ -74,9 +89,10 @@ const gatewayKeyFor = (provider, t) => {
   const gw = String(t.gateway_name || '').toLowerCase();
   const keys = keysForProvider(provider);
   if (gw && keys.includes(gw)) return gw;
+  const legacyAliases = Object.keys(OPERATOR_TO_PROVIDER).filter(op => OPERATOR_TO_PROVIDER[op] === provider);
+  if (gw && gw !== provider && !legacyAliases.includes(gw)) return null;
   const country = String(t.detected_country || '').toLowerCase();
-  if (country) { const byCountry = keys.find(k => k.endsWith(`_${country}`)); if (byCountry) return byCountry; }
-  return keys[0] || null;
+  return country ? keys.find(k => k.endsWith(`_${country}`)) || null : null;
 };
 
 /**
@@ -86,7 +102,13 @@ const gatewayKeyFor = (provider, t) => {
  */
 const reconcileWave2 = async (t, provider) => {
   const mmRouter = require('./mobilemoney/mobilemoney.router');
+  const gw = String(t.gateway_name || '').toLowerCase();
+  const legacyAliases = Object.keys(OPERATOR_TO_PROVIDER).filter(op => OPERATOR_TO_PROVIDER[op] === provider);
+  if (gw && !keysForProvider(provider).includes(gw) && gw !== provider && !legacyAliases.includes(gw)) {
+    return { txn: t.transaction_id, provider, skipped: 'original_gateway_unsupported', still: 'pending' };
+  }
   const key = gatewayKeyFor(provider, t);
+  if (!key) return { txn: t.transaction_id, provider, skipped: 'country_unavailable', still: 'pending' };
   const mod = key ? mmRouter.getProvider(key) : null;
   if (!mod || typeof mod.getStatus !== 'function') return { txn: t.transaction_id, provider, skipped: 'no_status_endpoint' };
   const config = await mmRouter.getConfig(key);
@@ -107,27 +129,21 @@ const reconcileWave2 = async (t, provider) => {
 };
 
 // Statut MTN reel : provider orchestrateur (config DB/env par pays) si configure,
-// sinon client rails (config Congo). Leve en cas d'erreur reseau/HTTP → la
-// transaction reste pending.
+// Le client rails Congo ne peut servir que les ordres Congo. Une erreur d'un
+// autre pays ne doit jamais être transformée en refus via ce deuxième compte.
 const mtnStatus = async (t, product) => {
   const ref = t.gateway_payment_id;
-  const country = String(t.detected_country || '').toLowerCase();
-  if (country) {
-    try {
-      const router = require('./mobilemoney/mobilemoney.router');
-      const config = await router.getConfig(`mtn_${country}`);
-      if (config && config.apiKey && config.baseUrl) {
-        const provider = require('./mobilemoney/providers/mtn.provider');
-        return product === 'collection'
-          ? await provider.getRequestStatus(config, ref)
-          : await provider.getTransferStatus(config, ref);
-      }
-    } catch (e) {
-      // provider pays non configure ou en erreur → on tente le client rails ci-dessous
-      if (e && e.statusCode && e.statusCode !== 404) throw e;
-      logger.warn('Reconcile MTN provider fallback to rails client', { txn: t.transaction_id, err: e.message });
-    }
+  const country = String(/^mtn_([a-z]{2})$/i.exec(t.gateway_name || '')?.[1] || t.detected_country || '').toLowerCase();
+  if (!country) throw new Error('MTN status unavailable: original country unknown');
+  const router = require('./mobilemoney/mobilemoney.router');
+  const config = await router.getConfig(`mtn_${country}`);
+  if (config && config.apiKey && config.baseUrl) {
+    const provider = require('./mobilemoney/providers/mtn.provider');
+    return product === 'collection'
+      ? await provider.getRequestStatus(config, ref)
+      : await provider.getTransferStatus(config, ref);
   }
+  if (country !== 'cg') throw new Error(`MTN status unavailable: ${country} not configured`);
   const mtn = require('./rails/mtn-momo.client');
   return product === 'collection'
     ? await mtn.getCollectionStatus(ref)
@@ -155,6 +171,12 @@ async function reconcileOne(t) {
   const currency = t.currency || 'XAF';
 
   try {
+    const originalGateway = String(t.gateway_name || '').toLowerCase();
+    if (originalGateway && op && !(op === 'mtn'
+      ? /^(mtn|mtn_momo|mtn_[a-z]{2})$/.test(originalGateway)
+      : /^(airtel|airtel_money|airtel_[a-z]{2})$/.test(originalGateway))) {
+      return { txn: t.transaction_id, provider: op, skipped: 'original_gateway_unsupported', still: 'pending' };
+    }
     // ---- Providers vague 2 (Orange, Wave, Africell, Express Union, Free Money, Moov) ----
     if (!op) {
       const provider = wave2Provider(t);
@@ -174,7 +196,7 @@ async function reconcileOne(t) {
       }
       if (op === 'airtel') {
         const airtel = require('./mobilemoney/providers/airtel.provider');
-        const s = await airtel.queryTransaction({ txId: ref, currency, config: airtelCfg() });
+        const s = await airtel.queryTransaction({ txId: ref, currency, config: await airtelStatusConfig(t, 'collection') });
         if (s.success) return await markCollectOk(t, s.airtelMoneyId);
         if (s.failed)  return await markFailed(t, s.message || 'Airtel failed');
         return { txn: t.transaction_id, still: 'pending', providerStatus: s.rawStatus || null };
@@ -194,7 +216,7 @@ async function reconcileOne(t) {
       }
       if (op === 'airtel') {
         const airtel = require('./mobilemoney/providers/airtel.provider');
-        const s = await airtel.queryDisbursement({ txId: ref, currency, config: airtelDisbCfg() });
+        const s = await airtel.queryDisbursement({ txId: ref, currency, config: await airtelStatusConfig(t, 'disbursement') });
         if (s.success) return await markPayoutOk(t, s.airtelMoneyId);
         if (s.failed)  return await markFailed(t, s.message || 'Airtel failed');
         return { txn: t.transaction_id, still: 'pending', providerStatus: s.rawStatus || null };
@@ -289,11 +311,39 @@ async function reconcilePending({ maxAgeHours = 24, limit = 100, minAgeMinutes =
 // ─── WAVE-6 (audit 17/10/2026 §1) : retraits et décaissements incertains ───
 // 1) merchant_transfers `unknown` / `processing` : statut réel opérateur via
 //    cash.service.refreshPayoutStatus (completed / failed uniquement sur statut explicite ;
-//    « introuvable » → failed seulement après CASH_UNKNOWN_GRACE_MINUTES) ; needs_review + e-mail
+//    « introuvable » reste réservé et demande une revue après la période de grâce) ; needs_review + e-mail
 //    ops après CASH_UNKNOWN_ALERT_HOURS.
 // 2) transactions type='payout' restées `pending` avec response_message='pending_unknown'
 //    (orchestrateur, exception gateway) : reconcileOne quand une référence existe, sinon alerte
 //    ops (une seule fois, événement PAYOUT_NEEDS_REVIEW) après CASH_UNKNOWN_ALERT_HOURS.
+// A single mutable operational checkpoint per transaction keeps bounded scans fair.
+// The transaction row lock serializes review claims with provider/callback finalization.
+async function checkpointUncertainPayout(t, out, ageHours, alertHours) {
+  return withTransaction(async (client) => {
+    const locked = await client.query(`SELECT status, response_message FROM transactions WHERE transaction_id=$1 FOR UPDATE`, [t.transaction_id]);
+    if (locked.rows[0]?.status !== 'pending' || locked.rows[0]?.response_message !== 'pending_unknown') return null;
+    const now = new Date().toISOString();
+    const check = await client.query(`SELECT event_id FROM transaction_events WHERE transaction_id=$1 AND event_type='PAYOUT_RECOVERY_CHECK' LIMIT 1`, [t.transaction_id]);
+    const checked = JSON.stringify({ checkedAt: now, status: out?.providerStatus || out?.skipped || (out?.error ? 'error' : 'pending'), source: 'reconcile' });
+    if (check.rows[0]) await client.query(`UPDATE transaction_events SET payload=$2 WHERE event_id=$1`, [check.rows[0].event_id, checked]);
+    else await client.query(`INSERT INTO transaction_events(transaction_id,merchant_id,event_type,payload) VALUES($1,$2,'PAYOUT_RECOVERY_CHECK',$3)`, [t.transaction_id,t.merchant_id,checked]);
+    if (ageHours < alertHours) return null;
+    const previous = await client.query(`SELECT event_id,payload FROM transaction_events WHERE transaction_id=$1 AND event_type='PAYOUT_NEEDS_REVIEW' ORDER BY created_at ASC LIMIT 1`, [t.transaction_id]);
+    const ev = previous.rows[0];
+    // Older review events predate delivery metadata: treat them as notified, but
+    // keep reconciling their order. A stale claim is retryable after five minutes.
+    if (ev && (!ev.payload?.alertState || ev.payload.alertState === 'sent'
+        || (ev.payload.alertState === 'sending' && Date.now() - new Date(ev.payload.attemptAt).getTime() < 300000))) return null;
+    const payload = { ...(ev?.payload || {}), ageHours: Math.round(ageHours * 10) / 10, alertHours, source: 'reconcile', alertState: 'sending', attemptAt: now };
+    if (ev) {
+      await client.query(`UPDATE transaction_events SET payload=$2 WHERE event_id=$1`, [ev.event_id, JSON.stringify(payload)]);
+      return { eventId: ev.event_id, attemptAt: now };
+    }
+    const inserted = await client.query(`INSERT INTO transaction_events(transaction_id,merchant_id,event_type,payload) VALUES($1,$2,'PAYOUT_NEEDS_REVIEW',$3) RETURNING event_id`, [t.transaction_id,t.merchant_id,JSON.stringify(payload)]);
+    return { eventId: inserted.rows[0].event_id, attemptAt: now };
+  });
+}
+
 async function reconcileUncertainPayouts({ graceMinutes = null, alertHours = null, limit = 200 } = {}) {
   const cash = require('./cash/cash.service');
   const transfers = await cash.sweepUncertainPayouts({ graceMinutes, alertHours, limit });
@@ -303,25 +353,27 @@ async function reconcileUncertainPayouts({ graceMinutes = null, alertHours = nul
             t.gateway_name, t.gateway_payment_id, t.pay_link_id, t.status, t.initiated_at, m.business_name
      FROM transactions t LEFT JOIN merchants m ON m.merchant_id = t.merchant_id
      WHERE t.type='payout' AND t.status='pending' AND t.response_message='pending_unknown'
-       AND t.initiated_at > NOW() - INTERVAL '30 days'
-       AND NOT EXISTS (SELECT 1 FROM transaction_events e WHERE e.transaction_id = t.transaction_id AND e.event_type = 'PAYOUT_NEEDS_REVIEW')
-     ORDER BY t.initiated_at ASC LIMIT $1`, [Math.min(1000, Math.max(1, parseInt(limit, 10) || 200))]);
+     ORDER BY COALESCE((SELECT MAX((e.payload->>'checkedAt')::timestamptz) FROM transaction_events e
+       WHERE e.transaction_id=t.transaction_id AND e.event_type='PAYOUT_RECOVERY_CHECK'),t.initiated_at) ASC, t.transaction_id ASC
+     LIMIT $1`, [Math.min(1000, Math.max(1, parseInt(limit, 10) || 200))]);
   const txResults = [];
   for (const t of r.rows) {
     let out = null;
     if (t.gateway_payment_id) out = await reconcileOne(t);
     const ageH = (Date.now() - new Date(t.initiated_at).getTime()) / 3600000;
     const stillPending = !out || !out.updated;
-    if (stillPending && ageH >= alertH) {
-      await query(`INSERT INTO transaction_events (transaction_id, merchant_id, event_type, payload) VALUES ($1,$2,'PAYOUT_NEEDS_REVIEW',$3)`,
-        [t.transaction_id, t.merchant_id, JSON.stringify({ ageHours: Math.round(ageH * 10) / 10, alertHours: alertH, source: 'reconcile' })]).catch((e) => logger.error('reconcile: needs_review event failed', { txn: t.transaction_id, err: e.message }));
-      await cash.notifyOps({
+    const claim = stillPending ? await checkpointUncertainPayout(t, out, ageH, alertH) : null;
+    if (claim) {
+      const alerted = await cash.notifyOps({
         subject: `Décaissement à vérifier (résultat opérateur incertain) — ${t.transaction_id}`,
         html: `<p>Décaissement <code>${t.transaction_id}</code> (${Number(t.amount)} ${t.currency || ''}, ${t.detected_operator || ''}) du marchand ${t.business_name || t.merchant_id}
           est <b>pending / pending_unknown</b> depuis ${Math.round(ageH * 10) / 10} h${t.gateway_payment_id ? '' : ' et ne possède aucune référence opérateur'}.</p>
           <p>Les fonds restent réservés. Vérifiez le relevé opérateur puis finalisez (webhook rejoué, réconciliation ou décision Finance documentée).</p>`,
       });
-      txResults.push({ txn: t.transaction_id, needsReview: true, ...(out || {}) });
+      await query(`UPDATE transaction_events SET payload = payload || $2::jsonb
+        WHERE event_id=$1 AND payload->>'attemptAt'=$3`,
+      [claim.eventId, JSON.stringify({ alertState: alerted ? 'sent' : 'retry' }), claim.attemptAt]);
+      txResults.push({ txn: t.transaction_id, needsReview: true, alerted, ...(out || {}) });
     } else {
       txResults.push({ txn: t.transaction_id, ...(out || { skipped: 'no_ref', still: 'pending' }) });
     }

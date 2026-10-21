@@ -327,6 +327,9 @@ const serializeTransfer = (t, { admin = false } = {}) => {
     expiresAt: t.expires_at || null,
     bankReference: t.bank_reference || t.settlement_ref || null,
     errorMessage: t.error_message || null,
+    needsReview: !!t.needs_review,
+    unknownSince: t.unknown_since || null,
+    lastStatusCheckAt: t.last_status_check_at || null,
   };
   if (t.dest_type === 'wallet') out.wallet = { operator: t.wallet_operator || null, phone: t.wallet_phone || null };
   if (t.dest_type === 'bank') out.bankAccount = { bankName: t.inst_name || null, accountMasked: maskNumber(t.account_number), accountName: t.account_name || null };
@@ -340,9 +343,6 @@ const serializeTransfer = (t, { admin = false } = {}) => {
     out.executedBy = t.executed_by || t.settled_by || null;
     out.adminNote = t.admin_note || null;
     out.gatewayReference = t.gateway_reference || null;
-    out.needsReview = !!t.needs_review;
-    out.unknownSince = t.unknown_since || null;
-    out.lastStatusCheckAt = t.last_status_check_at || null;
     out.requestPayload = t.request_payload || null;
     if (t.dest_type === 'bank') out.bankAccount.accountNumber = t.account_number || null;
   } else if (t.status === 'unknown') {
@@ -598,8 +598,8 @@ async function createPayout(p) {
 async function notifyOps({ subject, html }) {
   try {
     const email = require('../notifications/email.service');
-    await email.send({ to: process.env.ADMIN_ALERT_EMAIL || 'support@c-pay.global', subject, html });
-    return true;
+    const sent = await email.send({ to: process.env.ADMIN_ALERT_EMAIL || 'support@c-pay.global', subject, html });
+    return sent?.success !== false;
   } catch (e) { logger.warn('cash: ops email failed', { subject, err: e.message }); return false; }
 }
 
@@ -607,7 +607,7 @@ async function notifyOpsUnknownPayout(t, { ageHours } = {}) {
   const name = t.business_name || t.merchant_id;
   return notifyOps({
     subject: `Retrait à vérifier (résultat opérateur incertain) — ${t.reference} — ${name}`,
-    html: `<h2>Retrait en statut <code>unknown</code> depuis ${ageHours != null ? `${ageHours} h` : `plus de ${unknownAlertHours()} h`}</h2>
+    html: `<h2>Retrait en statut <code>${t.status === 'processing' ? 'processing' : 'unknown'}</code> depuis ${ageHours != null ? `${ageHours} h` : `plus de ${unknownAlertHours()} h`}</h2>
       <table style="border-collapse:collapse">
       <tr><td style="padding:6px 12px"><b>Marchand</b></td><td>${name}</td></tr>
       <tr><td style="padding:6px 12px"><b>Référence</b></td><td>${t.reference}</td></tr>
@@ -616,8 +616,8 @@ async function notifyOpsUnknownPayout(t, { ageHours } = {}) {
       <tr><td style="padding:6px 12px"><b>Référence opérateur</b></td><td>${t.gateway_reference || '— (aucune : vérifier le relevé opérateur par référence externe ' + t.reference + ')'}</td></tr>
       <tr><td style="padding:6px 12px"><b>Dernière erreur</b></td><td>${t.error_message || ''}</td></tr>
       </table>
-      <p>Les fonds restent réservés. Vérifiez le relevé opérateur puis clôturez dans le back-office admin
-      (Caisse → transfert → <i>mark-executed</i> si exécuté, <i>reject</i> si l'opérateur confirme l'absence d'exécution).</p>`,
+      <p>Les fonds restent réservés. Vérifiez le relevé et la référence opérateur, puis faites reprendre la
+      réconciliation ou le webhook authentifié. Une absence de résultat ne suffit pas à libérer les fonds.</p>`,
   });
 }
 
@@ -649,106 +649,178 @@ async function notifyOpsBankPayout({ merchant, merchantId, ref, amt, fee, net, c
 // provider pays), autres providers via getStatus({ product:'disbursement' }) quand il existe.
 // Seul un statut opérateur EXPLICITE change l'état : SUCCESSFUL → completed, FAILED → failed
 // (fonds libérés). Toute indisponibilité laisse le statut inchangé. « Introuvable » (NOT_FOUND /
-// 404) ne vaut échec qu'après la période de grâce CASH_UNKNOWN_GRACE_MINUTES (défaut 30) :
-// l'opérateur peut ne pas encore avoir indexé l'ordre.
+// 404) demande une revue après CASH_UNKNOWN_GRACE_MINUTES : ce n'est jamais un refus prouvé.
 // Sans gateway_reference (timeout avant réponse) : MTN ne peut être interrogé (X-Reference-Id
 // généré par le client rails) → reste `unknown` jusqu'à revue ops ; les providers du routeur MM
 // sont interrogés par txnId (= transfer_id, référence externe).
 async function refreshPayoutStatus(t, { graceMinutes = null, source = 'status_poll' } = {}) {
   if (!t || !UNCERTAIN.includes(t.status) || t.direction !== 'payout' || t.dest_type !== 'wallet') return t;
   const code = normalizeOperatorCode(t.wallet_operator);
-  const country = String(t.merchant_country || '').toUpperCase();
+  const savedGateway = t.request_payload?.gateway || null;
+  const savedCountry = savedGateway && /_([a-z]{2})$/i.exec(savedGateway)?.[1];
+  const country = String(t.request_payload?.rail === 'mtn_client' ? 'CG' : savedCountry || t.merchant_country || '').toUpperCase();
   const grace = graceMinutes === null || graceMinutes === undefined ? unknownGraceMinutes() : Number(graceMinutes);
   const ageMinutes = (Date.now() - new Date(t.unknown_since || t.created_at || Date.now()).getTime()) / 60000;
   const from = [t.status];
-  const touch = () => query(`UPDATE merchant_transfers SET last_status_check_at=NOW() WHERE transfer_id=$1`, [t.transfer_id]).catch(() => {});
+  // Every attempt, including unsupported/config/network failures, advances the durable
+  // check timestamp. Returning the current row avoids reporting stale state after a callback.
+  const checked = async (marker, error = null, review = false) => {
+    const r = await query(`UPDATE merchant_transfers SET last_status_check_at=NOW(),
+      needs_review = CASE WHEN status = ANY($2::text[]) AND $3 THEN TRUE ELSE needs_review END,
+      events = CASE WHEN status = ANY($2::text[]) AND $3 AND NOT COALESCE(needs_review,FALSE)
+        THEN COALESCE(events,'[]'::jsonb) || $4::jsonb ELSE events END
+      WHERE transfer_id=$1 RETURNING *`,
+    [t.transfer_id, UNCERTAIN, review, JSON.stringify([event('needs_review', { source, reason: marker })])]);
+    return { ...t, ...(r.rows[0] || {}), _statusCheck: marker, ...(error ? { _statusError: String(error).slice(0, 200) } : {}) };
+  };
   try {
     let st = null; let reason = null; let gatewayRef = null;
+    // An aggregator's reference belongs to its account/API, not to the direct
+    // operator named by wallet_operator. Preserve it for review without probing
+    // another backend. Explicit legacy mtn_client rails are already identified.
+    const originalGateway = String(savedGateway || '').toLowerCase();
+    if (/^(paymenthub_|interswitch_)/.test(originalGateway) && t.request_payload?.rail !== 'mtn_client') {
+      return checked('original_gateway_unsupported');
+    }
+    const originalSupported = code === 'mtn_momo'
+      ? /^(mtn|mtn_momo|mtn_[a-z]{2})$/.test(originalGateway)
+      : /^(airtel|airtel_money|airtel_[a-z]{2})$/.test(originalGateway);
+    if (originalGateway && ['mtn_momo','airtel_money'].includes(code) && !originalSupported
+        && !(code === 'mtn_momo' && t.request_payload?.rail === 'mtn_client')) {
+      return checked('original_gateway_unsupported');
+    }
     if (code === 'mtn_momo') {
-      if (!t.gateway_reference) { await touch(); return { ...t, _statusCheck: 'no_reference' }; }
+      if (!t.gateway_reference) return checked('no_reference');
       let s = null;
-      if (country && country !== 'CG') {
-        try {
-          const mm = require('../mobilemoney/mobilemoney.router');
-          const cfg = await mm.getConfig(`mtn_${country.toLowerCase()}`);
-          if (cfg && cfg.apiKey && cfg.baseUrl) s = await require('../mobilemoney/providers/mtn.provider').getTransferStatus(cfg, t.gateway_reference);
-        } catch (e) {
-          if (Number(e?.statusCode) === 404) s = { status: 'NOT_FOUND' };
-          else s = null;
+      if (!country) return checked('config_unavailable', 'Pays du rail MTN inconnu');
+      try {
+        if (country !== 'CG') {
+          const cfg = await require('../mobilemoney/mobilemoney.router').getConfig(`mtn_${country.toLowerCase()}`);
+          if (!cfg?.apiKey || !cfg?.baseUrl) return checked('config_unavailable');
+          s = await require('../mobilemoney/providers/mtn.provider').getTransferStatus(cfg, t.gateway_reference);
+        } else {
+          s = await require('../rails/mtn-momo.client').getDisbursementStatus(t.gateway_reference);
         }
-      }
-      if (!s) {
-        try { s = await require('../rails/mtn-momo.client').getDisbursementStatus(t.gateway_reference); }
-        catch (e) { if (Number(e?.statusCode) === 404) s = { status: 'NOT_FOUND' }; else throw e; }
+      } catch (e) {
+        if (Number(e?.statusCode) === 404) s = { status: 'NOT_FOUND' }; else throw e;
       }
       st = String(s?.status || '').toUpperCase(); reason = s?.reason || null; gatewayRef = s?.financialTxnId || s?.financialTransactionId || null;
     } else {
       const d = detectWallet(t.wallet_phone, { country, operator: code });
-      const gateway = d.success ? d.gateway : null;
-      if (!gateway) return t;
+      const gateway = savedGateway || (d.success ? d.gateway : null);
+      if (!gateway) return checked('gateway_unavailable');
       const mm = require('../mobilemoney/mobilemoney.router');
       const provider = mm.getProvider(gateway);
-      if (!provider || typeof provider.getStatus !== 'function') return t;
+      const airtel = code === 'airtel_money' && typeof provider?.queryDisbursement === 'function';
+      if (!provider || (!airtel && typeof provider.getStatus !== 'function')) return checked('no_status_endpoint');
+      // This Airtel adapter only implements CD/CDF and CG/XAF request headers.
+      // A different gateway's credentials do not change those hard-coded headers.
+      if (airtel && !((country === 'CG' && t.currency === 'XAF') || (country === 'CD' && t.currency === 'CDF'))) {
+        return checked('status_unavailable', 'Consultation Airtel non disponible pour ce pays et cette devise');
+      }
       const cfg = await mm.getConfig(gateway);
       let s;
-      try { s = await provider.getStatus({ txnId: t.transfer_id, gatewayRef: t.gateway_reference || null, config: cfg, product: 'disbursement' }); }
+      try {
+        if (airtel) {
+          // Airtel generates its own reference in sendPayout; the internal UUID is
+          // not a usable substitute after a timeout before its response.
+          if (!t.gateway_reference) return checked('no_reference');
+          const a = await provider.queryDisbursement({ txId: t.gateway_reference, currency: t.currency || 'XAF', config: cfg });
+          s = a && { status: a.success === true ? 'SUCCESSFUL' : a.failed === true ? 'FAILED' : a.pending === true ? 'PENDING' : a.rawStatus,
+            reason: a.message, gatewayRef: a.airtelMoneyId };
+        } else s = await provider.getStatus({ txnId: t.transfer_id, gatewayRef: t.gateway_reference || null, config: cfg, product: 'disbursement' });
+      }
       catch (e) { if (Number(e?.statusCode) === 404) s = { available: true, status: 'NOT_FOUND' }; else throw e; }
-      if (!s || s.available === false) return t;
+      if (!s || s.available === false) return checked('status_unavailable');
       st = String(s.status || '').toUpperCase(); reason = s.reason || null; gatewayRef = s.gatewayRef || null;
     }
-    await touch();
     if (st === 'SUCCESSFUL' || st === 'SUCCESS' || st === 'COMPLETED') {
       const row = await transitionTransfer({ transferId: t.transfer_id, from, to: 'completed',
         patch: { gatewayReference: gatewayRef }, event: event('completed', { source, from: t.status, gatewayReference: gatewayRef }) });
-      return row ? { ...t, ...row } : t;
+      return row ? { ...t, ...row } : checked('already_final');
     }
     if (st === 'FAILED' || st === 'REJECTED') {
       const row = await transitionTransfer({ transferId: t.transfer_id, from, to: 'failed',
         patch: { errorMessage: String(reason || 'Retrait échoué').slice(0, 200) }, event: event('failed', { source, from: t.status, reason, providerStatus: st }) });
-      return row ? { ...t, ...row } : t;
+      return row ? { ...t, ...row } : checked('already_final');
     }
     if (st === 'NOT_FOUND') {
       if (ageMinutes < grace) {
         logger.info('cash: payout not found at operator — within grace period', { transferId: t.transfer_id, ageMinutes: Math.round(ageMinutes), grace });
-        return { ...t, _statusCheck: 'not_found_in_grace' };
+        return checked('not_found_in_grace');
       }
-      const row = await transitionTransfer({ transferId: t.transfer_id, from, to: 'failed',
-        patch: { errorMessage: 'Ordre inconnu de l’opérateur après la période de grâce' },
-        event: event('failed', { source, from: t.status, reason: 'not_found_after_grace', ageMinutes: Math.round(ageMinutes), graceMinutes: grace }) });
-      return row ? { ...t, ...row } : t;
+      return checked('not_found_after_grace', null, true);
     }
-    return { ...t, _statusCheck: st || 'no_status' };
+    return checked(st || 'no_status');
   } catch (e) {
     logger.warn('cash: payout status poll failed (status kept)', { transferId: t.transfer_id, status: t.status, err: e.message });
-    return { ...t, _statusCheck: 'error', _statusError: e.message };
+    return checked('error', e.message);
   }
+}
+
+// SMTP is outside the DB transaction. A short delivery lease prevents active
+// duplicate sends while permitting recovery after worker death. Delivery remains
+// at-least-once across a crash after SMTP acceptance; review history stays unique.
+async function claimPayoutReviewNotification(t, ageHours, alertHours) {
+  return withTransaction(async (client) => {
+    const r = await client.query('SELECT * FROM merchant_transfers WHERE transfer_id=$1 FOR UPDATE', [t.transfer_id]);
+    const row = r.rows[0];
+    if (!row || !UNCERTAIN.includes(row.status)) return null;
+    const events = Array.isArray(row.events) ? row.events : [];
+    const previous = events.find(e => e.type === 'review_notification');
+    // Legacy timestamps were recorded as delivery, so never resend them merely
+    // because they are old. Only an explicitly unfinished lease may be reclaimed.
+    if (previous?.state === 'sent' || (row.review_alerted_at && !previous)) return null;
+    if (previous?.state === 'sending' && Date.now() - new Date(previous.attemptAt).getTime() < 300000) return null;
+    const token = crypto.randomUUID();
+    const nextEvents = events.filter(e => e.type !== 'review_notification');
+    if (!events.some(e => e.type === 'needs_review')) nextEvents.push(event('needs_review', { source: 'reconcile', ageHours: Math.round(ageHours * 10) / 10, alertHours }));
+    nextEvents.push(event('review_notification', { state: 'sending', token, attemptAt: new Date().toISOString() }));
+    const updated = await client.query(`UPDATE merchant_transfers SET needs_review=TRUE, review_alerted_at=NOW(),
+      updated_at=NOW(), events=$2::jsonb WHERE transfer_id=$1 RETURNING *`, [t.transfer_id,JSON.stringify(nextEvents)]);
+    return { row: updated.rows[0], token };
+  });
+}
+
+async function finishPayoutReviewNotification(transferId, token, sent) {
+  return withTransaction(async (client) => {
+    const r = await client.query('SELECT events FROM merchant_transfers WHERE transfer_id=$1 FOR UPDATE', [transferId]);
+    const events = r.rows[0]?.events;
+    if (!Array.isArray(events) || !events.some(e => e.type === 'review_notification' && e.token === token && e.state === 'sending')) return;
+    const next = events.map(e => e.type === 'review_notification' && e.token === token
+      ? { ...e, state: sent ? 'sent' : 'retry', finishedAt: new Date().toISOString() } : e);
+    await client.query(`UPDATE merchant_transfers SET events=$2::jsonb,
+      review_alerted_at=CASE WHEN $3::boolean THEN review_alerted_at ELSE NULL END WHERE transfer_id=$1`,
+    [transferId,JSON.stringify(next),sent]);
+  });
 }
 
 /**
  * WAVE-6 : balayage des retraits incertains (`unknown`, `processing`) — appelé par
  * reconcile.service / scripts/reconcile-pending.js / POST /admin/reconcile.
  *   - interroge l'opérateur (refreshPayoutStatus) ; completed / failed uniquement sur statut explicite ;
- *   - après CASH_UNKNOWN_ALERT_HOURS (défaut 2) en `unknown` : needs_review=true + e-mail ops (une fois).
+ *   - après CASH_UNKNOWN_ALERT_HOURS (défaut 2) : revue et alerte pour unknown ET processing.
  */
-async function sweepUncertainPayouts({ graceMinutes = null, alertHours = null, limit = 200, maxAgeDays = 30 } = {}) {
+async function sweepUncertainPayouts({ graceMinutes = null, alertHours = null, limit = 200 } = {}) {
   const alertH = alertHours === null || alertHours === undefined ? unknownAlertHours() : Number(alertHours);
   const r = await query(
     `${TRANSFER_SELECT}
      WHERE mt.direction='payout' AND mt.dest_type='wallet' AND mt.status = ANY($1::text[])
-       AND mt.created_at > NOW() - ($2 || ' days')::interval
-     ORDER BY mt.created_at ASC LIMIT $3`, [UNCERTAIN, String(Math.max(1, parseInt(maxAgeDays, 10) || 30)), Math.min(1000, Math.max(1, parseInt(limit, 10) || 200))]);
+     ORDER BY COALESCE(mt.last_status_check_at, mt.created_at) ASC, mt.transfer_id ASC LIMIT $2`,
+    [UNCERTAIN, Math.min(1000, Math.max(1, parseInt(limit, 10) || 200))]);
   const results = [];
   for (const t of r.rows) {
     const out = await refreshPayoutStatus(t, { graceMinutes, source: 'reconcile' });
     const entry = { transferId: t.transfer_id, reference: t.reference, from: t.status, status: out.status, check: out._statusCheck || null };
-    if (out.status === 'unknown') {
+    if (UNCERTAIN.includes(out.status)) {
       const ageH = (Date.now() - new Date(t.unknown_since || t.created_at).getTime()) / 3600000;
-      if (ageH >= alertH && !t.review_alerted_at) {
-        await query(`UPDATE merchant_transfers SET needs_review=TRUE, review_alerted_at=NOW(), updated_at=NOW(),
-                       events = COALESCE(events,'[]'::jsonb) || $2::jsonb WHERE transfer_id=$1`,
-          [t.transfer_id, JSON.stringify([event('needs_review', { source: 'reconcile', ageHours: Math.round(ageH * 10) / 10, alertHours: alertH })])]).catch((e) => logger.error('cash: needs_review flag failed', { transferId: t.transfer_id, err: e.message }));
-        entry.needsReview = true;
-        entry.alerted = await notifyOpsUnknownPayout(t, { ageHours: Math.round(ageH * 10) / 10 });
+      if (ageH >= alertH || out.needs_review) {
+        const claim = await claimPayoutReviewNotification(t, ageH, alertH);
+        if (claim) {
+          entry.needsReview = true;
+          entry.alerted = await notifyOpsUnknownPayout({ ...t, ...claim.row }, { ageHours: Math.round(ageH * 10) / 10 });
+          await finishPayoutReviewNotification(t.transfer_id, claim.token, entry.alerted);
+        }
       }
     }
     results.push(entry);

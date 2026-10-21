@@ -9,6 +9,7 @@ import { directionOf } from '../../utils/status';
 import { errorMessage } from '../../utils/errors';
 import { PERMS } from '../../utils/roles';
 import toast from '../../utils/toast';
+import CashTransferRecovery, { hasUncertainOutcome } from './CashTransferRecovery';
 
 const MANUAL = ['pending_manual', 'pending_settlement'];
 
@@ -75,7 +76,7 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
   };
 
   const TITLES = { confirm: 'Confirmer la réception des fonds', execute: 'Marquer le virement exécuté', reject: 'Rejeter le transfert' };
-  const actionable = canAct && (t.status === 'awaiting_funds' || MANUAL.includes(t.status));
+  const actionable = canAct && !loading && !error && !t.needsReview && (t.status === 'awaiting_funds' || MANUAL.includes(t.status));
 
   return (
     <Drawer title={`${dir.label} · ${t.reference || ''}`} sub={`${fmtMoney(t.amount, cur)} · créé le ${fmtDateTime(t.createdAt)}`} onClose={onClose}
@@ -86,10 +87,12 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
       </> : null}>
       <div className="stack-lg">
         <div className="row-wrap"><StatusBadge status={t.status} /><Badge tone={dir.tone}>{dir.label}</Badge>{loading && <span className="xs muted">actualisation…</span>}</div>
+        {error && <div role="alert"><ErrorState error={errorMessage(error)} onRetry={reload} /></div>}
+        <CashTransferRecovery transfer={t} />
         <KeyValue rows={[
           ['Marchand', t.merchantId ? <Link to={`/marchands/${t.merchantId}?tab=caisse`} onClick={onClose}>{t.merchant || t.merchantId}</Link> : t.merchant],
           ['E-mail marchand', t.merchantEmail],
-          ['Montant', fmtMoney(t.amount, cur)], ['Frais', fmtMoney(t.fee, cur)], ['Net', fmtMoney(t.net, cur)],
+          ['Montant', fmtMoney(t.amount, cur)], ['Frais', fmtMoney(t.fee, cur)], [hasUncertainOutcome(t) ? 'Net prévu' : 'Net', fmtMoney(t.net, cur)],
           t.amountRequested !== undefined ? ['Montant demandé', fmtMoney(t.amountRequested, cur)] : null,
           ['Description', t.description],
           ['Référence bancaire', t.bankReference], ['Référence opérateur', t.gatewayReference],
@@ -104,7 +107,7 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
         <div><h3 className="mb-2">Journal des changements</h3><Events events={t.events} /></div>
       </div>
 
-      {action && (
+      {action && actionable && (
         <Modal title={TITLES[action]} sub={`${t.reference} · ${fmtMoney(t.amount, cur)} · ${t.merchant || ''}`} onClose={busy ? undefined : () => setAction(null)} size="sm"
           footer={<><Button onClick={() => setAction(null)} disabled={busy}>Annuler</Button><Button variant={action === 'reject' ? 'danger' : 'success'} loading={busy} onClick={run}>{action === 'reject' ? 'Confirmer le rejet' : 'Confirmer'}</Button></>}>
           <div className="stack">

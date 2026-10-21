@@ -7,7 +7,7 @@ export const STATUS = {
   failed: S('Échouée', 'error'), pending: S('En attente', 'warn'), processing: S('En cours', 'info'),
   reversed: S('Annulée', 'neutral'), cancelled: S('Annulé', 'neutral'), rejected: S('Rejeté', 'error'), expired: S('Expiré', 'neutral'),
   // Caisse
-  awaiting_funds: S('Fonds attendus', 'warn'), pending_manual: S('À exécuter', 'warn'), pending_settlement: S('À virer', 'warn'),
+  unknown: S('Issue inconnue', 'warn'), awaiting_funds: S('Fonds attendus', 'warn'), pending_manual: S('À exécuter', 'warn'), pending_settlement: S('À virer', 'warn'),
   // Règlement d'une transaction
   regle: S('Réglé', 'success'), en_cours: S('En cours', 'warn'), echec: S('Échec', 'error'), non_regle: S('Non réglé', 'neutral'),
   // Lots de règlement

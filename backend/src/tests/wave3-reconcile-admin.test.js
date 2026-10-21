@@ -76,7 +76,8 @@ describe('reconcile.service — providers vague 2', () => {
     expect(wave2Provider({ detected_operator: 'MTN_MOMO' })).toBeNull();
     expect(gatewayKeyFor('orange', { gateway_name: 'ORANGE_MONEY', detected_country: 'CM' })).toBe('orange_cm');
     expect(gatewayKeyFor('wave', { detected_country: 'CI' })).toBe('wave_ci');
-    expect(gatewayKeyFor('wave', { detected_country: 'XX' })).toBe('wave_sn');
+    expect(gatewayKeyFor('wave', { detected_country: 'XX' })).toBeNull();
+    expect(gatewayKeyFor('wave', {})).toBeNull();
   });
 
   test('Africell SUCCESSFUL → finalisation webhook (claim status=pending, règlement enfilé, transaction_events RECONCILE)', async () => {

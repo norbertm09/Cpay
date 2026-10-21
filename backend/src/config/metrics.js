@@ -8,6 +8,7 @@
 // Compteurs en mémoire — reset au redémarrage
 
 const counters = {
+  reconciliation_runs_total: {}, // bounded outcome labels
   transactions_total:         {},   // { status, method, gateway }
   transactions_amount_total:  {},   // { currency }
   api_requests_total:         {},   // { method, path, status }
@@ -19,7 +20,15 @@ const counters = {
   gateway_requests_total:     {},   // { gateway, status }
 };
 
+const recoveryStatus = () => require('../services/reconciliation-job').getStatus();
 const gauges = {
+  reconciliation_enabled: () => Number(recoveryStatus().enabled),
+  reconciliation_scheduled: () => Number(recoveryStatus().scheduled),
+  reconciliation_running: () => Number(recoveryStatus().running),
+  reconciliation_last_success_timestamp_seconds: () => recoveryStatus().lastSuccessfulAt ? Date.parse(recoveryStatus().lastSuccessfulAt) / 1000 : 0,
+  reconciliation_last_finished_timestamp_seconds: () => recoveryStatus().lastFinishedAt ? Date.parse(recoveryStatus().lastFinishedAt) / 1000 : 0,
+  reconciliation_consecutive_failures: () => recoveryStatus().consecutiveFailures,
+
   process_uptime_seconds:     () => Math.floor(process.uptime()),
   process_memory_rss_bytes:   () => process.memoryUsage().rss,
   process_memory_heap_bytes:  () => process.memoryUsage().heapUsed,
@@ -93,6 +102,9 @@ const metricsHandler = (req, res) => {
 
 module.exports = {
   httpMetrics, metricsHandler,
+  recordReconciliationOutcome: (outcome) => {
+    if (['success', 'partial_failure', 'error', 'locked_elsewhere'].includes(outcome)) inc('reconciliation_runs_total', { outcome });
+  },
   incTransaction: (labels) => inc('transactions_total', labels),
   incAmount:      (currency, amount) => inc('transactions_amount_total', { currency }, amount),
   incFraudBlock:  (labels) => inc('fraud_blocked_total', labels),
