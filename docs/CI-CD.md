@@ -26,7 +26,7 @@ exécuté en parallèle d'un autre (`concurrency: deploy-production`).
 | Job | Ce qu'il fait | Notes |
 |-----|---------------|-------|
 | `backend` | Node 22, `npm ci`, `scripts/check-js-syntax.sh src` (`node --check` sur `src/**/*.js`), `npm test` (jest, 475 tests, sans base de données), `npm audit --omit=dev --audit-level=critical` | L'audit est **informatif** (`continue-on-error`). |
-| `portals` | Matrice `admin, merchant, cardholder, partners, bank, agency, agent` : Node 20 (comme `docker/Dockerfile.portal`), `npm ci` si `package-lock.json` existe sinon `npm install`, `Vite (`npm run build`, sortie `build/`) npm run build`, artefact `portal-<nom>` (7 jours) | Seuls `merchant` et `partners` ont un lockfile ; les autres sont installés en `npm install` (non reproductible, un `::notice::` le rappelle). |
+| `portals` | Matrice `admin, merchant, cardholder, partners, bank, agency, agent` : Node 20 (comme `docker/Dockerfile.portal`), `npm ci`, `npm test`, `npm run build` (Vite, sortie `build/`), artefact `portal-<nom>` (7 jours) | Les 7 portails ont un lockfile (installation reproductible). |
 | `landing` | `python3 -I scripts/check-landing.py portal/landing` | Équilibre des balises, `id` dupliqués, liens/ressources/ancres internes résolus comme `nginx-landing.conf` (`$uri`, `$uri/`, `$uri.html`), `sitemap.xml`, `node --check` sur `app.js`/`assistant.js`. |
 | `php` | `php -l` sur `sdk/php` et `plugins/` en PHP 7.4 (minimum annoncé par le plugin) et 8.3 | `shivammathur/setup-php`. |
 | `sdk-js` | `node --check` sur `sdk/javascript` | Le SDK JS a sa propre version (`1.1.0`). |
