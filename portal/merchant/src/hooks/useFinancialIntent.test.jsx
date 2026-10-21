@@ -18,7 +18,7 @@ function mount(user = actor, operation = 'transfer') {
 }
 function unmount() { act(() => root.unmount()); host.remove(); }
 beforeEach(() => { sessionStorage.clear(); mount(); });
-afterEach(() => { unmount(); jest.restoreAllMocks(); });
+afterEach(() => { unmount(); vi.restoreAllMocks(); });
 
 test('network uncertainty and reload reuse the same submitted business intent', async () => {
   let firstKey;
@@ -83,7 +83,7 @@ test('merchant, authenticated user and operation each isolate saved intent', asy
 
 test('storage failure prevents sending and can be retried after storage recovers', async () => {
   const original = Storage.prototype.setItem;
-  jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
   let sent = false;
   await act(async () => { await expect(intent.execute(payment, async () => { sent = true; })).rejects.toThrow(/enregistrement/); });
   expect(sent).toBe(false);

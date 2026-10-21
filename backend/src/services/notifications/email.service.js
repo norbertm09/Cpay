@@ -1,14 +1,14 @@
 'use strict';
-const { smtpTlsOptions } = require('../../config/smtp-tls');
+// WAVE-7 : Nodemailer 10.x — transport construit par la fabrique commune (smtp-transport.js).
+const { createSmtpTransport, describeSmtpError } = require('./smtp-transport');
 
 let transporter = null;
 
 const getTransporter = () => {
   if (transporter) return transporter;
-  const nodemailer = require('nodemailer');
 
   const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '465', 10);
+  const port = process.env.SMTP_PORT || '465';
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
@@ -18,15 +18,17 @@ const getTransporter = () => {
     throw e;
   }
 
-  transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-    requireTLS: true,
-    tls: smtpTlsOptions(),
-  });
+  transporter = createSmtpTransport({ host, port, user, pass });
   return transporter;
+};
+
+// Erreur SMTP normalisée (code Nodemailer, code de réponse, message sans identifiants).
+const smtpError = (err) => {
+  if (err && err.code === 'SMTP_NOT_CONFIGURED') return err;
+  const d = describeSmtpError(err);
+  const e = new Error(d.message);
+  Object.assign(e, { code: d.code, responseCode: d.responseCode, command: d.command, retryable: d.retryable, cause: err });
+  return e;
 };
 
 // ─── Template HTML CPlus ──────────────────────────────────────────
@@ -70,14 +72,23 @@ const fmt = (n) => new Intl.NumberFormat('fr-FR').format(Math.round(n));
 // ─── Envoi generique ──────────────────────────────────────────────
 const send = async ({ to, subject, html, text }) => {
   const t = getTransporter();
-  const info = await t.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to,
-    subject,
-    html,
-    text: text || subject,
-  });
-  return { success: true, messageId: info.messageId, accepted: info.accepted };
+  let info;
+  try {
+    info = await t.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to,
+      subject,
+      html,
+      text: text || subject,
+    });
+  } catch (err) { throw smtpError(err); }
+  return {
+    success: true,
+    messageId: info.messageId,
+    accepted: info.accepted || [],
+    rejected: info.rejected || [],
+    response: info.response || null,
+  };
 };
 
 // ═══════════ TEMPLATES METIER ═══════════
@@ -229,12 +240,16 @@ const sendKycStatus = ({ to, status, level, reason }) => {
 // Test SMTP
 const testConnection = async () => {
   const t = getTransporter();
-  await t.verify();
+  try { await t.verify(); } catch (err) { throw smtpError(err); }
   return { success: true, host: process.env.SMTP_HOST, from: process.env.SMTP_FROM };
 };
 
+// Réinitialise le transport mis en cache (tests, rotation des identifiants).
+const resetTransport = () => { if (transporter && typeof transporter.close === 'function') { try { transporter.close(); } catch (_) {} } transporter = null; };
+
 module.exports = {
   send,
+  resetTransport,
   sendReceipt,
   sendTransferNotice,
   sendWelcome,

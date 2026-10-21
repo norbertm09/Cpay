@@ -1,0 +1,78 @@
+# Pile de supervision — fichier de RÉFÉRENCE (vague 7, suite du lot 5B).
+#
+# Il n'est démarré ni par docker/docker-compose.yml ni par scripts/deploy.sh : l'exploitant
+# l'active explicitement après avoir généré et validé la configuration Alertmanager
+# (docs/LOT-5B-ALERTES.md). Son rôle est de rendre explicites les montages des fichiers secrets :
+#
+#   - le token du scrape API est monté à /etc/prometheus/secrets/metrics_token, chemin attendu par
+#     monitoring/prometheus/prometheus.yml (authorization.credentials_file) ; son contenu doit être
+#     identique à METRICS_TOKEN de backend/.env ;
+#   - la configuration Alertmanager générée référence des chemins ABSOLUS de l'hôte (fichier mot de
+#     passe SMTP, template, CA éventuelle) : ils doivent exister à l'identique dans le conteneur.
+#
+# Variables attendues (fichier d'environnement privé, jamais backend/.env) :
+#   MONITORING_METRICS_TOKEN_FILE   fichier privé contenant le token (celui validé par le générateur)
+#   ALERTMANAGER_CONFIG_FILE        configuration générée par scripts/configure-monitoring.cjs
+#   ALERT_SMTP_PASSWORD_FILE        fichier privé du mot de passe SMTP (même chemin dans le conteneur)
+#   MONITORING_TEMPLATE_DIR         chemin absolu de monitoring/alertmanager sur l'hôte
+#   CPLUS_NETWORK                   réseau applicatif (défaut docker_cplus-internal)
+#
+# Validation avant démarrage :
+#   docker compose -f monitoring/docker-compose.monitoring.yml --env-file <privé> config
+#   docker compose -f monitoring/docker-compose.monitoring.yml --env-file <privé> run --rm --no-deps \
+#     prometheus promtool check config /etc/prometheus/prometheus.yml
+#
+# CA privée pour le relais SMTP : ajouter un fichier d'override avec
+#   services.alertmanager.volumes: ["${ALERT_SMTP_CA_FILE}:${ALERT_SMTP_CA_FILE}:ro"].
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: cplus-prometheus
+    restart: unless-stopped
+    # L'image s'exécute sous nobody (65534) : le fichier secret doit être lisible par cet uid
+    # (propriétaire 65534 mode 0400, ou groupe 65534 mode 0440), jamais lisible par tous.
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ${MONITORING_METRICS_TOKEN_FILE:?MONITORING_METRICS_TOKEN_FILE requis}:/etc/prometheus/secrets/metrics_token:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - cplus-internal
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    container_name: cplus-alertmanager
+    restart: unless-stopped
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=
+    volumes:
+      - ${ALERTMANAGER_CONFIG_FILE:?ALERTMANAGER_CONFIG_FILE requis}:/etc/alertmanager/alertmanager.yml:ro
+      # Mêmes chemins absolus que dans la configuration générée.
+      - ${ALERT_SMTP_PASSWORD_FILE:?ALERT_SMTP_PASSWORD_FILE requis}:${ALERT_SMTP_PASSWORD_FILE}:ro
+      - ${MONITORING_TEMPLATE_DIR:?MONITORING_TEMPLATE_DIR requis}/alerts.tmpl:${MONITORING_TEMPLATE_DIR}/alerts.tmpl:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    networks:
+      - cplus-internal
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+
+networks:
+  cplus-internal:
+    external: true
+    name: ${CPLUS_NETWORK:-docker_cplus-internal}

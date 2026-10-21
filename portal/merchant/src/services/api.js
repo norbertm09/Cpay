@@ -8,7 +8,7 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
-const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '';
+const apiBaseUrl = import.meta.env.REACT_APP_API_BASE_URL || '';
 
 // ─── Stockage de l'access token EN MÉMOIRE ────────────────────────
 //

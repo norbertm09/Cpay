@@ -9,9 +9,9 @@ import { Encaisser } from './Encaisser';
 
 let mockAvailable = 100000;
 let mockOpen = true;
-jest.mock('../../hooks/useAuth', () => ({ useAuth: () => ({ user: { userId: 'u1', merchantId: 'm1', currency: 'XAF', country: 'CG' } }) }));
-jest.mock('../../hooks/useCashSummary', () => ({ useCashSummary: () => ({ summary: { currency: 'XAF', balance: { available: mockAvailable } }, state: 'ok', reload: () => {} }) }));
-jest.mock('../../hooks/useCapabilities', () => ({ useCapabilities: () => ({ isOpen: () => mockOpen, isPilot: () => false }) }));
+vi.mock('../../hooks/useAuth', () => ({ useAuth: () => ({ user: { userId: 'u1', merchantId: 'm1', currency: 'XAF', country: 'CG' } }) }));
+vi.mock('../../hooks/useCashSummary', () => ({ useCashSummary: () => ({ summary: { currency: 'XAF', balance: { available: mockAvailable } }, state: 'ok', reload: () => {} }) }));
+vi.mock('../../hooks/useCapabilities', () => ({ useCapabilities: () => ({ isOpen: () => mockOpen, isPilot: () => false }) }));
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let root, host;
 async function mount(Component) {
@@ -24,11 +24,11 @@ async function click(text) { await act(async () => { Simulate.click(button(text)
 async function change(input, value) { await act(async () => { Simulate.change(input, { target: { value } }); }); }
 beforeEach(() => {
   sessionStorage.clear(); mockAvailable = 100000; mockOpen = true;
-  jest.spyOn(cashApi, 'getWallet').mockResolvedValue({ status: 200, data: { phone: '+242061234567', operator: 'MTN' } });
-  jest.spyOn(accountApi, 'bankAccounts').mockResolvedValue({ data: { data: [] } });
-  jest.spyOn(cashApi, 'listTransfers').mockResolvedValue({ data: { data: [] } });
+  vi.spyOn(cashApi, 'getWallet').mockResolvedValue({ status: 200, data: { phone: '+242061234567', operator: 'MTN' } });
+  vi.spyOn(accountApi, 'bankAccounts').mockResolvedValue({ data: { data: [] } });
+  vi.spyOn(cashApi, 'listTransfers').mockResolvedValue({ data: { data: [] } });
 });
-afterEach(() => { unmount(); jest.restoreAllMocks(); });
+afterEach(() => { unmount(); vi.restoreAllMocks(); });
 
 test.each([
   ['withdraw', Retirer, null],
@@ -36,7 +36,7 @@ test.each([
   ['collect', Encaisser, 'Carte'],
 ])('%s restores business fields on reload and resends the same order key', async (method, Component, option) => {
   const sent = [];
-  jest.spyOn(cashApi, method).mockImplementation(async (body, key) => {
+  vi.spyOn(cashApi, method).mockImplementation(async (body, key) => {
     sent.push({ body, key }); throw new Error('offline');
   });
   await mount(Component);
@@ -65,7 +65,7 @@ test.each([
 
 test('withdraw keeps the same order when the server requests renewed strong confirmation', async () => {
   const sent = [];
-  jest.spyOn(cashApi, 'withdraw').mockImplementation(async (body, key) => {
+  vi.spyOn(cashApi, 'withdraw').mockImplementation(async (body, key) => {
     sent.push({ body, key });
     if (sent.length === 1) throw { response: { status: 428, data: { code: 'STEP_UP_REQUIRED', methods: ['password'] } } };
     return { data: { reference: 'withdraw-1', status: 'pending', amount: 1200 } };

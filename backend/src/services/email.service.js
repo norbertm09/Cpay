@@ -1,17 +1,17 @@
 'use strict';
-const { smtpTlsOptions } = require('../config/smtp-tls');
-const nodemailer = require('nodemailer');
+// WAVE-7 : Nodemailer 10.x via la fabrique commune (TLS vérifié, STARTTLS forcé hors 465,
+// délais bornés, erreurs décrites sans secret). `secure` suit désormais le port : l'ancien
+// `secure: true` figé rendait SMTP_PORT=587 inutilisable (TLS implicite sur un port STARTTLS).
+const { createSmtpTransport, describeSmtpError } = require('./notifications/smtp-transport');
 
 let _transporter = null;
 const getTransporter = () => {
   if (_transporter) return _transporter;
-  _transporter = nodemailer.createTransport({
-    host:   process.env.SMTP_HOST   || 'smtp.mail.ovh.net',
-    port:   parseInt(process.env.SMTP_PORT || '465'),
-    secure: true,
-    auth: { user: process.env.SMTP_USER || 'noreply@c-pay.global', pass: process.env.SMTP_PASS },
-    requireTLS: true,
-    tls: smtpTlsOptions(),
+  _transporter = createSmtpTransport({
+    host: process.env.SMTP_HOST || 'smtp.mail.ovh.net',
+    port: process.env.SMTP_PORT || '465',
+    user: process.env.SMTP_USER || 'noreply@c-pay.global',
+    pass: process.env.SMTP_PASS,
   });
   return _transporter;
 };
@@ -28,7 +28,8 @@ const send = async ({ to, subject, html }) => {
     console.info(`[EmailService] Envoyé: ${subject} → ${to}`);
     return true;
   } catch (err) {
-    console.error(`[EmailService] Erreur: ${err.message}`);
+    const d = describeSmtpError(err);
+    console.error(`[EmailService] Erreur ${d.code}${d.responseCode ? ` (${d.responseCode})` : ''}: ${d.message}`);
     return false;
   }
 };

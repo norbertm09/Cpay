@@ -1,15 +1,16 @@
 # C-Pay Admin — back-office (`portal/admin`)
 
-Portail d’administration de la plateforme C-Pay (`admin.c-pay.global`). CRA + React 18, react-router 6, axios ; CSS pur (aucune bibliothèque d’interface, aucun Tailwind, aucune police d’icônes).
+Portail d’administration de la plateforme C-Pay (`admin.c-pay.global`). Vite 5 + React 18, react-router 6, axios ; CSS pur (aucune bibliothèque d’interface, aucun Tailwind, aucune police d’icônes).
 
 ```bash
-npm install                                  # pas de lockfile versionné
-npm start                                    # http://localhost:3000, proxy API → http://localhost:3000 (package.json)
-CI=false npm run build                       # build/ (non versionné)
-REACT_APP_API_BASE_URL=http://127.0.0.1:4012 CI=false npm run build && MOCK_STATIC=build npm run mock   # app + API simulée sur une seule origine
+npm ci                                       # lockfile versionné
+npm run dev                                  # http://localhost:3004, proxy /api → http://localhost:3000 (vite.config.js)
+npm run build                                # build/ (non versionné, vite build)
+npm test                                     # vitest (jsdom)
+REACT_APP_API_BASE_URL=http://127.0.0.1:4012 npm run build && MOCK_STATIC=build npm run mock   # app + API simulée sur une seule origine
 ```
 
-Variables : `REACT_APP_API_BASE_URL` (origine de l’API, vide = même origine), `REACT_APP_VERSION` (affichée dans le menu).
+Variables (lues au build via `import.meta.env`, préfixe `REACT_APP_` conservé dans `vite.config.js`) : `REACT_APP_API_BASE_URL` (origine de l’API, vide = même origine), `REACT_APP_VERSION` (affichée dans le menu, sinon version de `package.json`).
 
 ## Architecture de l’information
 
@@ -84,7 +85,7 @@ Serveur Node sans dépendance qui reproduit les contrats des routes backend util
 | Variable | Effet |
 |---|---|
 | `PORT` | port (défaut 4012) |
-| `MOCK_STATIC=build` | sert aussi le build CRA (SPA) : app et API sur la même origine |
+| `MOCK_STATIC=build` | sert aussi le build Vite (SPA) : app et API sur la même origine |
 | `MOCK_SESSION=none` | `/auth/refresh` répond 401 (affiche la page de connexion) |
 | `MOCK_ROLE=ops_admin` | rôle du compte (défaut `super_admin`) pour vérifier les gardes |
 | `MOCK_MFA=1` | login en deux étapes (tout code à 6 chiffres passe) |

@@ -1,17 +1,18 @@
 # C-Pay — Espace marchand (`portal/merchant`)
 
-Portail React 18 (Create React App, react-router 6, axios, react-hot-toast, qrcode.react) servi sur
+Portail React 18 (Vite 5, react-router 6, axios, react-hot-toast, qrcode.react) servi sur
 `merchant.c-pay.global`. Il aide le marchand à **encaisser** ses recettes (Mobile Money, carte par lien ou QR),
 à tenir sa **caisse** (retirer, transférer, journal) et lui donne une **vue à 360°** de son activité.
 
 ```bash
 npm ci
-npm start                                   # http://localhost:3002, API via REACT_APP_API_BASE_URL (ou proxy localhost:3000)
-CI=false npm run build                      # bundle de production dans build/
+npm run dev                                 # http://localhost:3002, API via REACT_APP_API_BASE_URL (ou proxy /api → localhost:3000, vite.config.js)
+npm run build                               # bundle de production dans build/ (vite build)
+npm test                                    # vitest (jsdom)
 ```
 
-Variables : `REACT_APP_API_BASE_URL` (origine de l'API, vide = même origine), `INLINE_RUNTIME_CHUNK=false`
-(CSP, voir `docker/Dockerfile.portal`), `REACT_APP_DEV_TOOLS=1` (préremplissage par paramètres d'URL, réservé
+Variables (lues au build via `import.meta.env`, préfixe `REACT_APP_` conservé dans `vite.config.js`) :
+`REACT_APP_API_BASE_URL` (origine de l'API, vide = même origine), `REACT_APP_DEV_TOOLS=1` (préremplissage par paramètres d'URL, réservé
 au développement et aux captures d'écran ; jamais en production).
 
 ## Architecture de l'information
@@ -79,10 +80,10 @@ formulaires, confirmation des actions destructives, aucun émoji (icônes SVG), 
 
 ```bash
 node dev/mock-api.js                              # API seule sur http://127.0.0.1:4010 (CORS avec identifiants)
-REACT_APP_API_BASE_URL=http://127.0.0.1:4010 npm start
+REACT_APP_API_BASE_URL=http://127.0.0.1:4010 npm run dev
 
 # ou bundle + API sur la même origine (captures d'écran) :
-REACT_APP_DEV_TOOLS=1 REACT_APP_API_BASE_URL= CI=false npm run build
+REACT_APP_DEV_TOOLS=1 REACT_APP_API_BASE_URL= npm run build
 node dev/mock-api.js --static build               # http://127.0.0.1:4010
 node dev/mock-api.js --static build --no-session --port 4011   # écran de connexion (refresh refusé)
 ```

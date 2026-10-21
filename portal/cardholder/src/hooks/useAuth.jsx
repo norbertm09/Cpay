@@ -1,6 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { clearToken, decodeJwt, getToken, logoutLocal, refreshAccessToken, subscribeToken } from '../services/api';
+import { broadcastSession, clearToken, decodeJwt, getToken, logoutLocal, logoutServer, refreshAccessToken, subscribeSession, subscribeToken, tokenTtl } from '../services/api';
 import * as authApi from '../services/auth';
+
+// Modele de session (vague 7) : jeton d'acces en memoire seulement, refresh
+// HttpOnly en cookie. Trois etats : loading (refresh silencieux au demarrage),
+// authentifie, anonyme. Sans l'etat loading, RequireAuth renverrait sur
+// /connexion a chaque rechargement avant que le refresh ait pu repondre.
 
 // Profil de reference : GET /auth/me -> { cardholder:{cardholderId,firstName,
 // lastName,email,phone,kycLevel,mfaEnabled}, card, mustChangePassword }.
@@ -18,6 +23,10 @@ const fetchProfile = async (t) => {
   }
 };
 
+// Seuil (secondes) en deca duquel un onglet qui redevient visible renouvelle
+// son jeton plutot que d'attendre un 401 sur la prochaine requete.
+const NEAR_EXPIRY_S = 90;
+
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
@@ -27,14 +36,34 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => subscribeToken(setTok), []);
 
-  // Jeton absent ou expire au demarrage : refresh silencieux par cookie.
+  // Demarrage : le jeton n'est jamais persiste, on le redemande au cookie.
+  // Echec (pas de cookie, refresh revoque) = simplement anonyme.
   useEffect(() => {
     let cancelled = false;
-    if (decodeJwt(getToken() || '')) { setRefreshing(false); return undefined; }
+    if (getToken()) { setRefreshing(false); return undefined; }
     refreshAccessToken()
       .catch(() => { if (!cancelled) clearToken(); })
       .finally(() => { if (!cancelled) setRefreshing(false); });
     return () => { cancelled = true; };
+  }, []);
+
+  // Multi-onglets : deconnexion ailleurs -> on vide la memoire ici (le cookie
+  // est deja revoque) ; connexion ailleurs -> on prend un jeton via le cookie.
+  useEffect(() => subscribeSession((msg) => {
+    if (msg.type === 'logout') { if (getToken()) logoutLocal({ broadcast: false }); return; }
+    if (msg.type === 'login' && !getToken()) refreshAccessToken().catch(() => clearToken());
+  }), []);
+
+  // Onglet remis au premier plan avec un jeton absent ou proche de l'expiration :
+  // renouvellement anticipe (un echec = session revoquee entre-temps).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!getToken() || tokenTtl() > NEAR_EXPIRY_S) return;
+      refreshAccessToken().catch(() => logoutLocal());
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   const reloadUser = useCallback(async () => {
@@ -53,9 +82,13 @@ export const AuthProvider = ({ children }) => {
     return () => { cancelled = true; };
   }, [token]);
 
+  // Deconnexion reelle : revocation du refresh + cookie efface cote serveur,
+  // puis purge memoire et propagation aux autres onglets. La navigation vers
+  // /connexion reste a la charge de l'appelant (toast, etat local...).
   const signOut = useCallback(async () => {
-    try { await authApi.logout(); } catch (e) { /* le jeton local est efface quoi qu'il arrive */ }
+    try { await logoutServer(); } catch (e) { /* le jeton local est efface quoi qu'il arrive */ }
     clearToken();
+    broadcastSession('logout');
   }, []);
 
   // Mise a jour locale du solde apres une operation (sans rappeler /auth/me).

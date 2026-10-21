@@ -1,7 +1,7 @@
 import axios from 'axios';
 import toast from '../utils/toast';
 
-export const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '';
+export const apiBaseUrl = import.meta.env.REACT_APP_API_BASE_URL || '';
 
 // ─── Jeton d'accès ────────────────────────────────────────────────
 // L'access token (15 min) reste dans localStorage sous admin_token ; le

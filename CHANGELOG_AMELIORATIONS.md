@@ -1,5 +1,11 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-wave-7 (2026-10-21) — reliquats de l'audit residuel
+Voir `docs/WAVE-7.md` : Nodemailer 10 (plus aucune vulnerabilite high en production, audit npm bloquant en CI),
+fabrique SMTP commune (STARTTLS force, delais bornes, erreurs normalisees), scenario d'alerte « identifiants
+refuses » (535) et runbook Prometheus du secret de scrape, portail porteur avec jeton en memoire et refresh par
+cookie, migration CRA 5 -> Vite 5 des sept portails avec lockfiles, 797 tests backend.
+
 ## 2.7.0-wave-6 (2026-10-20) — reponse a l'audit du 17 octobre
 Voir `docs/WAVE-6.md` : resultats operateur incertains (statut unknown, reservation conservee, reconciliation,
 alertes), idempotence durable sur les routes monetaires, finalisation atomique et reparation de la file de

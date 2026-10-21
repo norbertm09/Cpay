@@ -20,7 +20,8 @@ async function until(check, timeout = 45000) {
   throw new Error('Local alert delivery assertion timed out');
 }
 async function freePort() { const s = net.createServer(); s.listen(0, '127.0.0.1'); await once(s, 'listening'); const p = s.address().port; await new Promise(r => s.close(r)); return p; }
-async function scenario({ trust = true, transientRejects = 0 }, run) {
+// badCredentials: the password file holds a wrong secret so the fixture answers 535 to every AUTH.
+async function scenario({ trust = true, transientRejects = 0, badCredentials = false }, run) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpay-alert-test-'));
   let smtp, child;
   try {
@@ -30,7 +31,7 @@ async function scenario({ trust = true, transientRejects = 0 }, run) {
     execFileSync(openssl, ['req', '-config', opensslConfig, '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'], { stdio: 'pipe', windowsHide: true });
     smtp = await startSmtpFixture({ cert: fs.readFileSync(cert), key: fs.readFileSync(key), transientRejects });
     const passwordFile = path.join(dir, 'smtp.secret'), metricsFile = path.join(dir, 'metrics.secret');
-    fs.writeFileSync(passwordFile, 'local-fixture-password', { mode: 0o600 }); fs.writeFileSync(metricsFile, 'local-fixture-metrics', { mode: 0o600 });
+    fs.writeFileSync(passwordFile, badCredentials ? 'wrong-fixture-password' : 'local-fixture-password', { mode: 0o600 }); fs.writeFileSync(metricsFile, 'local-fixture-metrics', { mode: 0o600 });
     const settings = loadMonitoringSettings({ ALERT_SMTP_HOST: '127.0.0.1', ALERT_SMTP_PORT: String(smtp.port), ALERT_SMTP_USER: 'fixture',
       ALERT_SMTP_FROM: 'alerts@example.test', ALERT_SMTP_TO: 'ops@example.test', ALERT_SMTP_PASSWORD_FILE: passwordFile,
       MONITORING_METRICS_TOKEN_FILE: metricsFile, ...(trust ? { ALERT_SMTP_CA_FILE: cert } : {}) });
@@ -41,7 +42,8 @@ async function scenario({ trust = true, transientRejects = 0 }, run) {
     const port = await freePort();
     child = spawn(bin('alertmanager'), [`--config.file=${configFile}`, `--storage.path=${path.join(dir, 'data')}`, `--web.listen-address=127.0.0.1:${port}`, '--cluster.listen-address='], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let error; child.on('error', err => { error = err; });
-    child.stdout.resume(); child.stderr.resume();
+    let logs = ''; const collect = chunk => { if (logs.length < 500000) logs += chunk.toString('utf8'); };
+    child.stdout.on('data', collect); child.stderr.on('data', collect);
     const base = `http://127.0.0.1:${port}`;
     await until(async () => { if (error) throw error; if (child.exitCode !== null) throw new Error('Alertmanager exited'); try { return (await fetch(`${base}/-/ready`)).ok; } catch (_) { return false; } });
     const post = async resolved => {
@@ -51,7 +53,7 @@ async function scenario({ trust = true, transientRejects = 0 }, run) {
         startsAt: new Date(Date.now() - 10000).toISOString(), endsAt: new Date(Date.now() + (resolved ? -1000 : 120000)).toISOString(),
       }]) }); assert.equal(r.status, 200);
     };
-    await run({ smtp, post, base });
+    await run({ smtp, post, base, logs: () => logs });
   } finally {
     if (child && child.exitCode === null && child.pid) { child.kill(); await Promise.race([once(child, 'exit'), wait(5000)]); }
     if (smtp) await smtp.close();
@@ -71,6 +73,25 @@ test('untrusted certificate is rejected rather than sending plaintext', { timeou
     await post(false);
     await until(async () => /alertmanager_notifications_failed_total\{[^\n]*integration="email"[^\n]*\} [1-9]/.test(await (await fetch(`${base}/metrics`)).text()));
     assert.equal(smtp.messages.length, 0);
+  });
+});
+test('bad credentials (535) fail with a clear error, are surfaced in metrics and never retried in a tight loop', { timeout: 90000 }, async () => {
+  await scenario({ badCredentials: true }, async ({ smtp, post, base, logs }) => {
+    await post(false);
+    await until(() => smtp.authFailures >= 1);
+    // Surfaced: per-attempt failures immediately, then the notification itself once retries give up.
+    const metrics = async () => (await fetch(`${base}/metrics`)).text();
+    await until(async () => /alertmanager_notification_requests_failed_total\{[^\n]*integration="email"[^\n]*\} [1-9]/.test(await metrics()));
+    await until(async () => /alertmanager_notifications_failed_total\{[^\n]*integration="email"[^\n]*\} [1-9]/.test(await metrics()));
+    // Bounded retries: exponential backoff inside one notification window, not a loop on 535.
+    const before = smtp.authFailures; await wait(5000);
+    assert.ok(smtp.authFailures - before <= 10, `too many AUTH attempts in 5s: ${smtp.authFailures - before}`);
+    assert.equal(smtp.messages.length, 0);
+    assert.equal(smtp.rejections, 0);
+    assert.ok(smtp.tlsConnections >= 1, 'AUTH must only ever happen after STARTTLS');
+    // Clear operator-facing error, without the secret itself.
+    assert.match(logs(), /535/);
+    assert.doesNotMatch(logs(), /wrong-fixture-password|local-fixture-password/);
   });
 });
 test('temporary SMTP refusal retries and eventually delivers', { timeout: 90000 }, async () => {

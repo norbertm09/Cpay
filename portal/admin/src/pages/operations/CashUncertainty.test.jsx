@@ -5,7 +5,7 @@ import CashPage from './CashPage';
 import CashTransferDrawer from './CashTransferDrawer';
 import { cashApi } from '../../services/api';
 import { fmtDateTime } from '../../utils/format';
-jest.mock('../../hooks/useAuth', () => ({
+vi.mock('../../hooks/useAuth', () => ({
   useAuth: () => ({
     admin: {
       role: 'ops_admin'
@@ -13,14 +13,14 @@ jest.mock('../../hooks/useAuth', () => ({
     hasRole: () => true
   })
 }));
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   cashApi: {
-    stats: jest.fn(),
-    reconciliationStatus: jest.fn(),
-    transfers: jest.fn(),
-    transfer: jest.fn(),
-    reject: jest.fn(),
-    markExecuted: jest.fn()
+    stats: vi.fn(),
+    reconciliationStatus: vi.fn(),
+    transfers: vi.fn(),
+    transfer: vi.fn(),
+    reject: vi.fn(),
+    markExecuted: vi.fn()
   }
 }));
 const transfer = {
@@ -64,7 +64,7 @@ const mount = async (url, content = <CashPage />) => flush(() => root.render(<Me
 }} initialEntries={[url]}>{content}</MemoryRouter>));
 beforeEach(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
-  jest.clearAllMocks();
+  vi.clearAllMocks();
   cashApi.reconciliationStatus.mockResolvedValue({
     data: {
       enabled: true,

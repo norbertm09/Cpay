@@ -1800,11 +1800,18 @@ router.post('/notification-configs/test', requireRole('super_admin', 'ops_admin'
     }
 
     if (section === 'smtp') {
-      try { const nodemailer = require('nodemailer');
-        const t = nodemailer.createTransport({ host:cfg.smtp_host, port:parseInt(cfg.smtp_port||587), secure:cfg.smtp_secure==='ssl', auth:{user:cfg.smtp_user,pass:cfg.smtp_pass} });
+      // WAVE-7 : même fabrique que les services e-mail (TLS vérifié, STARTTLS forcé, délais bornés) ;
+      // une erreur 535 (identifiants refusés) est renvoyée explicitement, sans reprise automatique.
+      const { createSmtpTransport, describeSmtpError } = require('../services/notifications/smtp-transport');
+      let t;
+      try {
+        t = createSmtpTransport({ host: cfg.smtp_host, port: cfg.smtp_port || 587, secure: cfg.smtp_secure === 'ssl', user: cfg.smtp_user, pass: cfg.smtp_pass });
         await t.verify();
-        return res.json({ success:true, message:`Connexion SMTP ${cfg.smtp_host}:${cfg.smtp_port} établie ✅` });
-      } catch(e) { return res.status(400).json({success:false, error:e.message}); }
+        return res.json({ success:true, message:`Connexion SMTP ${cfg.smtp_host}:${cfg.smtp_port || 587} établie ✅` });
+      } catch(e) {
+        const d = describeSmtpError(e);
+        return res.status(400).json({ success:false, error:d.message, code:d.code, responseCode:d.responseCode, retryable:d.retryable });
+      } finally { if (t && typeof t.close === 'function') t.close(); }
     }
 
     if (section === 'whatsapp') {
@@ -1834,27 +1841,30 @@ router.post('/notification-configs/send-test', requireRole('super_admin', 'ops_a
     const cfg = r.rows[0].extra_params;
 
     if (section === 'smtp') {
-      const nodemailer = require('nodemailer');
-      const transporter = nodemailer.createTransport({
-        host: cfg.smtp_host, port: parseInt(cfg.smtp_port||587),
-        secure: cfg.smtp_secure === 'ssl',
-        auth: { user: cfg.smtp_user, pass: cfg.smtp_pass }
-      });
-      await transporter.sendMail({
-        from: `"C-Pay Admin" <${cfg.smtp_from||cfg.smtp_user}>`,
-        to,
-        subject: 'C-Pay — Test configuration Email',
-        html: `<div style="font-family:Arial,sans-serif;padding:20px;max-width:500px">
-          <h2 style="color:#12b6c7">Calculus Plus</h2>
-          <p>Configuration SMTP opérationnelle.</p>
-          <p style="background:#f0f4f8;padding:12px;border-radius:8px">
-            Serveur: ${cfg.smtp_host}:${cfg.smtp_port}<br/>
-            Date: ${new Date().toLocaleString('fr-FR')}
-          </p>
-          <p style="color:#5a6677;font-size:12px">C-Pay — admin.c-pay.global</p>
-        </div>`
-      });
-      return res.json({ success:true, message:`Email test envoyé à ${to} ✅` });
+      // WAVE-7 : transport commun Nodemailer 10 ; erreur SMTP décrite (code, 535…) sans identifiants.
+      const { createSmtpTransport, describeSmtpError } = require('../services/notifications/smtp-transport');
+      let transporter;
+      try {
+        transporter = createSmtpTransport({ host: cfg.smtp_host, port: cfg.smtp_port || 587, secure: cfg.smtp_secure === 'ssl', user: cfg.smtp_user, pass: cfg.smtp_pass });
+        const info = await transporter.sendMail({
+          from: `"C-Pay Admin" <${cfg.smtp_from||cfg.smtp_user}>`,
+          to,
+          subject: 'C-Pay — Test configuration Email',
+          html: `<div style="font-family:Arial,sans-serif;padding:20px;max-width:500px">
+            <h2 style="color:#12b6c7">Calculus Plus</h2>
+            <p>Configuration SMTP opérationnelle.</p>
+            <p style="background:#f0f4f8;padding:12px;border-radius:8px">
+              Serveur: ${cfg.smtp_host}:${cfg.smtp_port || 587}<br/>
+              Date: ${new Date().toLocaleString('fr-FR')}
+            </p>
+            <p style="color:#5a6677;font-size:12px">C-Pay — admin.c-pay.global</p>
+          </div>`
+        });
+        return res.json({ success:true, message:`Email test envoyé à ${to} ✅`, messageId: info?.messageId || null, accepted: info?.accepted || [] });
+      } catch(e) {
+        const d = describeSmtpError(e);
+        return res.status(400).json({ success:false, error:d.message, code:d.code, responseCode:d.responseCode, retryable:d.retryable });
+      } finally { if (transporter && typeof transporter.close === 'function') transporter.close(); }
     }
 
     if (section === 'smpp') {

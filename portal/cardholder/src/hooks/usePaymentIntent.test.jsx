@@ -1,9 +1,11 @@
 import React, { act } from 'react';
+import { webcrypto } from 'node:crypto';
+import { vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
 import { usePaymentIntent } from './usePaymentIntent';
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
-Object.defineProperty(window, 'crypto', { value: require('crypto').webcrypto, configurable: true });
+Object.defineProperty(window, 'crypto', { value: webcrypto, configurable: true });
 const actor = { cardholderId: 'actor-a', cardId: 'card-a', currency: 'XAF' };
 const payment = { merchantId: 'merchant-a', amount: 1000, description: 'Test' };
 let root, host, intent;
@@ -14,7 +16,7 @@ function mount(identity = actor) {
 }
 function unmount() { act(() => root.unmount()); host.remove(); }
 beforeEach(() => { sessionStorage.clear(); mount(); });
-afterEach(() => { unmount(); jest.restoreAllMocks(); });
+afterEach(() => { unmount(); vi.restoreAllMocks(); });
 
 test('lost response and reload reuse the persisted intention and key', async () => {
   let key;
@@ -41,7 +43,7 @@ test('whitelist excludes PIN, credentials and unknown fields', async () => {
 test.each([undefined, 409, 500, 422])('unknown outcome %s cannot change parameters or start a new order', async status => {
   await act(async () => { await expect(intent.execute(payment, async () => { throw { response: status ? { status, data: {} } : undefined }; })).rejects.toBeDefined(); });
   act(() => { expect(() => intent.startNew()).toThrow(); });
-  const send = jest.fn();
+  const send = vi.fn();
   await act(async () => { await expect(intent.execute({ ...payment, amount: 2000 }, send)).rejects.toThrow(); });
   expect(send).not.toHaveBeenCalled();
 });
@@ -76,8 +78,8 @@ test('PIN refusal then uncertain corrected retry blocks a new intent across relo
 });
 
 test('storage unavailable blocks sending and can recover without changing intent', async () => {
-  const send = jest.fn();
-  jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied'); });
+  const send = vi.fn();
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied'); });
   await act(async () => { await expect(intent.execute(payment, send)).rejects.toThrow(); });
   expect(send).not.toHaveBeenCalled();
 });
@@ -86,7 +88,7 @@ test.each(['{broken', '', '{}', 'null'])('corrupt storage %j is not silently rep
   await act(async () => { await expect(intent.execute(payment, async () => { throw new Error('offline'); })).rejects.toThrow(); });
   const key = sessionStorage.key(0); sessionStorage.setItem(key, raw);
   unmount(); mount();
-  const send = jest.fn();
+  const send = vi.fn();
   await act(async () => { await expect(intent.execute(payment, send)).rejects.toThrow(); });
   expect(send).not.toHaveBeenCalled();
 });
@@ -94,14 +96,14 @@ test.each(['{broken', '', '{}', 'null'])('corrupt storage %j is not silently rep
 test('stale actor callback cannot send or overwrite another actor', async () => {
   const old = intent.execute;
   act(() => root.render(<Harness identity={{ ...actor, cardholderId: 'actor-b' }} />));
-  const send = jest.fn();
+  const send = vi.fn();
   await act(async () => { await expect(old(payment, send)).rejects.toThrow(); });
   expect(send).not.toHaveBeenCalled(); expect(intent.restored).toBeNull();
 });
 
 test('double click submits once while busy and late completion cannot mark a new actor known', async () => {
   let resolve;
-  const send = jest.fn(() => new Promise(r => { resolve = r; }));
+  const send = vi.fn(() => new Promise(r => { resolve = r; }));
   let first;
   await act(async () => { first = intent.execute(payment, send); });
   await act(async () => { await expect(intent.execute(payment, send)).rejects.toThrow(); });
