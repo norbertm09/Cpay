@@ -21,6 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Preparer Alertmanager officiel (SHA256)
+        run: node scripts/fetch-alertmanager.cjs
+      - name: Tester la configuration et la livraison SMTP locale
+        run: node --test monitoring/alertmanager/config.test.cjs monitoring/tests/alert-delivery.test.cjs
       - name: Valider les regles Prometheus
         run: >-
           docker run --rm --entrypoint promtool
