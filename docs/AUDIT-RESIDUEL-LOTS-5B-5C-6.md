@@ -52,6 +52,8 @@ Les marchands historiques SN/CI restent tolérés par défaut ; pour un périmè
 
 ## Limites et suite
 
+Validation locale fraîche : backend **777/777** (36 suites), app **15/15**, merchant **46/46**, admin **25/25** ; trois builds réussis. Recette navigateur **17/17**, harnais serveur **2/2**, configuration/protocole SMTP **14/14** ; promtool valide les neuf règles et les scénarios. Un timeout backend sous builds concurrents a été suivi d'un succès isolé du guard (23/23) puis d'une suite complète 777/777, sans augmenter les délais. La validation CI réelle est publiée sur le PR, séparément de ces résultats locaux.
+
 La recette 5C utilise les vrais builds et des API simulées strictes ; les tests SQL vérifient séparément les écritures financières. Les essais SMTP 5B emploient un récepteur local sans transfert externe. VPN, relais réel, destinataires d'astreinte, accès opérateurs et GIMAC restent à valider en exploitation. Les autres portails et applications natives ne bénéficient pas de la même recette navigateur dans ce lot.
 
 Avant ouverture d'un rail : contrat partenaire, configuration sécurisée, tests sandbox encaissement/retrait/transfert, callbacks, rapprochement et reprise après incident. Avant activation des alertes : appliquer le runbook `LOT-5B-ALERTES.md` avec les paramètres réels. Les comptes-rendus CI et la revue du PR complètent les résultats locaux ; aucune fusion ni aucun déploiement ne découle automatiquement de cet audit.
