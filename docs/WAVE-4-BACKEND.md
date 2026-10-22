@@ -124,6 +124,7 @@ actif pour la devise, `bank_to_wallet` répond `409 FUNDING_UNAVAILABLE`.
 |---|---|---|
 | `CASH_WITHDRAW_DAILY_L0` / `L1` / `L2` | 100 000 / 500 000 / 2 000 000 | limite journalière de retrait par niveau KYB (devise du marchand) |
 | `MTN_CG_DISB_API_USER`, `MTN_CG_DISB_API_KEY`, `MTN_CG_DISB_SUB_KEY_PRIMARY` | — | rail de retrait MTN **Congo** (client rails) ; sans ces trois valeurs le retrait MTN CG répond `410` |
+| `MTN_ENV` | `sandbox` | **interrupteur unique** sandbox/production de MTN pour l'encaissement et le retrait (`config/mtn-env.js`, go-live CG) ; en production `X-Target-Environment` et l'URL de base sont dérivés du pays (`mtncongo`, `https://proxy.momoapi.mtn.com`) ; `MTN_<CC>_TARGET_ENV` / `MTN_<CC>_BASE_URL` restent des surcharges explicites, les incohérences sont journalisées `[MTN-ENV]` |
 | `PAY_LINK_BASE_URL` | `https://pay.c-pay.global` | base des liens carte |
 | `ADMIN_ALERT_EMAIL` | `support@c-pay.global` | destinataire des demandes de virement manuel |
 

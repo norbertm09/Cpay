@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ================================================================
-# CPlus 2.6 — Initialisation VPS OVH
+# CPlus 2.6 — Initialisation VPS OVH  (HISTORIQUE : nginx conteneurise, Ubuntu 22.04)
+# Depuis la 2.7.0 utiliser scripts/init-vps.sh (nginx hote + certbot, Ubuntu 24.04/26.04, import d'un ancien serveur).
 # Ubuntu 22.04 LTS — À exécuter en root UNE SEULE FOIS
 #
 # Usage :

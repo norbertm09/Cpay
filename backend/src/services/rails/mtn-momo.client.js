@@ -9,12 +9,17 @@ const sanitizeMsg = (s) => String(s || 'Paiement C-Pay')
 const https  = require('https');
 const { v4: uuidv4 } = require('uuid');
 
-const MTN_HOST = (process.env.MTN_CG_BASE_URL || 'https://sandbox.momodeveloper.mtn.com')
-  .replace(/^https?:\/\//, '').replace(/\/$/, '');
+// Environnement MTN (sandbox | production) resolu une seule fois pour tout le backend : config/mtn-env.js
+const { resolveMtnEnv, warnOnce } = require('../../config/mtn-env');
+const MTN_ENV = resolveMtnEnv({ country: process.env.MTN_CG_COUNTRY || 'CG' });
+warnOnce(MTN_ENV);
+const MTN_HOST = MTN_ENV.host;
+const TARGET_ENV = MTN_ENV.targetEnvironment;
 
 const CONFIG = {
-  baseUrl:  process.env.MTN_CG_BASE_URL || process.env.MTN_MOMO_BASE_URL || 'https://sandbox.momodeveloper.mtn.com',
-  sandbox:  (process.env.MTN_CG_ENV || 'sandbox') !== 'production',
+  baseUrl:  MTN_ENV.baseUrl,
+  sandbox:  MTN_ENV.isSandbox,
+  targetEnvironment: TARGET_ENV,
   currency: process.env.MTN_CG_CURRENCY || 'XAF',
   country:  process.env.MTN_CG_COUNTRY || 'CG',
   callbackUrl: process.env.MTN_CG_CALLBACK_URL || 'https://api.c-pay.global/api/v1/momo/webhooks/mtn',
@@ -126,7 +131,7 @@ const requestToPay = async ({ amount, phone, description, externalId }) => {
     headers: {
       'Authorization':             `Bearer ${token}`,
       'X-Reference-Id':            refId,
-      'X-Target-Environment':      process.env.MTN_CG_TARGET_ENV || 'sandbox',
+      'X-Target-Environment':      TARGET_ENV,
       'Ocp-Apim-Subscription-Key': CONFIG.collections.primaryKey,
       'Content-Type':              'application/json',
       'Content-Length':            Buffer.byteLength(body),
@@ -146,7 +151,7 @@ const getCollectionStatus = async (referenceId) => {
     method:   'GET',
     headers: {
       'Authorization':             `Bearer ${token}`,
-      'X-Target-Environment':      process.env.MTN_CG_TARGET_ENV || 'sandbox',
+      'X-Target-Environment':      TARGET_ENV,
       'Ocp-Apim-Subscription-Key': CONFIG.collections.primaryKey,
     },
   }, null);
@@ -163,7 +168,7 @@ const getCollectionBalance = async () => {
     method:   'GET',
     headers: {
       'Authorization':             `Bearer ${token}`,
-      'X-Target-Environment':      process.env.MTN_CG_TARGET_ENV || 'sandbox',
+      'X-Target-Environment':      TARGET_ENV,
       'Ocp-Apim-Subscription-Key': CONFIG.collections.primaryKey,
     },
   }, null);
@@ -189,7 +194,7 @@ const transfer = async ({ amount, phone, description, externalId }) => {
     headers: {
       'Authorization':             `Bearer ${token}`,
       'X-Reference-Id':            refId,
-      'X-Target-Environment':      process.env.MTN_CG_TARGET_ENV || 'sandbox',
+      'X-Target-Environment':      TARGET_ENV,
       'Ocp-Apim-Subscription-Key': CONFIG.disbursements.primaryKey,
       'Content-Type':              'application/json',
       'Content-Length':            Buffer.byteLength(body),
@@ -209,7 +214,7 @@ const getDisbursementStatus = async (referenceId) => {
     method:   'GET',
     headers: {
       'Authorization':             `Bearer ${token}`,
-      'X-Target-Environment':      process.env.MTN_CG_TARGET_ENV || 'sandbox',
+      'X-Target-Environment':      TARGET_ENV,
       'Ocp-Apim-Subscription-Key': CONFIG.disbursements.primaryKey,
     },
   }, null);
@@ -226,7 +231,7 @@ const getDisbursementBalance = async () => {
     method:   'GET',
     headers: {
       'Authorization':             `Bearer ${token}`,
-      'X-Target-Environment':      process.env.MTN_CG_TARGET_ENV || 'sandbox',
+      'X-Target-Environment':      TARGET_ENV,
       'Ocp-Apim-Subscription-Key': CONFIG.disbursements.primaryKey,
     },
   }, null);
@@ -243,7 +248,7 @@ const validateAccount = async (phone, product = 'collections') => {
     method:   'GET',
     headers: {
       'Authorization':             `Bearer ${token}`,
-      'X-Target-Environment':      process.env.MTN_CG_TARGET_ENV || 'sandbox',
+      'X-Target-Environment':      TARGET_ENV,
       'Ocp-Apim-Subscription-Key': cfg.primaryKey,
     },
   }, null);
