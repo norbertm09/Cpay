@@ -233,10 +233,14 @@ router.post('/auth/2fa/disable', adminAuth, async (req, res) => {
 // Statut des variables ENV par provider
 router.get('/api-configs/env-status', adminAuth, async (req, res) => {
   const env = process.env;
+  const mtnCg = require('../config/mtn-env').resolveMtnEnv({ country: 'CG', env });
   const status = {
     mtn_momo_cg: {
       configured: !!(env.MTN_CG_COLL_API_USER && env.MTN_CG_COLL_SUB_KEY_PRIMARY),
-      env: env.MTN_CG_ENV || 'sandbox',
+      env: mtnCg.mode,
+      target: mtnCg.targetEnvironment,
+      baseUrl: mtnCg.baseUrl,
+      warnings: mtnCg.warnings,
       coll: { user: !!env.MTN_CG_COLL_API_USER, key: !!env.MTN_CG_COLL_API_KEY, sub_primary: !!env.MTN_CG_COLL_SUB_KEY_PRIMARY, sub_secondary: !!env.MTN_CG_COLL_SUB_KEY_SECONDARY },
       disb: { user: !!env.MTN_CG_DISB_API_USER, key: !!env.MTN_CG_DISB_API_KEY, sub_primary: !!env.MTN_CG_DISB_SUB_KEY_PRIMARY, sub_secondary: !!env.MTN_CG_DISB_SUB_KEY_SECONDARY }
     },

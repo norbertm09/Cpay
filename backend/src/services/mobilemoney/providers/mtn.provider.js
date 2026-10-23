@@ -7,6 +7,19 @@
 const https  = require('https');
 const crypto = require('crypto');
 const logger = require('../../../config/logger');
+const { resolveMtnEnv } = require('../../../config/mtn-env');
+
+// X-Target-Environment : config gateway (extra_params.targetEnvironment) > MTN_<CC>_TARGET_ENV > derive de MTN_ENV.
+// Le pays est deduit de la cle de gateway (mtn_cg -> CG, mtn_cm -> CM, mtn_ci -> CI).
+const countryOf = (config) => {
+  const m = /^mtn_([a-z]{2})$/i.exec(String(config && config.providerKey || ''));
+  return m ? m[1].toUpperCase() : (config && config.country) || 'CG';
+};
+const targetEnv = (config) => resolveMtnEnv({
+  country: countryOf(config),
+  targetEnvironment: config && config.targetEnvironment,
+  baseUrl: config && config.baseUrl,
+}).targetEnvironment;
 
 const getAccessToken = async (config) => {
   const creds = Buffer.from(`${config.apiKey}:${config.apiSecret}`).toString('base64');
@@ -36,7 +49,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
     {
       'Authorization':              `Bearer ${token}`,
       'X-Reference-Id':             ref,
-      'X-Target-Environment':       process.env.MTN_ENV || 'sandbox',
+      'X-Target-Environment':       targetEnv(config),
       'Ocp-Apim-Subscription-Key':  config.subscriptionKey || config.apiKey,
       'Content-Type':               'application/json',
     }
@@ -68,7 +81,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
     {
       'Authorization':             `Bearer ${token}`,
       'X-Reference-Id':            ref,
-      'X-Target-Environment':      process.env.MTN_ENV || 'sandbox',
+      'X-Target-Environment':      targetEnv(config),
       'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey,
       'Content-Type':              'application/json',
     }
@@ -89,7 +102,7 @@ const pollStatus = async (config, ref, token, maxWaitMs = 30000, sleepMs = 3000)
       null,
       {
         'Authorization':             `Bearer ${token}`,
-        'X-Target-Environment':      process.env.MTN_ENV || 'sandbox',
+        'X-Target-Environment':      targetEnv(config),
         'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey,
       }
     );
@@ -109,7 +122,7 @@ const pollDisbursementStatus = async (config, ref, token, sleepMs = 5000) => {
   const r = await httpRequest('GET', config.baseUrl,
     `/disbursement/v1_0/transfer/${ref}`,
     null,
-    { 'Authorization': `Bearer ${token}`, 'X-Target-Environment': process.env.MTN_ENV || 'sandbox', 'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey }
+    { 'Authorization': `Bearer ${token}`, 'X-Target-Environment': targetEnv(config), 'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey }
   );
   const status = r.body?.status;
   if (status === 'SUCCESSFUL') {
@@ -131,7 +144,7 @@ const getStatusGeneric = async (config, product, ref) => {
     : `/collection/v1_0/requesttopay/${ref}`;
   const r = await httpRequest('GET', config.baseUrl, path, null, {
     'Authorization':             `Bearer ${token}`,
-    'X-Target-Environment':      process.env.MTN_ENV || 'sandbox',
+    'X-Target-Environment':      targetEnv(config),
     'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey,
   });
   if (r.statusCode >= 400 || !r.body || typeof r.body !== 'object') {

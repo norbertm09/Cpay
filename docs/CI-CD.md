@@ -69,11 +69,11 @@ Durée typique : les jobs sont parallèles ; le plus long est `android` (≈ 6-8
 
 | Secret | Obligatoire | Usage |
 |--------|-------------|-------|
-| `OVH_SSH_HOST` | oui | Hôte/IP du VPS OVH. |
+| `OVH_SSH_HOST` | oui | Hôte/IP du VPS OVH (`137.74.46.246` depuis la migration du 2026-10, voir `docs/GO-LIVE-CG.md`). |
 | `OVH_SSH_PORT` | non (22) | Port SSH. |
 | `OVH_SSH_USER` | oui | Utilisateur SSH (membre du groupe `docker`, droits d'écriture sur `/opt/cplus`). |
 | `OVH_SSH_KEY` | oui | Clé privée OpenSSH (ed25519 recommandé) dédiée au déploiement ; la clé publique dans `~/.ssh/authorized_keys` du serveur. |
-| `OVH_KNOWN_HOSTS` | recommandé | Sortie de `ssh-keyscan -p <port> <host>` ; sans lui, l'empreinte est acceptée au premier contact (avertissement dans le run). |
+| `OVH_KNOWN_HOSTS` | recommandé | Sortie de `ssh-keyscan -p <port> <host>` (ou `ssh root@<host> 'echo <host> $(cut -d" " -f1-2 /etc/ssh/ssh_host_ed25519_key.pub)'`) ; **à mettre à jour à chaque changement de serveur** ; sans lui, l'empreinte est acceptée au premier contact (avertissement dans le run). |
 | `ANDROID_KEYSTORE_BASE64` | non | `base64 -w0 release.jks` — signature des APK/AAB de release. |
 | `ANDROID_KEYSTORE_PASSWORD` | non | Mot de passe du keystore. |
 | `ANDROID_KEY_ALIAS` | non | Alias de la clé. |

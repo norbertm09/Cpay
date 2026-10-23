@@ -1,5 +1,13 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-go-live-cg (2026-10-22) — migration VPS dedie et preparation go-live Congo
+Voir `docs/GO-LIVE-CG.md` : scripts de migration de serveur (`scripts/vps-export.sh` sur l'ancien,
+`scripts/init-vps.sh` pour Ubuntu 24.04/26.04 avec nginx hote, certbot, Docker, UFW, fail2ban, import des
+certificats, secrets et crons), configuration nginx hote documentee et allowlist des callbacks operateurs
+(`docker/nginx-host/`), environnement MTN unifie (`MTN_ENV` unique pour l'encaissement et le retrait, cibles de
+production derivees par pays, incoherences journalisees), runbook complet de bascule DNS et de pilote MTN/Airtel
+Congo, 807 tests.
+
 ## 2.7.0-wave-7 (2026-10-21) — reliquats de l'audit residuel
 Voir `docs/WAVE-7.md` : Nodemailer 10 (plus aucune vulnerabilite high en production, audit npm bloquant en CI),
 fabrique SMTP commune (STARTTLS force, delais bornes, erreurs normalisees), scenario d'alerte « identifiants
