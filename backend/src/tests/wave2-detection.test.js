@@ -148,3 +148,20 @@ describe('exports de compatibilité', () => {
     expect(detectFromPhone('+242051234567').operator).toBe('AIRTEL_MONEY');
   });
 });
+
+describe('detection : numéro local avec pays par défaut (saisie caisse sans indicatif)', () => {
+  const { detectFromPhone } = require('../services/detection/detection.engine');
+  test('CG : 06 612 34 56 → +242066123456 MTN ; 05… → Airtel ; sans pays → refus', () => {
+    const mtn = detectFromPhone('06 612 34 56', { defaultCountry: 'CG' });
+    expect(mtn.success).toBe(true); expect(mtn.country).toBe('CG'); expect(mtn.phone).toBe('+242066123456');
+    expect(String(mtn.operator).toUpperCase()).toBe('MTN_MOMO');
+    const airtel = detectFromPhone('056123456', { defaultCountry: 'CG' });
+    expect(airtel.success).toBe(true); expect(String(airtel.operator).toUpperCase()).toBe('AIRTEL_MONEY');
+    const none = detectFromPhone('066123456');
+    expect(none.success).toBe(false);
+  });
+  test('un numéro international reste accepté quel que soit le pays par défaut', () => {
+    const r = detectFromPhone('+242 06 612 34 56', { defaultCountry: 'CM' });
+    expect(r.success).toBe(true); expect(r.country).toBe('CG');
+  });
+});

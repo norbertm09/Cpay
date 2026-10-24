@@ -13,7 +13,7 @@ import { errorMessage } from '../../utils/errors';
 import { opLabel, countryName, CARD_ACCEPTANCE, statusLabel } from '../../utils/labels';
 import { copyText, shareOrCopy, printDoc } from '../../utils/actions';
 import { devParams } from '../../utils/dev';
-import { usePhoneDetection } from './shared';
+import { usePhoneDetection, phonePlaceholder, phoneHint, suggestReference } from './shared';
 
 const POLL_EVERY_MS = 3000, POLL_MAX_MS = 90000;
 
@@ -35,7 +35,7 @@ export const Encaisser = () => {
   const [amount, setAmount] = useState(dev?.get('amount') || '');
   const [phone, setPhone] = useState(dev?.get('phone') || '');
   const [description, setDescription] = useState('');
-  const [reference, setReference] = useState('');
+  const [reference, setReference] = useState(() => suggestReference('ENC'));
   const [operator, setOperator] = useState(''); // '' = opérateur détecté, sinon alternative forcée
   const [phase, setPhase] = useState('form'); // form | pending | success | failed | timeout | card | card_unavailable
   const [result, setResult] = useState(null);
@@ -45,11 +45,12 @@ export const Encaisser = () => {
   const restore = useCallback((payload) => {
     setMethod(payload?.method || 'mobile_money'); setAmount(payload ? String(payload.amount) : '');
     setPhone(payload?.customerPhone || ''); setDescription(payload?.description || '');
-    setReference(payload?.reference || ''); setOperator(payload?.operator || '');
+    setReference(payload?.reference || suggestReference('ENC')); setOperator(payload?.operator || '');
   }, []);
   useEffect(() => { restore(intent.restored || devDefaults.current); setResult(null); setPhase('form'); }, [intent.restored, user?.merchantId, user?.userId, restore]);
   const pollRef = useRef(null);
-  const { detect, detecting } = usePhoneDetection(phone, method === 'mobile_money');
+  const country = user?.country || null;
+  const { detect, detecting } = usePhoneDetection(phone, method === 'mobile_money', country);
   useEffect(() => { if (!intent.pending) setOperator(''); }, [detect, intent.pending]);
 
   // Avertissement avant de quitter la page pendant une attente de paiement.
@@ -156,7 +157,7 @@ export const Encaisser = () => {
             ]} />
             {methodClosed && <Notice tone="neutral" className="mb-4" icon="clock"><strong>{cap.message}.</strong> {method === 'card' ? 'Aucune passerelle carte n’est active dans votre pays (intégration en cours).' : 'Les opérateurs Mobile Money de votre pays sont en cours d’intégration.'}{cap.countryInfo ? ` Pays du compte : ${cap.countryInfo.name}.` : ''}</Notice>}
             {method === 'mobile_money' && (<>
-              <Input label="Numéro Mobile Money du client" type="tel" inputMode="tel" value={phone} onChange={v => { setPhone(v); setErrors(e => ({ ...e, phone: undefined })); }} placeholder="+237 6XX XXX XXX" autoComplete="off" error={errors.phone} required />
+              <Input label="Numéro Mobile Money du client" type="tel" inputMode="tel" value={phone} onChange={v => { setPhone(v); setErrors(e => ({ ...e, phone: undefined })); }} placeholder={phonePlaceholder(country)} hint={!errors.phone && !detect ? phoneHint(country) : undefined} autoComplete="off" error={errors.phone} required />
               {detectBox()}
             </>)}
             {method === 'card' && (
@@ -165,7 +166,7 @@ export const Encaisser = () => {
               </Notice>
             )}
             <div className="form-grid">
-              <Input label="Référence (facultatif)" value={reference} onChange={setReference} placeholder="FACT-001" />
+              <Input label="Référence (générée automatiquement, modifiable)" value={reference} onChange={setReference} placeholder="ENC-261101-XXXXX" hint="Remplacez-la par votre numéro de facture ou de ticket si vous en avez un." />
               <Input label="Description (facultatif)" value={description} onChange={setDescription} placeholder="Vente comptoir" />
             </div>
             <Button type="submit" variant="primary" size="lg" block loading={loading} disabled={!canSubmit}>
