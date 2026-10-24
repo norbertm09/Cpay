@@ -105,3 +105,93 @@ describe('rails/mtn-momo.client et providers/mtn.provider utilisent la meme reso
     expect(targets).not.toContain('sandbox');
   });
 });
+
+describe('MTN octobre 2026 : X-Target-Environment exige aussi sur la demande de jeton', () => {
+  const https = require('https');
+  const ENV_KEYS = ['MTN_ENV', 'MTN_CG_ENV', 'MTN_CG_TARGET_ENV', 'MTN_CG_BASE_URL', 'MTN_MOMO_BASE_URL', 'MTN_CG_CALLBACK_URL'];
+  beforeEach(() => { jest.resetModules(); jest.restoreAllMocks(); ENV_KEYS.forEach((k) => delete process.env[k]); });
+  afterAll(() => { ENV_KEYS.forEach((k) => delete process.env[k]); });
+  const mockHttps = (captured) => jest.spyOn(https, 'request').mockImplementation((opts, cb) => {
+    captured.push(opts);
+    const isToken = /\/token\/?$/.test(String(opts.path));
+    const res = { statusCode: isToken ? 200 : 202, on: (ev, h) => { if (ev === 'data') h(isToken ? '{"access_token":"t","expires_in":3600}' : '{}'); if (ev === 'end') h(); return res; } };
+    return { write: jest.fn(), end: jest.fn(() => cb(res)), on: jest.fn().mockReturnThis(), destroy: jest.fn(), setTimeout: jest.fn() };
+  });
+
+  test('client rails : le POST /collection/token/ et /disbursement/token/ portent X-Target-Environment (sandbox puis mtncongo)', async () => {
+    const captured = []; mockHttps(captured);
+    let mtn = jest.requireActual('../services/rails/mtn-momo.client');
+    await mtn.getToken('collections'); await mtn.getToken('disbursements');
+    const tokens = captured.filter((o) => /\/token\/$/.test(o.path));
+    expect(tokens).toHaveLength(2);
+    tokens.forEach((o) => expect(o.headers['X-Target-Environment']).toBe('sandbox'));
+    jest.resetModules(); process.env.MTN_ENV = 'production';
+    const captured2 = []; mockHttps(captured2);
+    mtn = jest.requireActual('../services/rails/mtn-momo.client');
+    await mtn.getToken('collections');
+    expect(captured2[0].headers['X-Target-Environment']).toBe('mtncongo');
+  });
+
+  test('client rails : requesttopay porte X-Callback-Url quand une URL de callback est configuree', async () => {
+    process.env.MTN_CG_CALLBACK_URL = 'https://api.c-pay.global/api/v1/momo/webhooks/mtn';
+    const captured = []; mockHttps(captured);
+    const mtn = jest.requireActual('../services/rails/mtn-momo.client');
+    await mtn.requestToPay({ amount: 100, phone: '061234567', description: 'test', externalId: 'x' });
+    const rtp = captured.find((o) => String(o.path).includes('requesttopay'));
+    expect(rtp.headers['X-Callback-Url']).toBe('https://api.c-pay.global/api/v1/momo/webhooks/mtn');
+  });
+
+  test('provider mtn_cg : le POST /collection/token/ porte X-Target-Environment derive du gateway', async () => {
+    process.env.MTN_ENV = 'production';
+    const captured = []; mockHttps(captured);
+    const provider = jest.requireActual('../services/mobilemoney/providers/mtn.provider');
+    await provider.getRequestStatus({ apiKey: 'k', apiSecret: 's', subscriptionKey: 'sub', baseUrl: 'https://proxy.momoapi.mtn.com', providerKey: 'mtn_cg' }, 'ref1').catch(() => {});
+    const token = captured.find((o) => /\/token\/$/.test(o.path));
+    expect(token).toBeDefined();
+    expect(token.headers['X-Target-Environment']).toBe('mtncongo');
+  });
+});
+
+describe('provider MTN : jeton et cle d\'abonnement par produit (collection vs disbursement)', () => {
+  const https = require('https');
+  beforeEach(() => { jest.resetModules(); jest.restoreAllMocks(); delete process.env.MTN_ENV; });
+  const mockHttps = (captured) => jest.spyOn(https, 'request').mockImplementation((opts, cb) => {
+    captured.push(opts);
+    const isToken = /\/token\/?$/.test(String(opts.path));
+    const res = { statusCode: isToken ? 200 : 200, on: (ev, h) => { if (ev === 'data') h(isToken ? '{"access_token":"t","expires_in":3600}' : '{"status":"SUCCESSFUL"}'); if (ev === 'end') h(); return res; } };
+    return { write: jest.fn(), end: jest.fn(() => cb(res)), on: jest.fn().mockReturnThis(), destroy: jest.fn(), setTimeout: jest.fn() };
+  });
+  const cfg = { apiKey: 'coll-user', apiSecret: 'coll-key', subscriptionKey: 'coll-sub', baseUrl: 'https://sandbox.momodeveloper.mtn.com', providerKey: 'mtn_cm',
+    disbursement: { apiKey: 'disb-user', apiSecret: 'disb-key', subscriptionKey: 'disb-sub' } };
+
+  test('statut de retrait : POST /disbursement/token/ avec les identifiants disbursement, puis cle disbursement', async () => {
+    const captured = []; mockHttps(captured);
+    const provider = jest.requireActual('../services/mobilemoney/providers/mtn.provider');
+    await provider.getTransferStatus(cfg, 'ref-d');
+    const token = captured.find((o) => /\/token\/$/.test(o.path));
+    expect(token.path).toBe('/disbursement/token/');
+    expect(token.headers['Ocp-Apim-Subscription-Key']).toBe('disb-sub');
+    expect(token.headers.Authorization).toBe('Basic ' + Buffer.from('disb-user:disb-key').toString('base64'));
+    const st = captured.find((o) => String(o.path).includes('/disbursement/v1_0/transfer/'));
+    expect(st.headers['Ocp-Apim-Subscription-Key']).toBe('disb-sub');
+  });
+
+  test('statut d\'encaissement : POST /collection/token/ avec les identifiants collection', async () => {
+    const captured = []; mockHttps(captured);
+    const provider = jest.requireActual('../services/mobilemoney/providers/mtn.provider');
+    await provider.getRequestStatus(cfg, 'ref-c');
+    const token = captured.find((o) => /\/token\/$/.test(o.path));
+    expect(token.path).toBe('/collection/token/');
+    expect(token.headers['Ocp-Apim-Subscription-Key']).toBe('coll-sub');
+  });
+
+  test('sans bloc disbursement : les identifiants collection servent aux deux produits (compatibilite)', async () => {
+    const captured = []; mockHttps(captured);
+    const provider = jest.requireActual('../services/mobilemoney/providers/mtn.provider');
+    const { disbursement, ...single } = cfg;
+    await provider.getTransferStatus(single, 'ref-d');
+    const token = captured.find((o) => /\/token\/$/.test(o.path));
+    expect(token.path).toBe('/disbursement/token/');
+    expect(token.headers['Ocp-Apim-Subscription-Key']).toBe('coll-sub');
+  });
+});

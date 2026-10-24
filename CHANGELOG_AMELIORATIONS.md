@@ -1,5 +1,12 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-mtn-octobre-2026 (2026-10-24) — API MTN MoMo
+MTN exige depuis octobre 2026 l'en-tete `X-Target-Environment` sur toutes les requetes, demande de jeton comprise :
+ajoute dans le client rails (CG) et le provider du routeur (CM/CI/CG). Le provider demande desormais un jeton par
+produit (`/collection/token/` ou `/disbursement/token/`) avec les identifiants et la cle d'abonnement du produit
+(`extra_params.disbursement`), au lieu d'utiliser le jeton de collection pour les retraits. `X-Callback-Url` envoye sur
+`requesttopay` quand `MTN_CG_CALLBACK_URL` est definie ; jeton refuse journalise. 813 tests.
+
 ## 2.7.0-environnements (2026-10-24) — serveurs de developpement et de production
 Voir `docs/ENVIRONNEMENTS.md` : branche `develop` -> environnement GitHub `development` (51.91.98.115,
 dev.c-pay.global, base dediee, operateurs sandbox) et `main` -> `production` (137.74.46.246, c-pay.global) avec un seul
