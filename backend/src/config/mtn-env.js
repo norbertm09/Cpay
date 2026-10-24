@@ -14,12 +14,17 @@
  *
  * Les anciens MTN_CG_ENV restent acceptes (priorite : MTN_<CC>_ENV > MTN_ENV).
  * En production, l'API MTN attend un X-Target-Environment par pays (mtncongo, mtncameroon,
- * mtnivorycoast…) et l'hote https://proxy.momoapi.mtn.com ; en sandbox la valeur « sandbox »
- * et l'hote https://sandbox.momodeveloper.mtn.com.
+ * mtnivorycoast…) et l'hote https://momoapi.momo.africa (octobre 2026 ; l'ancien
+ * proxy.momoapi.mtn.com n'est plus a utiliser) ; en sandbox la valeur « sandbox » et l'hote
+ * https://sandbox.momodeveloper.mtn.com. La cle d'abonnement (Ocp-Apim-Subscription-Key) reste
+ * obligatoire sur chaque requete, verifie le 2026-10-24 (401 « missing subscription key »).
  */
 
 const SANDBOX_BASE_URL    = 'https://sandbox.momodeveloper.mtn.com';
-const PRODUCTION_BASE_URL = 'https://proxy.momoapi.mtn.com';
+// Production : depuis octobre 2026 MTN sert l'API sur momoapi.momo.africa (remplace proxy.momoapi.mtn.com,
+// qui reste accepte en surcharge explicite via MTN_<CC>_BASE_URL).
+const PRODUCTION_BASE_URL = 'https://momoapi.momo.africa';
+const LEGACY_PRODUCTION_HOST = 'proxy.momoapi.mtn.com';
 
 const PRODUCTION_TARGETS = Object.freeze({
   CG: 'mtncongo',
@@ -88,7 +93,8 @@ function resolveMtnEnv(opts = {}) {
   baseUrl = baseUrl.replace(/\/+$/, '');
   const looksSandbox = /sandbox/i.test(baseUrl);
   if (mode === 'production' && looksSandbox) warnings.push(`MTN_ENV=production mais URL de base sandbox (${baseUrl})`);
-  if (mode === 'sandbox' && !looksSandbox && /momoapi\.mtn\.com/i.test(baseUrl)) warnings.push(`MTN_ENV=sandbox mais URL de base de production (${baseUrl})`);
+  if (mode === 'sandbox' && !looksSandbox && /momoapi\.mtn\.com|momoapi\.momo\.africa/i.test(baseUrl)) warnings.push(`MTN_ENV=sandbox mais URL de base de production (${baseUrl})`);
+  if (mode === 'production' && new RegExp(LEGACY_PRODUCTION_HOST.replace(/\./g, '\\.'), 'i').test(baseUrl)) warnings.push(`URL de base ${LEGACY_PRODUCTION_HOST} obsolete depuis octobre 2026 : utiliser ${PRODUCTION_BASE_URL}`);
 
   const host = baseUrl.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
   return { mode, isSandbox: mode === 'sandbox', targetEnvironment, baseUrl, host, country, warnings };
@@ -102,4 +108,4 @@ function warnOnce(resolved, logger = console) {
   }
 }
 
-module.exports = { resolveMtnEnv, warnOnce, SANDBOX_BASE_URL, PRODUCTION_BASE_URL, PRODUCTION_TARGETS };
+module.exports = { resolveMtnEnv, warnOnce, SANDBOX_BASE_URL, PRODUCTION_BASE_URL, LEGACY_PRODUCTION_HOST, PRODUCTION_TARGETS };

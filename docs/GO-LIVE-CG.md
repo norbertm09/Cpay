@@ -98,13 +98,13 @@ Le fichier importé est celui de l'ancien serveur. Ajouter ou vérifier :
 ```ini
 # Environnement MTN : UN SEUL interrupteur (go-live CG). sandbox tant que les tests réels ne sont pas faits.
 MTN_ENV=sandbox                    # passer à production à l'étape 3.3
-# (facultatif) MTN_CG_TARGET_ENV=mtncongo et MTN_CG_BASE_URL=https://proxy.momoapi.mtn.com sont dérivés automatiquement
+# (facultatif) MTN_CG_TARGET_ENV=mtncongo et MTN_CG_BASE_URL=https://momoapi.momo.africa sont dérivés automatiquement (hôte de production MTN depuis octobre 2026)
 MTN_CG_COLL_API_USER=…             # collection (encaissement)
 MTN_CG_COLL_API_KEY=…
 MTN_CG_COLL_SUB_KEY_PRIMARY=…
 MTN_CG_DISB_API_USER=…             # disbursement (retrait vers le wallet marchand)
 MTN_CG_DISB_API_KEY=…
-MTN_CG_DISB_SUB_KEY_PRIMARY=…
+MTN_CG_DISB_SUB_KEY_PRIMARY=…    # cle d'abonnement OBLIGATOIRE (verifie le 2026-10-24 : 401 « missing subscription key » sans elle)
 MTN_CG_CALLBACK_URL=https://api.c-pay.global/api/v1/momo/webhooks/mtn
 MTN_TLS_INSECURE=false
 
@@ -116,6 +116,8 @@ AIRTEL_CG_COLL_CLIENT_SECRET=…
 AIRTEL_CG_DISB_CLIENT_ID=…
 AIRTEL_CG_DISB_CLIENT_SECRET=…
 AIRTEL_WEBHOOK_SECRET=…            # OBLIGATOIRE : sans lui les callbacks Airtel sont refusés
+
+# Valeurs contenant ( ) # $ ou des espaces : les mettre entre guillemets simples, ex. MTN_CG_COLL_API_KEY='…'
 
 # Garde des capacités : report pendant le pilote (journalise sans bloquer), enforce ensuite
 CAPABILITY_ENFORCE=report
@@ -275,7 +277,7 @@ cd /opt/cplus/docker && docker compose up -d api && docker compose logs --tail=5
 
 Aucune ligne `[MTN-ENV]` ne doit apparaître (elles signalent une incohérence sandbox/production).
 `GET /api/v1/admin/api-configs/env-status` doit montrer `mtn_momo_cg.env = production`, `target = mtncongo`,
-`baseUrl = https://proxy.momoapi.mtn.com`, `warnings = []`.
+`baseUrl = https://momoapi.momo.africa`, `warnings = []`.
 
 ### 3.4 Pilote réel (marchand interne, petits montants)
 

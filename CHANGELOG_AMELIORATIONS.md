@@ -1,5 +1,11 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-mtn-production-host (2026-10-24) — hote de production MTN
+L'API MTN MoMo de production est servie sur https://momoapi.momo.africa depuis octobre 2026 : nouveau defaut de
+`config/mtn-env.js`, l'ancien proxy.momoapi.mtn.com reste accepte en surcharge mais signale comme obsolete. Cle
+d'abonnement confirmee obligatoire (test du 2026-10-24). Runbook : clés d'abonnement, guillemets pour les valeurs a
+caracteres speciaux.
+
 ## 2.7.0-mtn-octobre-2026 (2026-10-24) — API MTN MoMo
 MTN exige depuis octobre 2026 l'en-tete `X-Target-Environment` sur toutes les requetes, demande de jeton comprise :
 ajoute dans le client rails (CG) et le provider du routeur (CM/CI/CG). Le provider demande desormais un jeton par
