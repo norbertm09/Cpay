@@ -1,5 +1,12 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-environnements (2026-10-24) — serveurs de developpement et de production
+Voir `docs/ENVIRONNEMENTS.md` : branche `develop` -> environnement GitHub `development` (51.91.98.115,
+dev.c-pay.global, base dediee, operateurs sandbox) et `main` -> `production` (137.74.46.246, c-pay.global) avec un seul
+workflow `deploy.yml` (environnement choisi par la branche, garde-fou production = main ou tag, smoke test par
+`CPAY_DOMAIN`), URL d'API des portails parametree par `docker/.env`, vitrine deduisant l'API du nom d'hote,
+`scripts/setup-dev-server.sh` (certificat, vhost derive de la production, docker/.env), health check parametre.
+
 ## 2.7.0-go-live-cg (2026-10-22) — migration VPS dedie et preparation go-live Congo
 Voir `docs/GO-LIVE-CG.md` : scripts de migration de serveur (`scripts/vps-export.sh` sur l'ancien,
 `scripts/init-vps.sh` pour Ubuntu 24.04/26.04 avec nginx hote, certbot, Docker, UFW, fail2ban, import des

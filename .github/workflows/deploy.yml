@@ -1,19 +1,28 @@
-# Deploiement production OVH — voir docs/CI-CD.md
-# Lance automatiquement quand le pipeline CI est vert sur main (workflow_run), a la main
-# (workflow_dispatch), par release.yml apres la creation d'une release, ou par la publication
-# d'une release dans l'interface GitHub. Le job est rattache a l'environnement GitHub
-# `production` : y configurer des « required reviewers » (Settings → Environments → production)
-# pour que chaque deploiement attende une approbation.
-name: Deploy production
+# Deploiement C-Pay — voir docs/ENVIRONNEMENTS.md et docs/CI-CD.md
+#
+# Deux environnements GitHub, memes noms de secrets dans chacun (Settings → Environments) :
+#   development  ← branche develop  (serveur de developpement, deploiement automatique apres CI verte)
+#   production   ← branche main     (serveur de production, « required reviewers » recommandes)
+# Declencheurs : CI verte sur develop/main (workflow_run), a la main (workflow_dispatch, choix de
+# l'environnement), release publiee (production).
+# Variables d'environnement GitHub (Settings → Environments → <env> → Variables) :
+#   CPAY_DOMAIN  domaine de l'environnement (c-pay.global | dev.c-pay.global) — smoke test et URL
+name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Environnement cible'
+        type: choice
+        required: true
+        default: development
+        options: [development, production]
       ref:
-        description: 'Commit, branche ou tag a deployer (ex. v2.7.0)'
+        description: 'Commit, branche ou tag a deployer (ex. develop, main, v2.7.0)'
         type: string
         required: true
-        default: main
+        default: develop
       skip_backup:
         description: 'Ne pas sauvegarder la base avant le deploiement'
         type: boolean
@@ -21,53 +30,83 @@ on:
         default: false
   release:
     types: [published]
-  # Deploiement automatique : des que le pipeline CI est vert sur main
+  # Deploiement automatique : des que le pipeline CI est vert sur develop (→ development) ou main (→ production)
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
 
-# Jamais deux deploiements en parallele, et on n'annule pas un deploiement en cours
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
-
 jobs:
-  deploy:
-    name: Deploiement sur /opt/cplus
-    # Sur workflow_run : uniquement si la CI de main a reussi
+  plan:
+    name: Environnement cible
+    # Sur workflow_run : uniquement si la CI a reussi
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://c-pay.global
-    env:
-      OVH_SSH_HOST: ${{ secrets.OVH_SSH_HOST }}
-      OVH_SSH_PORT: ${{ secrets.OVH_SSH_PORT || '22' }}
-      OVH_SSH_USER: ${{ secrets.OVH_SSH_USER }}
+    outputs:
+      environment: ${{ steps.plan.outputs.environment }}
+      ref: ${{ steps.plan.outputs.ref }}
+      args: ${{ steps.plan.outputs.args }}
     steps:
-      - name: Reference a deployer
-        id: ref
+      - name: Determiner l'environnement et la reference
+        id: plan
         env:
+          EVENT: ${{ github.event_name }}
+          INPUT_ENV: ${{ inputs.environment }}
           INPUT_REF: ${{ inputs.ref }}
+          INPUT_SKIP_BACKUP: ${{ inputs.skip_backup }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-          INPUT_SKIP_BACKUP: ${{ inputs.skip_backup }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          REF="${INPUT_REF:-${RELEASE_TAG:-$RUN_SHA}}"
+          set -eu
+          case "$EVENT" in
+            workflow_dispatch) ENVIRONMENT="$INPUT_ENV"; REF="$INPUT_REF" ;;
+            release)           ENVIRONMENT="production";  REF="$RELEASE_TAG" ;;
+            workflow_run)
+              case "$RUN_BRANCH" in
+                main)    ENVIRONMENT="production" ;;
+                develop) ENVIRONMENT="development" ;;
+                *) echo "::error::branche $RUN_BRANCH sans environnement"; exit 1 ;;
+              esac
+              REF="$RUN_SHA" ;;
+            *) echo "::error::evenement $EVENT non gere"; exit 1 ;;
+          esac
+          # Garde-fou : la production ne se deploie que depuis main ou un tag vX.Y.Z (ou un SHA de main via workflow_run)
+          if [ "$ENVIRONMENT" = "production" ] && [ "$EVENT" = "workflow_dispatch" ]; then
+            case "$REF" in main|v[0-9]*) ;; *) echo "::error::production : ref autorisees = main ou tag vX.Y.Z (recu '$REF')"; exit 1 ;; esac
+          fi
           # ref stricte : pas d'espace, de quote ni de `..` (elle est injectee dans la commande distante)
           if ! printf '%s' "$REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$' || printf '%s' "$REF" | grep -q '\.\.'; then
             echo "::error::reference invalide : '$REF'"; exit 1
           fi
           ARGS=""
           [ "$INPUT_SKIP_BACKUP" = "true" ] && ARGS="--skip-backup"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
-          echo "Deploiement de '$REF' ${ARGS:+($ARGS)}"
+          { echo "environment=$ENVIRONMENT"; echo "ref=$REF"; echo "args=$ARGS"; } >> "$GITHUB_OUTPUT"
+          echo "Deploiement de '$REF' vers $ENVIRONMENT ${ARGS:+($ARGS)}"
 
+  deploy:
+    name: Deploiement ${{ needs.plan.outputs.environment }} (/opt/cplus)
+    needs: plan
+    runs-on: ubuntu-latest
+    # Jamais deux deploiements en parallele sur le meme environnement, et on n'annule pas un deploiement en cours
+    concurrency:
+      group: deploy-${{ needs.plan.outputs.environment }}
+      cancel-in-progress: false
+    environment:
+      name: ${{ needs.plan.outputs.environment }}
+      url: https://${{ vars.CPAY_DOMAIN || 'c-pay.global' }}
+    env:
+      OVH_SSH_HOST: ${{ secrets.OVH_SSH_HOST }}
+      OVH_SSH_PORT: ${{ secrets.OVH_SSH_PORT || '22' }}
+      OVH_SSH_USER: ${{ secrets.OVH_SSH_USER }}
+      CPAY_DOMAIN: ${{ vars.CPAY_DOMAIN || 'c-pay.global' }}
+      TARGET_ENV: ${{ needs.plan.outputs.environment }}
+      REF: ${{ needs.plan.outputs.ref }}
+      DEPLOY_ARGS: ${{ needs.plan.outputs.args }}
+    steps:
       - name: Cle SSH et known_hosts
         env:
           OVH_SSH_KEY: ${{ secrets.OVH_SSH_KEY }}
@@ -76,7 +115,7 @@ jobs:
           set -eu
           for v in OVH_SSH_HOST OVH_SSH_USER OVH_SSH_KEY; do
             eval "val=\${$v:-}"
-            [ -n "$val" ] || { echo "::error::secret $v manquant (Settings → Secrets → Actions)"; exit 1; }
+            [ -n "$val" ] || { echo "::error::secret $v manquant pour l'environnement (Settings → Environments → secrets)"; exit 1; }
           done
           umask 077
           mkdir -p "$RUNNER_TEMP/ssh"
@@ -88,11 +127,14 @@ jobs:
             ssh-keyscan -p "$OVH_SSH_PORT" -H "$OVH_SSH_HOST" > "$RUNNER_TEMP/ssh/known_hosts" 2>/dev/null
             [ -s "$RUNNER_TEMP/ssh/known_hosts" ] || { echo "::error::ssh-keyscan n'a rien retourne"; exit 1; }
           fi
+          # Garde-fou : l'environnement development doit avoir sa propre variable CPAY_DOMAIN (sinon ses secrets
+          # retombent sur ceux du depot et un deploiement de develop irait sur le serveur de production)
+          if [ "$TARGET_ENV" = "development" ] && [ "$CPAY_DOMAIN" = "c-pay.global" ]; then
+            echo "::error::environnement development non configure : definir la variable CPAY_DOMAIN=dev.c-pay.global et ses secrets OVH_* (Settings → Environments → development)"; exit 1
+          fi
+          echo "cible : $TARGET_ENV = $OVH_SSH_USER@$OVH_SSH_HOST ($CPAY_DOMAIN)"
 
       - name: Deploiement distant (git checkout + scripts/deploy.sh)
-        env:
-          REF: ${{ steps.ref.outputs.ref }}
-          DEPLOY_ARGS: ${{ steps.ref.outputs.args }}
         run: |
           set -eu
           ssh -i "$RUNNER_TEMP/ssh/key" -p "$OVH_SSH_PORT" \
@@ -112,8 +154,6 @@ jobs:
           REMOTE
 
       - name: Smoke test HTTP depuis le runner
-        env:
-          REF: ${{ steps.ref.outputs.ref }}
         run: |
           set -eu
           check() { # check <url> <motif attendu>
@@ -124,9 +164,9 @@ jobs:
             done
             echo "::error::$1 ne repond pas comme attendu ($2)"; return 1
           }
-          check https://api.c-pay.global/health '"status":"ok"'
-          check https://c-pay.global/ '<html'
-          DEPLOYED="$(curl -fsS --max-time 10 https://api.c-pay.global/health | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+          check "https://api.$CPAY_DOMAIN/health" '"status":"ok"'
+          check "https://$CPAY_DOMAIN/" '<html'
+          DEPLOYED="$(curl -fsS --max-time 10 "https://api.$CPAY_DOMAIN/health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
           echo "version exposee par /health : ${DEPLOYED:-?}"
           case "$REF" in
             v[0-9]*) [ "$DEPLOYED" = "${REF#v}" ] || { echo "::error::/health expose $DEPLOYED, attendu ${REF#v}"; exit 1; } ;;

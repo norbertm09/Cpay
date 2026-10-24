@@ -1,3 +1,6 @@
+# Variables d'environnement de composition (fichier docker/.env, voir docker/env.example) :
+#   CPAY_API_BASE_URL  URL de l'API compilee dans les portails (prod : https://api.c-pay.global,
+#                      dev : https://api.dev.c-pay.global). Sans fichier, la valeur de production s'applique.
 services:
 
   api:
@@ -34,7 +37,7 @@ services:
       dockerfile: docker/Dockerfile.portal
       args:
         APP_DIR: portal/admin
-        REACT_APP_API_BASE_URL: https://api.c-pay.global
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
     image: cplus-admin:${CPLUS_TAG:-2.7.0}
     container_name: cplus-admin-portal
     restart: unless-stopped
@@ -51,7 +54,7 @@ services:
       dockerfile: docker/Dockerfile.portal
       args:
         APP_DIR: portal/merchant
-        REACT_APP_API_BASE_URL: https://api.c-pay.global
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
     image: cplus-merchant:${CPLUS_TAG:-2.7.0}
     container_name: cplus-merchant-portal
     restart: unless-stopped
@@ -105,6 +108,8 @@ services:
     build:
       context: ../portal/partners
       dockerfile: Dockerfile
+      args:
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
     container_name: cplus-partners-portal
     restart: unless-stopped
     ports:
@@ -118,7 +123,7 @@ services:
       dockerfile: docker/Dockerfile.portal
       args:
         APP_DIR: portal/cardholder
-        REACT_APP_API_BASE_URL: https://api.c-pay.global
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
     image: cplus-cardholder:${CPLUS_TAG:-2.7.0}
     container_name: cplus-cardholder-portal
     restart: unless-stopped

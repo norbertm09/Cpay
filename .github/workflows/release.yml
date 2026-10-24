@@ -192,4 +192,4 @@ jobs:
             gh release create "$TAG" --title "C-Pay $VERSION" --notes-file notes.md --verify-tag assets/*
           fi
       - name: Lancer le deploiement production (attend l'approbation de l'environnement)
-        run: gh workflow run deploy.yml --ref "$GITHUB_REF_NAME" -f ref="$GITHUB_REF_NAME" -f skip_backup=false
+        run: gh workflow run deploy.yml --ref "$GITHUB_REF_NAME" -f environment=production -f ref="$GITHUB_REF_NAME" -f skip_backup=false

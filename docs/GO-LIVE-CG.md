@@ -17,9 +17,9 @@ Rappel de l'architecture 2.7 : nginx **hôte** (TLS Let's Encrypt) → conteneur
 
 | Point | Décision |
 |---|---|
-| Ancien serveur | `51.91.98.115`, `/opt/cplus`, conservé **15 jours** en repli puis résilié |
+| Ancien serveur | `51.91.98.115`, `/opt/cplus` : devient le **serveur de développement** (`dev.c-pay.global`, base dédiée, voir `docs/ENVIRONNEMENTS.md`) et héberge toujours Toonah et LincPay ; il n'est **pas** résilié |
 | Nouveau serveur | `137.74.46.246`, mêmes chemins (`/opt/cplus`), déploiement GitHub Actions en `root` |
-| Base de données | **inchangée** (OVH Cloud DB) : ajouter l'IP du nouveau VPS aux IP autorisées, retirer l'ancienne à la fin |
+| Base de données | **inchangée** pour la production (OVH Cloud DB `cplus_db`) : ajouter l'IP du nouveau VPS aux IP autorisées. L'ancien serveur doit être basculé sur une base de **développement** `cplus_db_dev` avant ou au moment de la bascule DNS (`docs/ENVIRONNEMENTS.md` § 3) |
 | Certificats TLS | copiés de l'ancien serveur (valables jusqu'à leur date d'expiration), renouvelés ensuite par `certbot.timer` sur le nouveau |
 | DNS | TTL abaissé à 300 s **24 h avant** la bascule ; bascule des enregistrements A en une fois |
 | Fenêtre | heure creuse (nuit), 30 min d'indisponibilité maximale des paiements |
@@ -179,7 +179,7 @@ Settings → Secrets and variables → Actions (environnement `production`) :
 
 | Secret | Nouvelle valeur |
 |---|---|
-| `OVH_SSH_HOST` | `137.74.46.246` |
+| `OVH_SSH_HOST` | `137.74.46.246` (secret de l'environnement `production` ; l'environnement `development` garde `51.91.98.115`) |
 | `OVH_KNOWN_HOSTS` | `137.74.46.246 ssh-ed25519 AAAA…` — obtenu par `ssh root@137.74.46.246 'echo 137.74.46.246 $(cut -d" " -f1-2 /etc/ssh/ssh_host_ed25519_key.pub)'` |
 | `OVH_SSH_USER`, `OVH_SSH_KEY` | inchangés (`root`, clé `cpay_deploy2`) |
 
@@ -212,19 +212,28 @@ certbot renew --dry-run          # le renouvellement doit réussir sur le nouvea
 Puis depuis le PC : `nslookup api.c-pay.global` doit renvoyer `137.74.46.246`, et les cinq URL de l'étape 1.6
 sans `--resolve`.
 
-### 2.6 [serveur ancien] Éteindre les conteneurs (le serveur reste en repli)
+### 2.6 [serveur ancien] Couper l'ancien serveur de la base de production
+
+Si le serveur de dev n'est pas encore configuré (`docs/ENVIRONNEMENTS.md` § 3), éteindre les conteneurs C-Pay pour
+qu'aucun traitement (règlement, rapprochement, callbacks retardataires) ne touche plus `cplus_db` depuis l'ancien
+serveur ; Toonah et LincPay ne sont pas concernés :
 
 ```sh
 ssh root@51.91.98.115 'cd /opt/cplus/docker && docker compose down'
 ```
 
-Repli en cas de problème : rebasculer le DNS sur `51.91.98.115` et `docker compose up -d` sur l'ancien ;
-la base n'a pas bougé.
+S'il est déjà configuré en dev (`backend/.env` sur `cplus_db_dev`), il n'y a rien à éteindre : désactiver seulement le
+vhost de production devenu inutile (`bash scripts/setup-dev-server.sh --disable-prod-vhost`).
 
-### 2.7 Après 15 jours sans incident
+Repli en cas de problème dans l'heure qui suit : rebasculer le DNS sur `51.91.98.115` et, si les conteneurs ont été
+éteints, `docker compose up -d` sur l'ancien serveur avec son `backend/.env` **de production** ; la base n'a pas bougé.
 
-- [OVH] retirer `51.91.98.115/32` des IP autorisées de la Cloud DB, résilier l'ancien VPS ;
-- [serveur nouveau] retirer les clés obsolètes de `/root/.ssh/authorized_keys` (l'ancienne `cpay_deploy` sans « 2 »).
+### 2.7 Après 48 h sans incident
+
+- [GitHub] supprimer les secrets de dépôt `OVH_SSH_HOST` / `OVH_KNOWN_HOSTS` (seuls ceux des environnements comptent) ;
+- [serveur nouveau] retirer les clés obsolètes de `/root/.ssh/authorized_keys` (l'ancienne `cpay_deploy` sans « 2 ») et
+  effacer l'archive de migration (`shred -u /root/cpay-migration-*.tgz`) ;
+- [serveur ancien] vérifier que plus aucun processus n'utilise les identifiants de `cplus_db` (`grep DB_ /opt/cplus/backend/.env`).
 
 ---
 

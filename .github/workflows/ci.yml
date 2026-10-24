@@ -1,11 +1,11 @@
 # CI C-Pay — voir docs/CI-CD.md
-# Declenchee sur chaque pull request et sur les push vers main et wave-*.
+# Declenchee sur chaque pull request et sur les push vers main, develop et wave-*.
 name: CI
 
 on:
   pull_request:
   push:
-    branches: [main, 'wave-*']
+    branches: [main, develop, 'wave-*']
 
 # Un run par branche/PR : un nouveau push annule le precedent
 concurrency:

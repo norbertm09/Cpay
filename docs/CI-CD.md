@@ -69,7 +69,7 @@ Durée typique : les jobs sont parallèles ; le plus long est `android` (≈ 6-8
 
 | Secret | Obligatoire | Usage |
 |--------|-------------|-------|
-| `OVH_SSH_HOST` | oui | Hôte/IP du VPS OVH (`137.74.46.246` depuis la migration du 2026-10, voir `docs/GO-LIVE-CG.md`). |
+| `OVH_SSH_HOST` | oui | Hôte/IP du serveur, **par environnement** : `137.74.46.246` (`production`), `51.91.98.115` (`development`). |
 | `OVH_SSH_PORT` | non (22) | Port SSH. |
 | `OVH_SSH_USER` | oui | Utilisateur SSH (membre du groupe `docker`, droits d'écriture sur `/opt/cplus`). |
 | `OVH_SSH_KEY` | oui | Clé privée OpenSSH (ed25519 recommandé) dédiée au déploiement ; la clé publique dans `~/.ssh/authorized_keys` du serveur. |
@@ -183,6 +183,13 @@ python3 -c "import yaml,sys;[yaml.safe_load(open(f)) for f in sys.argv[1:]]" .gi
 - `docker/Dockerfile.api` ne copie pas `backend/scripts/` : `deploy.sh` monte ce dossier en lecture seule pour le
   contrôle d'environnement ; les commandes `docker compose run … node scripts/…` citées dans `docs/WAVE-2.md` /
   `docs/WAVE-3.md` nécessitent le même montage (`-v "$PWD/../backend/scripts:/app/scripts:ro"`).
+
+## Deux environnements (depuis le 2026-10-24)
+
+`deploy.yml` déploie vers l'environnement GitHub choisi par la branche : `develop` → `development` (serveur de
+développement, `dev.c-pay.global`), `main` → `production` (`c-pay.global`). Les secrets portent les mêmes noms dans les
+deux environnements ; la variable `CPAY_DOMAIN` de chaque environnement pilote le smoke test. Flux, configuration GitHub
+et mise en place du serveur de dev : `docs/ENVIRONNEMENTS.md`.
 
 ## Déploiement automatique (depuis la vague 5)
 
