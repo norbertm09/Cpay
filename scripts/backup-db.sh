@@ -15,9 +15,19 @@ RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 LABEL=""
 [ "${1:-}" = "--label" ] && LABEL="_${2:-manual}"
 
+# Lecture des seules variables DB_* / PGSSLMODE / BACKUP_REMOTE, ligne a ligne : le fichier n'est PAS execute par le
+# shell (une valeur contenant ( ) # $ ' " ou un espace faisait echouer la sauvegarde, donc le deploiement).
+read_env_var() { # read_env_var <fichier> <NOM> -> valeur (guillemets simples/doubles externes retires), vide si absente
+  sed -n "s/^[[:space:]]*\(export[[:space:]]\+\)\?$2=//p" "$1" | tail -1 | sed -e "s/^'\(.*\)'\s*$/\1/" -e 's/^"\(.*\)"\s*$/\1/'
+}
 if [ -f "$ROOT/backend/.env" ]; then
-  set -a; # shellcheck disable=SC1091
-  . "$ROOT/backend/.env"; set +a
+  for v in DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSL PGSSLMODE BACKUP_REMOTE BACKUP_RETENTION_DAYS; do
+    if [ -z "${!v:-}" ]; then
+      val="$(read_env_var "$ROOT/backend/.env" "$v")"
+      [ -n "$val" ] && printf -v "$v" '%s' "$val" && export "$v"
+    fi
+  done
+  RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-$RETENTION_DAYS}"
 fi
 : "${DB_HOST:?DB_HOST manquant}" "${DB_NAME:?DB_NAME manquant}" "${DB_USER:?DB_USER manquant}" "${DB_PASSWORD:?DB_PASSWORD manquant}"
 command -v pg_dump >/dev/null || { echo "pg_dump absent : apt install postgresql-client" >&2; exit 1; }

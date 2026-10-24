@@ -219,8 +219,9 @@ const buildConfigFromEnv = (key) => {
   return {
   providerKey:key,
   baseUrl:   process.env[`${K}_BASE_URL`]    || process.env[`${K}_URL`],
-  apiKey:    process.env[`${K}_API_KEY`]     || process.env[`${K}_CLIENT_ID`] || (mtn ? mtn.apiKey : undefined),
-  apiSecret: process.env[`${K}_SECRET`]      || process.env[`${K}_CLIENT_SECRET`] || (mtn ? mtn.apiSecret : undefined),
+  // Repli generique sur les variables « collection » documentees (AIRTEL_CG_COLL_CLIENT_ID…), puis MTN COLL
+  apiKey:    process.env[`${K}_API_KEY`]     || process.env[`${K}_CLIENT_ID`] || process.env[`${K}_COLL_CLIENT_ID`] || (mtn ? mtn.apiKey : undefined),
+  apiSecret: process.env[`${K}_SECRET`]      || process.env[`${K}_CLIENT_SECRET`] || process.env[`${K}_COLL_CLIENT_SECRET`] || (mtn ? mtn.apiSecret : undefined),
   subscriptionKey: process.env[`${K}_SUBSCRIPTION_KEY`] || process.env[`${K}_SUB_KEY_PRIMARY`] || (mtn ? mtn.subscriptionKey : undefined),
   targetEnvironment: process.env[`${K}_TARGET_ENV`],
   ...(mtnDisb ? { disbursement: mtnDisb } : {}),
