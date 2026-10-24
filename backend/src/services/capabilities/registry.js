@@ -188,7 +188,12 @@ const providerSupports = (providers, gateway, fn) => {
 const has = (env, name) => !!(env[name] && String(env[name]).trim());
 const hasAll = (env, names) => names.every((n) => has(env, n));
 const isTrue = (v) => ['true', '1', 'yes', 'on'].includes(String(v || '').trim().toLowerCase());
-const gatewayEnvVars = (gateway) => { const K = gateway.toUpperCase(); return [`${K}_API_KEY`, `${K}_CLIENT_ID`]; };
+// Variables d'environnement qui rendent une gateway « configuree » (voir mobilemoney.router.buildConfigFromEnv) ;
+// pour MTN, les variables documentees MTN_<CC>_COLL_API_USER (+ _COLL_API_KEY, _COLL_SUB_KEY_PRIMARY) suffisent.
+const gatewayEnvVars = (gateway) => {
+  const K = gateway.toUpperCase();
+  return K.startsWith('MTN_') ? [`${K}_API_KEY`, `${K}_CLIENT_ID`, `${K}_COLL_API_USER`] : [`${K}_API_KEY`, `${K}_CLIENT_ID`];
+};
 const gatewayConfigured = (gateway, env, facts) =>
   gatewayEnvVars(gateway).some((n) => has(env, n)) || facts.configuredGateways.includes(gateway);
 const hostedCardGateways = (env) => ({ migs: hasAll(env, MIGS_VARS), mpgs: hasAll(env, MPGS_VARS) });
