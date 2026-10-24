@@ -71,6 +71,16 @@ healthcheck) et le hook de rechargement nginx après renouvellement TLS. Il est 
 > affichée dans GitHub → Settings → Deploy keys (lecture seule). Le déploiement automatique fait un `git fetch`
 > sur le serveur : il a besoin de cet accès.
 
+### 1.2 bis [serveur nouveau] Si l'ancien serveur hébergeait d'autres projets
+
+L'export reprend **tout** nginx et **tous** les certificats de l'ancien serveur. Si celui-ci est mutualisé (autres
+projets), retirer leurs traces avec `bash scripts/cleanup-foreign-vhosts.sh --pattern 'autreprojet1|autreprojet2'`
+(`--dry-run` pour prévisualiser). Le script déplace les vhosts étrangers vers `/root/nginx-backups/autres-projets/`,
+ne supprime que les certificats correspondant au motif et jamais ceux dont le nom contient `c-pay`. Incident du
+2026-10-23 : une première version détectait les certificats utilisés sans suivre les liens de `sites-enabled` et a
+supprimé les certificats C-Pay ; ils ont été restaurés depuis l'archive de migration. **Ne supprimer l'archive
+qu'après le premier déploiement réussi.**
+
 ### 1.3 [OVH] Autoriser le nouveau serveur sur la base
 
 Manager OVH → Cloud Databases → instance PostgreSQL → **IP autorisées** → ajouter `137.74.46.246/32`
