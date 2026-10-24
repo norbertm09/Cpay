@@ -195,3 +195,40 @@ describe('provider MTN : jeton et cle d\'abonnement par produit (collection vs d
     expect(token.headers['Ocp-Apim-Subscription-Key']).toBe('coll-sub');
   });
 });
+
+describe('variables MTN_<CC>_COLL_* / _DISB_* reconnues par le routeur et le registre (sans api_configurations)', () => {
+  const KEYS = ['MTN_CG_COLL_API_USER', 'MTN_CG_COLL_API_KEY', 'MTN_CG_COLL_SUB_KEY_PRIMARY', 'MTN_CG_DISB_API_USER', 'MTN_CG_DISB_API_KEY', 'MTN_CG_DISB_SUB_KEY_PRIMARY', 'MTN_CG_BASE_URL', 'MTN_CG_API_KEY'];
+  beforeEach(() => { jest.resetModules(); KEYS.forEach((k) => delete process.env[k]); });
+  afterAll(() => { KEYS.forEach((k) => delete process.env[k]); });
+
+  test('buildConfigFromEnv(mtn_cg) : apiKey = API user, apiSecret = API key, subscriptionKey, bloc disbursement', () => {
+    Object.assign(process.env, { MTN_CG_COLL_API_USER: 'u-coll', MTN_CG_COLL_API_KEY: 'k-coll', MTN_CG_COLL_SUB_KEY_PRIMARY: 'sub-coll',
+      MTN_CG_DISB_API_USER: 'u-disb', MTN_CG_DISB_API_KEY: 'k-disb', MTN_CG_DISB_SUB_KEY_PRIMARY: 'sub-disb', MTN_CG_BASE_URL: 'https://proxy.momoapi.mtn.com' });
+    jest.doMock('../config/database', () => ({ query: jest.fn().mockRejectedValue(new Error('no db')) }));
+    const router = require('../services/mobilemoney/mobilemoney.router');
+    return router.getConfig('mtn_cg').then((cfg) => {
+      expect(cfg).toMatchObject({ providerKey: 'mtn_cg', baseUrl: 'https://proxy.momoapi.mtn.com', apiKey: 'u-coll', apiSecret: 'k-coll', subscriptionKey: 'sub-coll',
+        disbursement: { apiKey: 'u-disb', apiSecret: 'k-disb', subscriptionKey: 'sub-disb' } });
+    });
+  });
+
+  test('sans variables MTN : config vide comme avant, pas de bloc disbursement', () => {
+    jest.doMock('../config/database', () => ({ query: jest.fn().mockRejectedValue(new Error('no db')) }));
+    const router = require('../services/mobilemoney/mobilemoney.router');
+    return router.getConfig('mtn_cg').then((cfg) => {
+      expect(cfg.apiKey).toBeUndefined(); expect(cfg.subscriptionKey).toBeUndefined(); expect(cfg.disbursement).toBeUndefined();
+    });
+  });
+
+  test('registre : MTN_CG_COLL_API_USER rend l\'encaissement MTN CG configure (active) ; MTN_CM_API_KEY reste accepte', () => {
+    const { getCapabilities } = require('../services/capabilities/registry');
+    const impl = { collectPayment() {}, sendPayout() {} };
+    const providers = { getProvider: (gw) => ({ mtn_cg: impl, mtn_cm: impl, airtel_cg: impl })[gw] || null };
+    const env = { MTN_CG_COLL_API_USER: 'u', MTN_CG_COLL_API_KEY: 'k', MTN_CG_COLL_SUB_KEY_PRIMARY: 's', MTN_CM_API_KEY: 'x', CAPABILITY_ENFORCE: 'enforce' };
+    const facts = { cardGatewayByCountry: {}, configuredGateways: [], fundingCurrencies: [], loadedAt: null, source: 'test' };
+    const caps = getCapabilities({ env, facts, providers });
+    const mtnCg = caps.countries.CG.operations.collect.mobile_money.operators.find((o) => o.operator === 'MTN_MOMO');
+    expect(mtnCg.status).toBe('active');
+    expect(caps.countries.CM.operations.collect.mobile_money.operators.find((o) => o.operator === 'MTN_MOMO').status).toBe('active');
+  });
+});

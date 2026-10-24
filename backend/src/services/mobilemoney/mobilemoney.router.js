@@ -203,24 +203,42 @@ const normalize = (raw, operator, gateway = null) => {
 };
 
 // Fallback env vars si pas de config DB
-const buildConfigFromEnv = (key) => ({
+// MTN : les variables documentees (docs/GO-LIVE-CG.md) sont MTN_<CC>_COLL_API_USER / _COLL_API_KEY / _COLL_SUB_KEY_PRIMARY
+// (collection) et MTN_<CC>_DISB_* (disbursement). Elles alimentent ici la config du provider mtn_<cc> :
+// apiKey = API user, apiSecret = API key, subscriptionKey = cle d'abonnement du produit.
+const mtnEnvBlock = (K, product) => {
+  const P = product === 'disbursement' ? 'DISB' : 'COLL';
+  const apiKey = process.env[`${K}_${P}_API_USER`], apiSecret = process.env[`${K}_${P}_API_KEY`];
+  const subscriptionKey = process.env[`${K}_${P}_SUB_KEY_PRIMARY`] || process.env[`${K}_${P}_SUBSCRIPTION_KEY`];
+  return (apiKey || apiSecret || subscriptionKey) ? { apiKey, apiSecret, subscriptionKey } : null;
+};
+const buildConfigFromEnv = (key) => {
+  const K = key.toUpperCase();
+  const mtn = K.startsWith('MTN_') ? mtnEnvBlock(K, 'collection') : null;
+  const mtnDisb = K.startsWith('MTN_') ? mtnEnvBlock(K, 'disbursement') : null;
+  return {
   providerKey:key,
-  baseUrl:   process.env[`${key.toUpperCase()}_BASE_URL`]    || process.env[`${key.toUpperCase()}_URL`],
-  apiKey:    process.env[`${key.toUpperCase()}_API_KEY`]     || process.env[`${key.toUpperCase()}_CLIENT_ID`],
-  apiSecret: process.env[`${key.toUpperCase()}_SECRET`]      || process.env[`${key.toUpperCase()}_CLIENT_SECRET`],
-  merchantId:process.env[`${key.toUpperCase()}_MERCHANT_ID`],
-  serviceCode:process.env[`${key.toUpperCase()}_SERVICE_CODE`],
-  merchantCode:process.env[`${key.toUpperCase()}_MERCHANT_CODE`],
-  payItemId:process.env[`${key.toUpperCase()}_PAY_ITEM_ID`],
-  authBaseUrl:process.env[`${key.toUpperCase()}_AUTH_BASE_URL`],
-  walletProvider:process.env[`${key.toUpperCase()}_WALLET_PROVIDER`],
-  companyCode:process.env[`${key.toUpperCase()}_COMPANY_CODE`],
-  debitAccountNo:process.env[`${key.toUpperCase()}_DEBIT_ACCOUNT_NO`],
-  callbackUrl:process.env[`${key.toUpperCase()}_CALLBACK_URL`],
-  webhookSecret:process.env[`${key.toUpperCase()}_WEBHOOK_SECRET`],
-  webhookToken:process.env[`${key.toUpperCase()}_WEBHOOK_TOKEN`],
-  statusPath:process.env[`${key.toUpperCase()}_STATUS_PATH`],
-});
+  baseUrl:   process.env[`${K}_BASE_URL`]    || process.env[`${K}_URL`],
+  // Repli generique sur les variables « collection » documentees (AIRTEL_CG_COLL_CLIENT_ID…), puis MTN COLL
+  apiKey:    process.env[`${K}_API_KEY`]     || process.env[`${K}_CLIENT_ID`] || process.env[`${K}_COLL_CLIENT_ID`] || (mtn ? mtn.apiKey : undefined),
+  apiSecret: process.env[`${K}_SECRET`]      || process.env[`${K}_CLIENT_SECRET`] || process.env[`${K}_COLL_CLIENT_SECRET`] || (mtn ? mtn.apiSecret : undefined),
+  subscriptionKey: process.env[`${K}_SUBSCRIPTION_KEY`] || process.env[`${K}_SUB_KEY_PRIMARY`] || (mtn ? mtn.subscriptionKey : undefined),
+  targetEnvironment: process.env[`${K}_TARGET_ENV`],
+  ...(mtnDisb ? { disbursement: mtnDisb } : {}),
+  merchantId:process.env[`${K}_MERCHANT_ID`],
+  serviceCode:process.env[`${K}_SERVICE_CODE`],
+  merchantCode:process.env[`${K}_MERCHANT_CODE`],
+  payItemId:process.env[`${K}_PAY_ITEM_ID`],
+  authBaseUrl:process.env[`${K}_AUTH_BASE_URL`],
+  walletProvider:process.env[`${K}_WALLET_PROVIDER`],
+  companyCode:process.env[`${K}_COMPANY_CODE`],
+  debitAccountNo:process.env[`${K}_DEBIT_ACCOUNT_NO`],
+  callbackUrl:process.env[`${K}_CALLBACK_URL`],
+  webhookSecret:process.env[`${K}_WEBHOOK_SECRET`],
+  webhookToken:process.env[`${K}_WEBHOOK_TOKEN`],
+  statusPath:process.env[`${K}_STATUS_PATH`],
+  };
+};
 
 module.exports = {
   processPayment, sendPayout, testProvider, invalidateCache, getConfig, getProvider, webhookUrl,

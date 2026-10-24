@@ -128,6 +128,12 @@ DB_SSL_REJECT_UNAUTHORIZED=true                        # retirer l'ancien false
 # NODE_TLS_REJECT_UNAUTHORIZED=0  ← à SUPPRIMER
 ```
 
+Ces variables suffisent : `MTN_CG_COLL_*` alimentent l'encaissement MTN (provider `mtn_cg` du routeur : API user,
+API key, clé d'abonnement Collection) et `MTN_CG_DISB_*` le retrait ; `AIRTEL_CG_COLL_CLIENT_ID` /
+`AIRTEL_CG_COLL_CLIENT_SECRET` ne sont lus que par l'écran admin : pour le provider `airtel_cg`, renseigner aussi
+`AIRTEL_CG_CLIENT_ID`, `AIRTEL_CG_CLIENT_SECRET` et `AIRTEL_CG_BASE_URL` (mêmes valeurs). `GET /api/v1/public/capabilities`
+doit alors afficher `active` pour MTN MoMo et Airtel Money au Congo.
+
 Les gateways du routeur Mobile Money (`mtn_cg`, `airtel_cg`) se configurent aussi par l'admin
 (`PUT /api/v1/admin/api-configs/<gateway>` : `baseUrl`, `apiKey`, `apiSecret`, `extra_params`) ; pour MTN,
 `extra_params.targetEnvironment` prime sur `MTN_ENV` si vous voulez un réglage par gateway.

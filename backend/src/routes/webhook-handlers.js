@@ -319,7 +319,12 @@ const handleMtnWebhook = async (req, res) => {
 
 const verifyAirtelSignature = async (req, res) => {
   const signature = req.headers['x-airtel-signature'];
-  const secret    = process.env.AIRTEL_WEBHOOK_SECRET;
+  // Secret global (AIRTEL_WEBHOOK_SECRET) ou par pays (AIRTEL_CG_WEBHOOK_SECRET, AIRTEL_CD_WEBHOOK_SECRET…) :
+  // Airtel ne dit pas le pays dans le callback, chaque secret configure est essaye.
+  const secrets = Object.keys(process.env)
+    .filter((k) => /^AIRTEL_(?:[A-Z]{2}_)?WEBHOOK_SECRET$/.test(k) && process.env[k])
+    .map((k) => process.env[k]);
+  const secret = secrets[0];
   if (!secret) {
     logOnce('airtel_secret', 'AIRTEL_WEBHOOK_SECRET non configuré — webhook Airtel refusé (fail-closed)');
     await auditLog({ eventType: 'AIRTEL_WEBHOOK_NO_SECRET', actorType: 'system', ipAddress: req.ip, success: false });
@@ -331,9 +336,10 @@ const verifyAirtelSignature = async (req, res) => {
     res.status(401).json({ error: 'Signature requise', code: 'MISSING_SIGNATURE' });
     return false;
   }
-  const expected = crypto.createHmac('sha256', secret).update(signedPayload(req)).digest('hex');
+  const payload  = signedPayload(req);
   const provided = String(signature).trim().toLowerCase();
-  if (!timingSafeEqualStr(provided, expected)) {
+  const matched  = secrets.some((sec) => timingSafeEqualStr(provided, crypto.createHmac('sha256', sec).update(payload).digest('hex')));
+  if (!matched) {
     await auditLog({ eventType: 'AIRTEL_WEBHOOK_INVALID_SIGNATURE', actorType: 'system', ipAddress: req.ip, success: false });
     res.status(401).json({ error: 'Signature invalide', code: 'INVALID_SIGNATURE' });
     return false;
