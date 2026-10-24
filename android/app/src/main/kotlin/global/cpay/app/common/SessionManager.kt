@@ -15,6 +15,7 @@ object SessionManager {
     private const val KEY_USER_ID = "user_id"
     private const val KEY_NAME    = "user_name"
     private const val KEY_EMAIL   = "user_email"
+    private const val KEY_COUNTRY = "user_country" // pays du marchand (ISO-2) : saisie des numeros locaux sans indicatif
     private const val KEY_TERMINAL_ID   = "terminal_id"
     private const val KEY_TERMINAL_NAME = "terminal_name"
     private const val KEY_TERMINAL_SITE = "terminal_site"
@@ -51,6 +52,11 @@ object SessionManager {
     var userType: String?
         get() = prefs.getString(KEY_TYPE, null)
         set(v) = prefs.edit().putString(KEY_TYPE, v).apply()
+
+    /** Pays du marchand connecte (ISO-2, ex. CG) ; null si inconnu. */
+    var userCountry: String?
+        get() = prefs.getString(KEY_COUNTRY, null)
+        set(v) = prefs.edit().putString(KEY_COUNTRY, v).apply()
 
     var userId: String?
         get() = prefs.getString(KEY_USER_ID, null)
@@ -110,20 +116,21 @@ object SessionManager {
 
     fun saveSession(
         token: String, refreshToken: String?, expiresInSec: Int,
-        userId: String, userName: String, email: String, type: String,
+        userId: String, userName: String, email: String, type: String, country: String? = null,
     ) {
         saveTokens(token, refreshToken, expiresInSec)
         this.userId    = userId
         this.userName  = userName
         this.userEmail = email
         this.userType  = type
+        this.userCountry = country?.takeIf { it.isNotBlank() }?.uppercase()
     }
 
     fun clearSession() {
         // Efface la session utilisateur MAIS preserve l'appairage du device (terminal)
         prefs.edit()
             .remove(KEY_TOKEN).remove(KEY_REFRESH).remove(KEY_EXPIRES)
-            .remove(KEY_PROFILE).remove(KEY_TYPE)
+            .remove(KEY_PROFILE).remove(KEY_TYPE).remove(KEY_COUNTRY)
             .remove(KEY_USER_ID).remove(KEY_NAME).remove(KEY_EMAIL)
             .commit()
     }

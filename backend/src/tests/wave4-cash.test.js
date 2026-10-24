@@ -766,3 +766,36 @@ describe('8. Journal /merchant/cash/history et export CSV', () => {
     expect(sql).toMatch(/LIMIT 10000/);
   });
 });
+
+describe('Caisse (pilote CG) : numéro local sans indicatif et référence automatique', () => {
+  beforeEach(() => mockDbQuery.mockImplementation(dbRouter(baseHandlers(merchant({ currency: 'XAF', country: 'CG' })))));
+
+  test('numéro local congolais (06…) accepté grâce au pays du marchand ; référence ENC-AAMMJJ-XXXXX générée et renvoyée', async () => {
+    mockProcess.mockResolvedValue({ success: true, txnId: 'T-CG', status: 'pending', message: 'ok' });
+    const res = await request(app).post('/merchant/cash/collect').set(bearer(merchantToken()))
+      .send({ amount: 500, method: 'mobile_money', customerPhone: '06 612 34 56' });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ txnId: 'T-CG', country: 'CG', operator: 'mtn_momo' });
+    expect(res.body.reference).toMatch(/^ENC-\d{6}-[A-HJ-NP-Z2-9]{5}$/);
+    expect(mockProcess.mock.calls[0][0].customerPhone).toBe('+242066123456');
+    expect(mockProcess.mock.calls[0][0].description).toBe(res.body.reference);
+  });
+
+  test('référence fournie par la caisse conservée telle quelle (tronquée à 40)', async () => {
+    mockProcess.mockResolvedValue({ success: true, txnId: 'T-CG2', status: 'pending' });
+    const res = await request(app).post('/merchant/cash/collect').set(bearer(merchantToken()))
+      .send({ amount: 500, method: 'mobile_money', customerPhone: '066123456', reference: ' FACT-2026-001 ', description: 'Vente' });
+    expect(res.body.reference).toBe('FACT-2026-001');
+    expect(mockProcess.mock.calls[0][0].description).toBe('FACT-2026-001 — Vente');
+  });
+
+  test('helpers : generateReference / referenceFromDescription', () => {
+    const cashSvc = require('../services/cash/cash.service');
+    const r = cashSvc.generateReference('ENC', new Date('2026-11-01T10:00:00Z'));
+    expect(r).toMatch(/^ENC-261101-[A-HJ-NP-Z2-9]{5}$/);
+    expect(cashSvc.referenceFromDescription('ENC-261101-ABCDE — Vente comptoir')).toBe('ENC-261101-ABCDE');
+    expect(cashSvc.referenceFromDescription('FACT-001')).toBe('FACT-001');
+    expect(cashSvc.referenceFromDescription('Vente comptoir sans ref')).toBeNull();
+    expect(cashSvc.referenceFromDescription(null)).toBeNull();
+  });
+});

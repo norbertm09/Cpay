@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.chip.Chip
 import global.cpay.app.R
 import global.cpay.app.common.ApiClient
+import global.cpay.app.common.SessionManager
 import global.cpay.app.common.ApiErrors
 import global.cpay.app.common.CashCollectRequest
 import global.cpay.app.common.CashLabels
@@ -116,7 +117,10 @@ class CollectCustomerFragment : Fragment() {
         if (phone == lastDetectedPhone && detection != null) { detection?.let { renderDetection(it) }; return }
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val r = ApiClient.api.detectPhone(mapOf("phone" to phone))
+                // Pays du marchand : un numero LOCAL (06 XXX XX XX) est accepte sans indicatif, l'operateur est deduit du prefixe
+                val body = mutableMapOf("phone" to phone)
+                SessionManager.userCountry?.let { body["country"] = it }
+                val r = ApiClient.api.detectPhone(body)
                 if (_b == null) return@launch
                 val d = r.body() ?: PhoneDetection(success = false, error = ApiErrors.message(r, getString(R.string.collect_detect_unknown)))
                 lastDetectedPhone = phone

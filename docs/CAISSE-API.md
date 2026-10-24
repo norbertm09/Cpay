@@ -106,6 +106,18 @@ toujours `null` : le numéro du client n'est pas conservé en clair.
   Un `428` laisse la fenêtre ouverte pour renouveler la confirmation ; aucun secret n'est persisté.
   Un compte refusé reste inutilisable : le propriétaire peut le retirer puis soumettre des coordonnées corrigées.
 
+## 3 bis. Saisie du numéro et référence (pilote CG, 2026-10-24)
+
+- **Numéro local sans indicatif** : `POST /merchant/cash/collect` accepte `customerPhone` au format local du pays du
+  marchand (`06 612 34 56` au Congo) ; le pays du compte marchand fournit l'indicatif et le préfixe détermine
+  l'opérateur (table `MOBILE_MONEY_OPERATORS` de `detection.engine.js`). `POST /api/v1/detect/phone` accepte le même
+  numéro local si le corps contient `country` (ISO-2) : les portails et l'app Android envoient le pays du marchand.
+  Un numéro international (`+242…`) reste accepté partout.
+- **Référence automatique** : si `reference` est absent, le serveur génère `ENC-AAMMJJ-XXXXX` (alphabet sans 0/O/1/I),
+  la place en préfixe de la description (`ENC-… — libellé`) et la renvoie dans `reference` (POST et
+  `GET /collect/:txnId`). Une référence fournie (facture, ticket) est conservée, tronquée à 40 caractères. Le portail
+  marchand pré-remplit le champ avec une proposition modifiable.
+
 ## 4. Retirer — `POST /merchant/cash/withdraw`
 ```json
 { "amount": 50000, "description?": "Caisse du soir", "confirm": { "code": "123456" } }

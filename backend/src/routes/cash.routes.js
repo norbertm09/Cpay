@@ -111,7 +111,9 @@ router.post('/collect', merchantAuth, idempotency, async (req, res) => {
   if (requestedCurrency && requestedCurrency !== merchantCurrency) {
     return fail(res, 422, `Devise ${requestedCurrency} différente de celle du marchand (${merchantCurrency})`, 'CURRENCY_MISMATCH', { currency: requestedCurrency, merchantCurrency });
   }
-  const desc = [reference, description].filter(Boolean).join(' — ') || null;
+  // Référence : fournie par la caisse (facture, ticket…) ou générée ici (ENC-AAMMJJ-XXXXX)
+  const ref = String(reference || '').trim().slice(0, 40) || cash.generateReference('ENC');
+  const desc = [ref, description].filter(Boolean).join(' — ') || null;
 
   // ── Carte : lien de paiement hébergé si une passerelle carte est configurée pour le pays ──
   if (method === 'card') {
@@ -119,7 +121,7 @@ router.post('/collect', merchantAuth, idempotency, async (req, res) => {
     if (!gateway) return featureDisabled(res, { method: 'card', reason: 'Aucune passerelle carte configurée pour ce pays' });
     const link = await createCardPayLink({ merchantId, amount, currency: merchantCurrency, description: desc, gateway });
     return res.status(201).json({
-      txnId: null, status: 'pending', method: 'card', gateway, amount, currency: merchantCurrency,
+      txnId: null, status: 'pending', method: 'card', gateway, amount, currency: merchantCurrency, reference: ref,
       payLink: { shortId: link.short_id, shortUrl: link.short_url, expiresAt: link.expires_at },
       message: 'Lien de paiement carte créé — le client paie sur la page hébergée',
     });
@@ -156,7 +158,7 @@ router.post('/collect', merchantAuth, idempotency, async (req, res) => {
   }
   const { fee, net } = cash.computeFee(amount, await cash.feeRate(merchantId, 'collect', operatorCode));
   res.status(201).json({
-    txnId: result.txnId, status: result.status || 'pending', method: 'mobile_money',
+    txnId: result.txnId, status: result.status || 'pending', method: 'mobile_money', reference: ref,
     operator: operatorCode, operatorLabel, country: d.country, currency: merchantCurrency,
     amount, fee, net, feeEstimated: true,
     statusUrl: `/api/v1/merchant/cash/collect/${result.txnId}`,
@@ -188,7 +190,7 @@ router.get('/collect/:txnId', merchantAuth, async (req, res) => {
     fee: Number(t.fee_amount || 0), net: Number(t.net_amount || 0), currency: t.currency,
     method: t.payment_method, operator: operatorCode, operatorLabel: operatorCode ? cash.operatorLabel(operatorCode) : null,
     country: t.detected_country || null, customerPhone: null, // le numéro client n'est pas conservé en clair
-    reference: t.gateway_order_id || null, description: t.description || null, message: t.response_message || null,
+    reference: cash.referenceFromDescription(t.description) || t.gateway_order_id || null, description: t.description || null, message: t.response_message || null,
     createdAt: t.initiated_at, finalizedAt: t.completed_at || null,
   });
 });
