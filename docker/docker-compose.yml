@@ -91,7 +91,7 @@ services:
       - ./certbot/www:/var/www/certbot
     command: >
       certonly --webroot -w /var/www/certbot
-      --email ${CERTBOT_EMAIL}
+      --email ${CERTBOT_EMAIL:-admin@c-pay.global}
       --agree-tos --no-eff-email
       -d c-pay.global
       -d api.c-pay.global

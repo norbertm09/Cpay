@@ -21,13 +21,27 @@ const targetEnv = (config) => resolveMtnEnv({
   baseUrl: config && config.baseUrl,
 }).targetEnvironment;
 
-const getAccessToken = async (config) => {
-  const creds = Buffer.from(`${config.apiKey}:${config.apiSecret}`).toString('base64');
-  const result = await httpRequest('POST', config.baseUrl, '/collection/token/',
+// product : 'collection' (encaissement) | 'disbursement' (retrait). Chez MTN chaque produit a son propre jeton ;
+// les identifiants de disbursement (extra_params.disbursement.{apiKey,apiSecret,subscriptionKey}) priment s'ils existent.
+const subKey = (config, product = 'collection') => {
+  const c = (product === 'disbursement' && config.disbursement && typeof config.disbursement === 'object')
+    ? { ...config, ...config.disbursement } : config;
+  return c.subscriptionKey || c.apiKey;
+};
+const getAccessToken = async (config, product = 'collection') => {
+  const c = (product === 'disbursement' && config.disbursement && typeof config.disbursement === 'object')
+    ? { ...config, ...config.disbursement } : config;
+  const creds = Buffer.from(`${c.apiKey}:${c.apiSecret}`).toString('base64');
+  const result = await httpRequest('POST', config.baseUrl, `/${product}/token/`,
     null, {
       'Authorization': `Basic ${creds}`,
-      'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey,
+      'Ocp-Apim-Subscription-Key': c.subscriptionKey || c.apiKey,
+      // Depuis octobre 2026, MTN exige X-Target-Environment sur TOUTES les requetes, jeton compris
+      'X-Target-Environment': targetEnv(config),
     });
+  if (!result.body?.access_token) {
+    logger.warn('MTN token refuse', { status: result.statusCode, product, providerKey: config.providerKey, body: typeof result.body === 'object' ? JSON.stringify(result.body).slice(0, 300) : String(result.body).slice(0, 300) });
+  }
   return result.body?.access_token;
 };
 
@@ -66,7 +80,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
 };
 
 const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
-  const token = await getAccessToken(config);
+  const token = await getAccessToken(config, 'disbursement');
   const ref   = txnId;
 
   const result = await httpRequest('POST', config.baseUrl,
@@ -82,7 +96,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
       'Authorization':             `Bearer ${token}`,
       'X-Reference-Id':            ref,
       'X-Target-Environment':      targetEnv(config),
-      'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey,
+      'Ocp-Apim-Subscription-Key': subKey(config, 'disbursement'),
       'Content-Type':              'application/json',
     }
   );
@@ -122,7 +136,7 @@ const pollDisbursementStatus = async (config, ref, token, sleepMs = 5000) => {
   const r = await httpRequest('GET', config.baseUrl,
     `/disbursement/v1_0/transfer/${ref}`,
     null,
-    { 'Authorization': `Bearer ${token}`, 'X-Target-Environment': targetEnv(config), 'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey }
+    { 'Authorization': `Bearer ${token}`, 'X-Target-Environment': targetEnv(config), 'Ocp-Apim-Subscription-Key': subKey(config, 'disbursement') }
   );
   const status = r.body?.status;
   if (status === 'SUCCESSFUL') {
@@ -138,14 +152,14 @@ const pollDisbursementStatus = async (config, ref, token, sleepMs = 5000) => {
 // ─── Statut reel (webhook / reconciliation) ───────────────────────
 // Retourne le statut tel que renvoye par MTN : { status, amount, currency, financialTransactionId, reason }
 const getStatusGeneric = async (config, product, ref) => {
-  const token = await getAccessToken(config);
+  const token = await getAccessToken(config, product === 'disbursement' ? 'disbursement' : 'collection');
   const path  = product === 'disbursement'
     ? `/disbursement/v1_0/transfer/${ref}`
     : `/collection/v1_0/requesttopay/${ref}`;
   const r = await httpRequest('GET', config.baseUrl, path, null, {
     'Authorization':             `Bearer ${token}`,
     'X-Target-Environment':      targetEnv(config),
-    'Ocp-Apim-Subscription-Key': config.subscriptionKey || config.apiKey,
+    'Ocp-Apim-Subscription-Key': subKey(config, product === 'disbursement' ? 'disbursement' : 'collection'),
   });
   if (r.statusCode >= 400 || !r.body || typeof r.body !== 'object') {
     const err = new Error(`MTN status query failed: HTTP ${r.statusCode}`);

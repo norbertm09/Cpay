@@ -88,6 +88,8 @@ const getToken = async (product) => {
     headers: {
       'Authorization': `Basic ${cred}`,
       'Ocp-Apim-Subscription-Key': cfg.primaryKey,
+      // Depuis octobre 2026, MTN exige X-Target-Environment sur TOUTES les requetes, jeton compris
+      'X-Target-Environment': TARGET_ENV,
       'Content-Length': '0',
       'Host': MTN_HOST,
     },
@@ -132,6 +134,7 @@ const requestToPay = async ({ amount, phone, description, externalId }) => {
       'Authorization':             `Bearer ${token}`,
       'X-Reference-Id':            refId,
       'X-Target-Environment':      TARGET_ENV,
+      ...(CONFIG.callbackUrl ? { 'X-Callback-Url': CONFIG.callbackUrl } : {}),
       'Ocp-Apim-Subscription-Key': CONFIG.collections.primaryKey,
       'Content-Type':              'application/json',
       'Content-Length':            Buffer.byteLength(body),
