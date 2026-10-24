@@ -192,7 +192,7 @@ const isTrue = (v) => ['true', '1', 'yes', 'on'].includes(String(v || '').trim()
 // pour MTN, les variables documentees MTN_<CC>_COLL_API_USER (+ _COLL_API_KEY, _COLL_SUB_KEY_PRIMARY) suffisent.
 const gatewayEnvVars = (gateway) => {
   const K = gateway.toUpperCase();
-  return K.startsWith('MTN_') ? [`${K}_API_KEY`, `${K}_CLIENT_ID`, `${K}_COLL_API_USER`] : [`${K}_API_KEY`, `${K}_CLIENT_ID`];
+  return K.startsWith('MTN_') ? [`${K}_API_KEY`, `${K}_CLIENT_ID`, `${K}_COLL_API_USER`] : [`${K}_API_KEY`, `${K}_CLIENT_ID`, `${K}_COLL_CLIENT_ID`];
 };
 const gatewayConfigured = (gateway, env, facts) =>
   gatewayEnvVars(gateway).some((n) => has(env, n)) || facts.configuredGateways.includes(gateway);
