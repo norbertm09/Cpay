@@ -8,8 +8,22 @@ import { errorMessage } from '../../utils/errors';
 import { OPERATOR_LABELS, WALLET_OPERATORS, opLabel, countryName } from '../../utils/labels';
 import { printDoc } from '../../utils/actions';
 
+// Saisie d'un numéro LOCAL (sans indicatif) : exemple et aide selon le pays du marchand.
+export const PHONE_PLACEHOLDERS = { CG: '06 XXX XX XX', CM: '6XX XXX XXX', CI: '07 XX XX XX XX', SN: '77 XXX XX XX', CD: '08X XXX XXXX', GA: '07 XX XX XX', TD: '6X XX XX XX', CF: '7X XX XX XX', GQ: '222 XXX XXX' };
+export const phonePlaceholder = (country) => PHONE_PLACEHOLDERS[String(country || '').toUpperCase()] || '+XXX XX XXX XX XX';
+const CALLING_CODES = { CG: '242', CM: '237', CI: '225', SN: '221', CD: '243', GA: '241', TD: '235', CF: '236', GQ: '240' };
+export const phoneHint = (country) => country ? `Numéro local du client, sans indicatif (+${CALLING_CODES[String(country).toUpperCase()] || '…'} ajouté automatiquement). L'opérateur est reconnu d'après le préfixe.` : 'Numéro au format international (+242 …).';
+// Référence d'encaissement proposée par défaut (le serveur en génère une si le champ est vide) : ENC-AAMMJJ-XXXXX
+export const suggestReference = (prefix = 'ENC') => {
+  const d = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let x = '';
+  const buf = new Uint8Array(5); (window.crypto || {}).getRandomValues ? window.crypto.getRandomValues(buf) : buf.forEach((_, i) => { buf[i] = Math.floor(Math.random() * 256); });
+  for (let i = 0; i < 5; i++) x += A[buf[i] % A.length];
+  return `${prefix}-${d}-${x}`;
+};
+
 // Détection d'opérateur en direct (debounce 400 ms, annulation des appels précédents).
-export const usePhoneDetection = (phone, enabled = true) => {
+export const usePhoneDetection = (phone, enabled = true, country = undefined) => {
   const [detect, setDetect] = useState(null);
   const [detecting, setDetecting] = useState(false);
   useEffect(() => {
@@ -18,13 +32,13 @@ export const usePhoneDetection = (phone, enabled = true) => {
     const ctrl = new AbortController();
     const h = setTimeout(() => {
       setDetecting(true);
-      detectApi.phone(phone.trim(), ctrl.signal)
+      detectApi.phone(phone.trim(), ctrl.signal, country)
         .then(r => setDetect(r.data))
         .catch(err => { if (!ctrl.signal.aborted) setDetect(err.response?.data || { success: false, error: 'Détection indisponible' }); })
         .finally(() => { if (!ctrl.signal.aborted) setDetecting(false); });
     }, 400);
     return () => { clearTimeout(h); ctrl.abort(); };
-  }, [phone, enabled]);
+  }, [phone, enabled, country]);
   return { detect, detecting };
 };
 
@@ -44,7 +58,7 @@ export const WalletForm = ({ user, initial, onSaved, onCancel }) => {
   const [operator, setOperator] = useState(initial?.operator || '');
   const [phone, setPhone] = useState(initial?.phone || '');
   const [error, setError] = useState(null);
-  const { detect } = usePhoneDetection(phone);
+  const { detect } = usePhoneDetection(phone, true, user?.country);
   useEffect(() => {
     const op = String(detect?.operator || '').toLowerCase();
     if (detect?.success && WALLET_OPERATORS.includes(op)) setOperator(o => o || op);

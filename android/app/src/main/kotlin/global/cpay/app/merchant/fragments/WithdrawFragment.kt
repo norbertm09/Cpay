@@ -15,6 +15,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import global.cpay.app.R
 import global.cpay.app.common.ApiClient
+import global.cpay.app.common.SessionManager
 import global.cpay.app.common.ApiError
 import global.cpay.app.common.ApiErrors
 import global.cpay.app.common.CashLabels
@@ -200,7 +201,7 @@ class WithdrawFragment : Fragment() {
         val phone = b.etWalletPhone.text.toString().trim()
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val d = ApiClient.api.detectPhone(mapOf("phone" to phone)).body() ?: return@launch
+                val d = ApiClient.api.detectPhone(buildMap { put("phone", phone); SessionManager.userCountry?.let { put("country", it) } }).body() ?: return@launch
                 if (_b == null) return@launch
                 walletDetection = d
                 if (d.success) {

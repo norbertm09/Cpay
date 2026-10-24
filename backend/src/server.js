@@ -512,9 +512,11 @@ app.post('/api/v1/webhooks/paymenthub', asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/v1/detect/phone', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false }), (req, res) => {
-  const { phone } = req.body;
+  const { phone, country } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'phone requis', code: 'PHONE_REQUIRED' });
-  res.json(detectFromPhone(phone));
+  // country (ISO-2, facultatif) : pays du marchand → un numéro LOCAL (06 XXX XX XX) est accepté sans indicatif
+  const defaultCountry = /^[A-Za-z]{2}$/.test(String(country || '')) ? String(country).toUpperCase() : undefined;
+  res.json(detectFromPhone(phone, defaultCountry ? { defaultCountry } : {}));
 });
 
 app.post('/internal/settlement/run', asyncHandler(async (req, res) => {

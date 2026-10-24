@@ -70,6 +70,22 @@ const OPERATOR_ALIASES = {
   moov: 'moov_money', free: 'free_money', mpesa: 'vodacom_mpesa', vodacom: 'vodacom_mpesa',
   africell: 'africell_money', express_union_mobile: 'express_union', eu: 'express_union',
 };
+// ─── Référence d'encaissement ─────────────────────────────────────
+// Générée côté serveur quand la caisse n'en fournit pas : ENC-AAMMJJ-XXXXX (alphabet sans 0/O/1/I), stockée en
+// préfixe de description (« ENC-… — libellé ») et renvoyée dans la réponse ; relue par referenceFromDescription.
+const REF_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const generateReference = (prefix = 'ENC', now = new Date()) => {
+  const d = now.toISOString().slice(2, 10).replace(/-/g, '');
+  const bytes = require('crypto').randomBytes(5);
+  let suffix = ''; for (let i = 0; i < 5; i++) suffix += REF_ALPHABET[bytes[i] % REF_ALPHABET.length];
+  return `${String(prefix).toUpperCase()}-${d}-${suffix}`;
+};
+const REF_IN_DESC = /^([A-Z0-9][A-Z0-9._\/-]{2,39})(?:\s+—\s+|$)/;
+const referenceFromDescription = (description) => {
+  const m = REF_IN_DESC.exec(String(description || '').trim());
+  return m ? m[1] : null;
+};
+
 const normalizeOperatorCode = (v) => {
   if (v === undefined || v === null || v === '') return null;
   const s = String(v).trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -1087,6 +1103,7 @@ async function historyCsv(merchantId, { from, to, type } = {}) {
 }
 
 module.exports = {
+  generateReference, referenceFromDescription,
   // règles
   TRANSFER_MIN, FUNDING_EXPIRES_DAYS, FEE_RATES, CASH_LIMITS, CASH_LIMITS_DEFAULT, withdrawDailyLimit,
   OUT_NOT_FAILED, OUT_INFLIGHT, UNCERTAIN, MANUAL_QUEUE, CANCELLABLE, REJECTABLE, FINAL, HISTORY_TYPES,

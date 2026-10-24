@@ -1,5 +1,11 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-caisse-pilote (2026-10-24) — demandes du pilote Congo
+Saisie du numero client en format local sans indicatif : le pays du marchand est transmis a la detection
+(`POST /detect/phone` accepte `country`), portail marchand (exemple et aide par pays) et app Android (pays memorise a
+la connexion). Reference d'encaissement automatique `ENC-AAMMJJ-XXXXX` generee par le serveur si absente, renvoyee
+dans les reponses et relue dans l'historique ; champ pre-rempli et modifiable dans le portail. 822 tests backend.
+
 ## 2.7.0-mtn-production-host (2026-10-24) — hote de production MTN
 L'API MTN MoMo de production est servie sur https://momoapi.momo.africa depuis octobre 2026 : nouveau defaut de
 `config/mtn-env.js`, l'ancien proxy.momoapi.mtn.com reste accepte en surcharge mais signale comme obsolete. Cle

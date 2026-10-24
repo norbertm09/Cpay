@@ -34,6 +34,7 @@ object AuthFlow {
             userName     = user.displayName,
             email        = user.email ?: fallbackEmail,
             type         = userType,
+            country      = user.country,
         )
         enterApp(activity, userType, auth.mustChangePassword)
         return true

@@ -152,7 +152,8 @@ export const cashApi = {
 
 // Détection publique d'opérateur (pas d'authentification, pas de cookie).
 export const detectApi = {
-  phone: (phone, signal) => axios.post(`${apiBaseUrl}/api/v1/detect/phone`, { phone }, { signal }),
+  // country = pays du marchand : permet la saisie d'un numéro local sans indicatif (06 XXX XX XX au Congo)
+  phone: (phone, signal, country) => axios.post(`${apiBaseUrl}/api/v1/detect/phone`, country ? { phone, country } : { phone }, { signal }),
 };
 
 // Capacités réelles par pays (registre serveur, vague 6) : public, sans cookie, cache 60 s côté API.
