@@ -6,8 +6,13 @@
 
   var API_BASE = (function () {
     var m = document.querySelector('meta[name="cpay-api"]');
-    var v = m && m.getAttribute('content');
-    return (v || 'https://api.c-pay.global').replace(/\/+$/, '');
+    var v = (m && m.getAttribute('content')) || 'https://api.c-pay.global';
+    // Environnements : sur un sous-domaine (dev.c-pay.global), l'API est api.<sous-domaine>
+    var host = String(window.location.hostname || '').toLowerCase().replace(/^www\./, '');
+    if (/^[a-z0-9-]+\.c-pay\.global$/.test(host) && host !== 'c-pay.global' && host.indexOf('api.') !== 0) {
+      v = 'https://api.' + host;
+    }
+    return v.replace(/\/+$/, '');
   })();
 
   var ROUTES = {

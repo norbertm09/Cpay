@@ -20,7 +20,15 @@
     var v = m && m.getAttribute('content');
     return v ? v : dflt;
   }
-  var API_BASE = meta('cpay-api', 'https://api.c-pay.global').replace(/\/+$/, '');
+  var API_BASE = (function () {
+    var v = meta('cpay-api', 'https://api.c-pay.global');
+    // Environnements : sur un sous-domaine (dev.c-pay.global), l'API est api.<sous-domaine>
+    var host = String(window.location.hostname || '').toLowerCase().replace(/^www\./, '');
+    if (/^[a-z0-9-]+\.c-pay\.global$/.test(host) && host !== 'c-pay.global' && host.indexOf('api.') !== 0) {
+      v = 'https://api.' + host;
+    }
+    return v.replace(/\/+$/, '');
+  })();
   var ASSISTANT_PATH = meta('cpay-assistant-path', '/api/v1/public/assistant').replace(/\/+$/, '');
   var BASE = API_BASE + ASSISTANT_PATH;
   var ROUTES = {
