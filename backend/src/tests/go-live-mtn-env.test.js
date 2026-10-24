@@ -16,8 +16,14 @@ describe('config/mtn-env — resolution unique sandbox/production', () => {
   test('MTN_ENV=production derive mtncongo et l\'hote de production pour CG', () => {
     const r = resolveMtnEnv({ country: 'CG', env: { MTN_ENV: 'production' } });
     expect(r).toMatchObject({ mode: 'production', isSandbox: false, targetEnvironment: 'mtncongo', baseUrl: PRODUCTION_BASE_URL });
-    expect(r.host).toBe('proxy.momoapi.mtn.com');
+    expect(r.host).toBe('momoapi.momo.africa');
     expect(r.warnings).toEqual([]);
+  });
+
+  test('ancien hote proxy.momoapi.mtn.com en production : accepte mais signale comme obsolete', () => {
+    const r = resolveMtnEnv({ country: 'CG', env: { MTN_ENV: 'production', MTN_CG_BASE_URL: 'https://proxy.momoapi.mtn.com' } });
+    expect(r.host).toBe('proxy.momoapi.mtn.com');
+    expect(r.warnings.some((w) => /obsolete/.test(w))).toBe(true);
   });
 
   test('cibles de production par pays (CM, CI) ; pays inconnu -> avertissement', () => {
@@ -29,10 +35,10 @@ describe('config/mtn-env — resolution unique sandbox/production', () => {
   });
 
   test('MTN_CG_ENV (historique) prime sur MTN_ENV ; MTN_CG_TARGET_ENV et MTN_CG_BASE_URL explicites sont respectes', () => {
-    const r = resolveMtnEnv({ country: 'CG', env: { MTN_ENV: 'sandbox', MTN_CG_ENV: 'production', MTN_CG_TARGET_ENV: 'mtncongo', MTN_CG_BASE_URL: 'https://proxy.momoapi.mtn.com/' } });
+    const r = resolveMtnEnv({ country: 'CG', env: { MTN_ENV: 'sandbox', MTN_CG_ENV: 'production', MTN_CG_TARGET_ENV: 'mtncongo', MTN_CG_BASE_URL: 'https://momoapi.momo.africa/' } });
     expect(r.mode).toBe('production');
     expect(r.targetEnvironment).toBe('mtncongo');
-    expect(r.baseUrl).toBe('https://proxy.momoapi.mtn.com');
+    expect(r.baseUrl).toBe('https://momoapi.momo.africa');
     expect(r.warnings).toEqual([]);
   });
 
@@ -78,7 +84,7 @@ describe('rails/mtn-momo.client et providers/mtn.provider utilisent la meme reso
     expect(mtn.CONFIG.targetEnvironment).toBe('mtncongo');
     await mtn.requestToPay({ amount: 100, phone: '061234567', description: 'test', externalId: 'x' });
     const rtp = captured.find((o) => String(o.path).includes('requesttopay'));
-    expect(rtp.hostname).toBe('proxy.momoapi.mtn.com');
+    expect(rtp.hostname).toBe('momoapi.momo.africa');
     expect(rtp.headers['X-Target-Environment']).toBe('mtncongo');
   });
 
