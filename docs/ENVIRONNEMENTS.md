@@ -64,7 +64,11 @@ Empreinte d'un serveur : `ssh root@<ip> 'echo <ip> $(cut -d" " -f1-2 /etc/ssh/ss
 - `develop` : « Require status checks to pass » seulement.
 - Créer `develop` depuis `main` une fois cette PR fusionnée et l'environnement `development` configuré :
   `git checkout main && git pull && git checkout -b develop && git push -u origin develop`.
-  Changer la branche par défaut du dépôt en `develop` (Settings → General) pour que les PR la ciblent par défaut.
+- **La branche par défaut du dépôt doit rester `main`.** Un workflow déclenché par `workflow_run` s'exécute toujours
+  sur la branche par défaut ; si c'est `develop`, la règle « Deployment branches » de l'environnement `production`
+  (`main` et `v*`) rejette tous les déploiements automatiques de production (« Branch "develop" is not allowed to
+  deploy to Production »), constaté le 2026-10-24. Les PR de fonctionnalités ciblent donc `develop` **explicitement**
+  (menu « base » à la création de la PR) ; la CI refuse de toute façon rien côté `main`, protégé par ses règles.
 
 ## 3. Mise en place du serveur de développement (ancien serveur)
 
@@ -113,7 +117,7 @@ base de production.
 
 | Date | Action |
 |---|---|
-| J | fusion de cette PR ; environnement `development` + variable `CPAY_DOMAIN` sur les deux environnements ; branche `develop` |
+| J | fusion de cette PR ; environnement `development` + variable `CPAY_DOMAIN` sur les deux environnements ; branche `develop` (branche par défaut : `main`) |
 | J | base `cplus_db_dev`, DNS `*.dev.c-pay.global`, `setup-dev-server.sh`, `backend/.env` de dev, déploiement dev |
 | J+1 | bascule DNS `c-pay.global` → 137.74.46.246 (GO-LIVE-CG § 2), identifiants MTN/Airtel de production sur la prod |
 | J+1 → 31.10 | pilote interne sur la prod (checklist GO-LIVE-CG § 3.4), développements courants sur `develop` |

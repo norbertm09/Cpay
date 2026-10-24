@@ -5,6 +5,8 @@
 #   production   ← branche main     (serveur de production, « required reviewers » recommandes)
 # Declencheurs : CI verte sur develop/main (workflow_run), a la main (workflow_dispatch, choix de
 # l'environnement), release publiee (production).
+# La branche par defaut du depot doit rester `main` : un run workflow_run s'execute sur la branche par defaut et la
+# regle « Deployment branches » de l'environnement production (main, v*) rejette toute autre branche.
 # Variables d'environnement GitHub (Settings → Environments → <env> → Variables) :
 #   CPAY_DOMAIN  domaine de l'environnement (c-pay.global | dev.c-pay.global) — smoke test et URL
 name: Deploy
