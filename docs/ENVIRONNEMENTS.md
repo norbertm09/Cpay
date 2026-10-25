@@ -92,7 +92,7 @@ base de production.
    `PAY_LINK_BASE_URL`, `MTN_CG_CALLBACK_URL` (valeurs affichées par le script), `MTN_ENV=sandbox`,
    `AIRTEL_CG_ENV=sandbox`, et de **nouvelles valeurs** pour `WEBHOOK_PATH_SECRET` et les secrets JWT / chiffrement
    (`openssl rand -hex 32`) : les secrets de dev ne doivent pas être ceux de la production.
-5. `cd /opt/cplus && ./scripts/deploy.sh` : les migrations créent le schéma de `cplus_db_dev`, les portails sont recompilés
+5. `cd /opt/cplus && ./scripts/deploy.sh` : les migrations créent le schéma de `cplus_db_dev` (rejeu intégral vérifié en CI par `migrations-fresh-db.test.js`), les portails sont recompilés
    avec l'URL `api.dev`. Puis créer le premier admin de dev (`scripts/create-first-admin.js`) et un marchand de test.
 6. Vérifier : `https://dev.c-pay.global`, `https://api.dev.c-pay.global/health`, connexion marchand sur
    `https://merchant.dev.c-pay.global`.
