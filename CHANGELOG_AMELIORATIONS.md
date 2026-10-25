@@ -1,5 +1,11 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-migrations-base-vierge (2026-10-25) — initialisation d'un nouvel environnement
+La migration 007 creait la vue `v_manual_compensation` sur des tables historiques de production absentes des migrations
+(`card_transactions`, `bank_transfers`) : echec sur une base vierge (serveur de developpement). Vue conditionnee a
+l'existence des tables ; `migrate.js` accepte l'ancien checksum de 007 pour les bases deja migrees (production
+inchangee) ; test de rejeu integral des 12 migrations sur PGlite en CI. 824 tests.
+
 ## 2.7.0-caisse-pilote (2026-10-24) — demandes du pilote Congo
 Saisie du numero client en format local sans indicatif : le pays du marchand est transmis a la detection
 (`POST /detect/phone` accepte `country`), portail marchand (exemple et aide par pays) et app Android (pays memorise a
