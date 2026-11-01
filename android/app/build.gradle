@@ -22,7 +22,9 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField "String", "API_BASE_URL", '"https://api.c-pay.global/api/v1"'
+            // Build de developpement : serveur de dev (base dediee, operateurs sandbox). Jamais la production.
+            buildConfigField "String", "API_BASE_URL", '"https://api.dev.c-pay.global/api/v1"'
+            buildConfigField "String", "PAY_BASE_URL",  '"https://pay.dev.c-pay.global"'
             applicationIdSuffix ".debug"
             versionNameSuffix "-debug"
         }

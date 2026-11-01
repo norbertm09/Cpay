@@ -1,5 +1,11 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-mobile-stores (2026-11-01) — publication Google Play et App Store
+Build Android debug pointe sur le serveur de developpement (api.dev / pay.dev), release inchangee ; workflow
+`mobile-expo.yml` (EAS Build Android/iOS, profils preview/production, soumission TestFlight / Play interne
+optionnelle, secret EXPO_TOKEN) ; `eas.json` complete (APK en preview, AAB en production, submit) ;
+docs/MOBILE-STORES.md (keystore, secrets, release signee, Play Console, Apple Developer, EAS, App Store Connect).
+
 ## 2.7.0-migrations-base-vierge (2026-10-25) — initialisation d'un nouvel environnement
 La migration 007 creait la vue `v_manual_compensation` sur des tables historiques de production absentes des migrations
 (`card_transactions`, `bank_transfers`) : echec sur une base vierge (serveur de developpement). Vue conditionnee a
