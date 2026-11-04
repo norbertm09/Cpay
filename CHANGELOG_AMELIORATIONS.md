@@ -1,5 +1,10 @@
 # Changelog - ameliorations integrees
 
+## 2.7.0-supervision (2026-11-01) — activation de la supervision en production
+`scripts/setup-monitoring.sh` : mise en route de Prometheus + Alertmanager (SMTP STARTTLS) a partir d'un fichier
+prive, secrets pour l'uid 65534, configuration generee dans le conteneur api, validation promtool, demarrage,
+alerte de test (`--test`), arret (`--down`). Voir docs/LOT-5B-ALERTES.md.
+
 ## 2.7.0-migrations-base-vierge (2026-10-25) — initialisation d'un nouvel environnement
 La migration 007 creait la vue `v_manual_compensation` sur des tables historiques de production absentes des migrations
 (`card_transactions`, `bank_transfers`) : echec sur une base vierge (serveur de developpement). Vue conditionnee a

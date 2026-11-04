@@ -145,3 +145,12 @@ La livraison locale ne prouve pas les identifiants SMTP de production. SMTP rest
 reprise : un arrêt après acceptation mais avant enregistrement peut conduire à une notification répétée.
 
 Référence : https://prometheus.io/docs/alerting/latest/configuration/
+
+## Activation en production (2026-11-01)
+
+`scripts/setup-monitoring.sh` automatise la mise en route sur le serveur : lecture du fichier privé
+`/etc/cplus/monitoring.env` (hôte, port 587, utilisateur, expéditeur, destinataire, mot de passe SMTP), fichiers
+secrets dans `/etc/cplus/monitoring/` lisibles par l'uid 65534, token de scrape repris de `backend/.env` sans
+l'exécuter, génération de la configuration Alertmanager dans le conteneur `api` (pas de Node sur l'hôte), validation
+(`compose config`, `promtool check config`), démarrage, état des cibles. `--test` envoie une alerte de test qui doit
+arriver par e-mail en 1 à 2 minutes ; `--down` arrête la pile. Ports 9090 et 9093 liés à `127.0.0.1` uniquement.
