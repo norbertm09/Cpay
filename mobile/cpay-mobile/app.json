@@ -2,7 +2,7 @@
   "expo": {
     "name": "C-Pay",
     "slug": "cpay-mobile",
-    "version": "2.7.0",
+    "version": "2.7.1",
     "orientation": "portrait",
     "scheme": "cpay",
     "userInterfaceStyle": "light",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "global.cpay.mobile",
-      "versionCode": 270,
+      "versionCode": 271,
       "permissions": [
         "INTERNET"
       ],

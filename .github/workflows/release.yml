@@ -71,7 +71,7 @@ jobs:
           java-version: 17
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: true
@@ -113,13 +113,9 @@ jobs:
             echo "signed=true" >> "$GITHUB_OUTPUT"
             echo "APK/AAB signes avec le keystore de release"
           else
-            for apk in "$APK_DIR"/*.apk; do
-              abi="$(basename "$apk" .apk)"; abi="${abi#app-}"; abi="${abi%-release-unsigned}"; abi="${abi%-release}"
-              cp "$apk" "$OUT/cpay-$VERSION-$abi-unsigned.apk"
-            done
-            cp "$AAB" "$OUT/cpay-$VERSION-unsigned.aab"
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::secrets ANDROID_KEYSTORE_* absents : APK/AAB non signes (voir docs/CI-CD.md)"
+            # Audit 2026-11-02 : une release ne publie jamais d'APK/AAB non signes (repackaging possible)
+            echo "::error::secrets ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD manquants : release refusee (docs/MOBILE-STORES.md § 1.2)"
+            exit 1
           fi
           ls -la "$OUT"
       - uses: actions/upload-artifact@v4

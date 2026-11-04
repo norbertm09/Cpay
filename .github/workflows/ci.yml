@@ -208,7 +208,7 @@ jobs:
           java-version: 17
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -220,7 +220,9 @@ jobs:
           set -o pipefail
           ./gradlew :app:assembleDebug --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
             # Erreurs Kotlin/Gradle remontées en annotations (les logs bruts ne sont pas toujours accessibles)
-            grep -E "^e: |What went wrong|Could not|error:|FAILURE" "$RUNNER_TEMP/gradle.log" | head -40 | sed 's/^/::error::/'
+            # Les 25 lignes qui suivent « What went wrong » portent la cause reelle (plugin, dependance, Kotlin)
+            grep -A25 "What went wrong" "$RUNNER_TEMP/gradle.log" | grep -v "^\s*$" | head -40 | sed 's/^/::error::/'
+            grep -E "^e: |Could not (resolve|find|determine)|Unsupported|requires|incompatible" "$RUNNER_TEMP/gradle.log" | head -20 | sed 's/^/::error::/'
             exit 1
           }
       - uses: actions/upload-artifact@v4

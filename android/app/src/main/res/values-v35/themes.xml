@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 15+ impose l'affichage bord a bord pour targetSdk >= 35 : les en-tetes et la barre basse
+         ne gerent pas encore les insets. Desactivation explicite (attribut honore jusqu'a l'API 36), a retirer
+         une fois les insets traites (audit 2026-11-02, lot mobile). -->
+    <style name="Theme.CPay" parent="Theme.CPay.Base">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>

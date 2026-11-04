@@ -1,5 +1,12 @@
 # Changelog - ameliorations integrees
 
+## 2.7.1 (2026-11-04) — premiere version signee de l'application Android
+Application Android marchande : API cible 36 (exigence Google Play, audit 2026-11-02 P0), AGP 8.11 / Gradle 8.13 /
+Kotlin 2.1, security-crypto 1.1.0 stable, affichage bord a bord desactive explicitement sur Android 15+ en attendant
+la gestion des insets. Release GitHub : APK et AAB signes avec le keystore de release (secrets ANDROID_*), une
+release sans signature est desormais refusee. Build debug sur le serveur de developpement, workflow Expo EAS,
+supervision de production (setup-monitoring.sh), audit complet du 2 novembre et evaluation du 1er novembre.
+
 ## 2.7.0-mobile-stores (2026-11-01) — publication Google Play et App Store
 Build Android debug pointe sur le serveur de developpement (api.dev / pay.dev), release inchangee ; workflow
 `mobile-expo.yml` (EAS Build Android/iOS, profils preview/production, soumission TestFlight / Play interne

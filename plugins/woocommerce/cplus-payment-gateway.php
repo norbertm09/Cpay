@@ -3,7 +3,7 @@
  * Plugin Name: C-Pay Payment Gateway
  * Plugin URI:  https://c-pay.global/developers
  * Description: Acceptez les paiements Mobile Money (Airtel Money, MTN MoMo) et carte bancaire via C-Pay (Calculus Plus) sur votre boutique WooCommerce. Zone CEMAC (Congo, Cameroun, Gabon, Tchad).
- * Version:     2.7.0
+ * Version:     2.7.1
  * Author:      Calculus Plus SAS
  * Author URI:  https://c-pay.global
  * License:     GPL-2.0+
@@ -24,7 +24,7 @@
 
 defined('ABSPATH') || exit;
 
-define('CPAY_VERSION',    '2.7.0');
+define('CPAY_VERSION',    '2.7.1');
 define('CPAY_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('CPAY_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('CPAY_API_BASE',   'https://api.c-pay.global/api/v1');

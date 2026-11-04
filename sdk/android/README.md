@@ -1,4 +1,4 @@
-# C-Pay Android SDK v2.7.0
+# C-Pay Android SDK v2.7.1
 
 SDK Android natif pour intégrer les paiements **C-Pay** (Mobile Money + Carte) dans vos applications Android.
 
