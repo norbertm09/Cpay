@@ -192,6 +192,13 @@ CREATE INDEX IF NOT EXISTS idx_txn_pending_reconcile
   WHERE status = 'pending' AND gateway_payment_id IS NOT NULL;
 
 -- 5. Vue operateur : incidents a compenser manuellement
+-- card_transactions et bank_transfers ne sont pas dans les migrations versionnees (tables historiques de la
+-- production) : la vue n'est creee que si les deux existent, pour que la migration reste rejouable sur une base vierge
+-- (serveur de developpement, 2026-10-25).
+DO $$
+BEGIN
+  IF to_regclass('public.card_transactions') IS NOT NULL AND to_regclass('public.bank_transfers') IS NOT NULL THEN
+    EXECUTE $v$
 CREATE OR REPLACE VIEW v_manual_compensation AS
 SELECT 'card2momo'::text AS source, ct.txn_id::text AS id, ct.cardholder_id::text AS owner_id,
        ct.amount, ct.currency, ct.status::text AS status, ct.failure_reason AS reason, ct.initiated_at
@@ -201,7 +208,10 @@ UNION ALL
 SELECT 'bank_transfer'::text, bt.transfer_id::text, bt.cardholder_id::text,
        bt.amount, bt.currency, bt.status::text, bt.error_message, bt.created_at
   FROM bank_transfers bt
- WHERE bt.status::text = 'needs_reversal';
+ WHERE bt.status::text = 'needs_reversal'
+    $v$;
+  END IF;
+END $$;
 
 -- ═══════════ 007c : clés API hachées, webhooks sortants ═══════════
 -- ================================================================
