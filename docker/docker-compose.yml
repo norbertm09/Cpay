@@ -7,7 +7,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.api
-    image: cplus-api:${CPLUS_TAG:-2.7.0}
+    image: cplus-api:${CPLUS_TAG:-2.7.1}
     container_name: cplus-api
     restart: unless-stopped
     dns:
@@ -38,7 +38,7 @@ services:
       args:
         APP_DIR: portal/admin
         REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-admin:${CPLUS_TAG:-2.7.0}
+    image: cplus-admin:${CPLUS_TAG:-2.7.1}
     container_name: cplus-admin-portal
     restart: unless-stopped
     expose:
@@ -55,7 +55,7 @@ services:
       args:
         APP_DIR: portal/merchant
         REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-merchant:${CPLUS_TAG:-2.7.0}
+    image: cplus-merchant:${CPLUS_TAG:-2.7.1}
     container_name: cplus-merchant-portal
     restart: unless-stopped
     expose:
@@ -104,7 +104,7 @@ services:
       - cplus-internal
 
   partners-portal:
-    image: cplus-partners:${CPLUS_TAG:-2.7.0}
+    image: cplus-partners:${CPLUS_TAG:-2.7.1}
     build:
       context: ../portal/partners
       dockerfile: Dockerfile
@@ -124,7 +124,7 @@ services:
       args:
         APP_DIR: portal/cardholder
         REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-cardholder:${CPLUS_TAG:-2.7.0}
+    image: cplus-cardholder:${CPLUS_TAG:-2.7.1}
     container_name: cplus-cardholder-portal
     restart: unless-stopped
     expose:

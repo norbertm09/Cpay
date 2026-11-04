@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- WAVE-5 : theme Material 3 clair (pas de mode sombre). -->
-    <style name="Theme.CPay" parent="Theme.Material3.Light.NoActionBar">
+    <style name="Theme.CPay.Base" parent="Theme.Material3.Light.NoActionBar">
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorOnPrimary">@color/white</item>
         <item name="colorPrimaryContainer">@color/primary_container</item>
@@ -47,6 +47,8 @@
         <item name="bottomSheetDialogTheme">@style/ThemeOverlay.CPay.BottomSheet</item>
         <item name="bottomNavigationStyle">@style/Widget.CPay.BottomNavigation</item>
     </style>
+    <!-- Theme applicatif : identique a Base ; values-v35 y ajoute l'opt-out bord a bord. -->
+    <style name="Theme.CPay" parent="Theme.CPay.Base"/>
 
     <style name="Theme.CPay.Splash" parent="Theme.CPay">
         <item name="android:windowBackground">@color/surface</item>
