@@ -1,0 +1,79 @@
+# Application mobile Expo (Android + iOS) — builds natifs par EAS Build (cloud Expo), voir docs/MOBILE-STORES.md
+# Prerequis (secrets GitHub) : EXPO_TOKEN (jeton d'acces Expo). Les identifiants Apple / Google Play sont geres
+# par EAS (eas credentials) et ne transitent jamais par GitHub.
+name: Mobile Expo (EAS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Plateforme'
+        type: choice
+        required: true
+        default: android
+        options: [android, ios, all]
+      profile:
+        description: 'Profil eas.json (preview = APK/simulateur interne, production = AAB/IPA stores)'
+        type: choice
+        required: true
+        default: preview
+        options: [preview, production]
+      submit:
+        description: 'Soumettre aux stores apres le build (eas submit : TestFlight / Play interne)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-expo-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  eas:
+    name: EAS build ${{ inputs.platform }} (${{ inputs.profile }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile/cpay-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret EXPO_TOKEN present
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          [ -n "$EXPO_TOKEN" ] || { echo "::error::secret EXPO_TOKEN manquant — creer un jeton sur expo.dev (Account settings → Access tokens) et l'ajouter dans Settings → Secrets (docs/MOBILE-STORES.md)"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Dependances
+        run: npm install --no-audit --no-fund
+      - name: Version et identifiants
+        run: |
+          node -e "const a=require('./app.json').expo; console.log('version', a.version, 'android', a.android.package, 'versionCode', a.android.versionCode, 'ios', a.ios.bundleIdentifier)"
+          [ "$(node -p "require('./app.json').expo.version")" = "$(tr -d '[:space:]' < ../../VERSION)" ] || echo "::warning::app.json.expo.version differe de VERSION"
+      - name: eas build
+        run: |
+          set -eu
+          eas build --platform "${{ inputs.platform }}" --profile "${{ inputs.profile }}" --non-interactive --json > build.json
+          node -e "const b=JSON.parse(require('fs').readFileSync('build.json','utf8')); for (const x of [].concat(b)) console.log(x.platform, x.status, x.artifacts && x.artifacts.buildUrl || '')"
+      - name: eas submit (optionnel)
+        if: ${{ inputs.submit }}
+        run: |
+          set -eu
+          PLATFORM="${{ inputs.platform }}"
+          for p in $( [ "$PLATFORM" = all ] && echo "android ios" || echo "$PLATFORM" ); do
+            eas submit --platform "$p" --profile "${{ inputs.profile }}" --latest --non-interactive
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eas-build-${{ inputs.platform }}-${{ inputs.profile }}
+          path: mobile/cpay-mobile/build.json
+          retention-days: 30
