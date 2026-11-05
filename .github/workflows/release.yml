@@ -79,7 +79,14 @@ jobs:
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
       - name: gradlew :app:assembleRelease :app:bundleRelease
         working-directory: android
-        run: ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-release.log" || {
+            grep -A25 "What went wrong" "$RUNNER_TEMP/gradle-release.log" | grep -v "^\s*$" | head -40 | sed 's/^/::error::/'
+            grep -E "^e: |Missing class|ERROR: R8|Could not (resolve|find|determine)|Unsupported|incompatible" "$RUNNER_TEMP/gradle-release.log" | head -40 | sed 's/^/::error::/'
+            [ -f app/build/outputs/mapping/release/missing_rules.txt ] && sed 's/^/::error::/' app/build/outputs/mapping/release/missing_rules.txt | head -40
+            exit 1
+          }
       - name: Signature (apksigner / jarsigner) si le keystore est fourni
         id: sign
         working-directory: android
