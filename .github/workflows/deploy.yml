@@ -146,7 +146,8 @@ jobs:
           set -eu
           cd /opt/cplus
           echo "== $(hostname) : $(git rev-parse --short HEAD) -> $REF"
-          git fetch --all --tags --prune
+          # --force : un tag deplace (release relancee) ne doit pas bloquer le deploiement (« would clobber existing tag »)
+          git fetch --all --tags --prune --force
           TARGET="$REF"
           # une branche se deploie depuis origin/<branche> (la branche locale n'est pas mise a jour par fetch)
           if git rev-parse -q --verify "refs/remotes/origin/$REF" >/dev/null 2>&1; then TARGET="origin/$REF"; fi
