@@ -225,11 +225,11 @@ jobs:
             grep -E "^e: |Could not (resolve|find|determine)|Unsupported|requires|incompatible" "$RUNNER_TEMP/gradle.log" | head -20 | sed 's/^/::error::/'
             exit 1
           }
-      - name: gradlew :app:assembleRelease (non signe — eprouve la minification R8 avant toute release)
+      - name: gradlew :app:assembleRelease :app:bundleRelease (non signes — eprouve R8 et l'AAB avant toute release)
         working-directory: android
         run: |
           set -o pipefail
-          ./gradlew :app:assembleRelease --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-release.log" || {
+          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-release.log" || {
             grep -A25 "What went wrong" "$RUNNER_TEMP/gradle-release.log" | grep -v "^\s*$" | head -40 | sed 's/^/::error::/'
             grep -E "^e: |Missing class|ERROR: R8|Could not (resolve|find|determine)|Unsupported|incompatible|missing_rules" "$RUNNER_TEMP/gradle-release.log" | head -40 | sed 's/^/::error::/'
             [ -f app/build/outputs/mapping/release/missing_rules.txt ] && { echo "::error::missing_rules.txt :"; sed 's/^/::error::/' app/build/outputs/mapping/release/missing_rules.txt | head -40; }

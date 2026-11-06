@@ -49,12 +49,12 @@ android {
         dataBinding false
     }
 
+    // Les APK par ABI sont incompatibles avec la generation de l'AAB sous AGP 8.11 (buildReleasePreBundle :
+    // « Please disable building multiple APKs when building an Android app bundle »). L'AAB decoupe lui-meme
+    // par ABI sur Google Play ; un seul APK universel suffit pour l'installation directe (release 2.7.1).
     splits {
         abi {
-            enable true
-            reset()
-            include "arm64-v8a", "armeabi-v7a", "x86_64"
-            universalApk true
+            enable false
         }
     }
 }

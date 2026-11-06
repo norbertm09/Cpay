@@ -107,7 +107,7 @@ jobs:
             printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS"
             BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
             for apk in "$APK_DIR"/*.apk; do
-              abi="$(basename "$apk" .apk)"; abi="${abi#app-}"; abi="${abi%-release-unsigned}"; abi="${abi%-release}"
+              abi="$(basename "$apk" .apk)"; abi="${abi#app-}"; abi="${abi%-release-unsigned}"; abi="${abi%-release}"; abi="${abi:-universal}"
               "$BT/zipalign" -p -f 4 "$apk" "$RUNNER_TEMP/aligned.apk"
               "$BT/apksigner" sign --ks "$KS" --ks-pass env:KS_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS \
                 --out "$OUT/cpay-$VERSION-$abi.apk" "$RUNNER_TEMP/aligned.apk"
