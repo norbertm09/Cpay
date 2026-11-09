@@ -12,19 +12,22 @@ if [ -z "$DOMAIN" ] && [ -f "$ROOT/docker/.env" ]; then
 fi
 DOMAIN="${DOMAIN:-c-pay.global}"
 FAILED=""
-check() { # check <nom> <url> [motif]
-  local name="$1" url="$2" expect="${3:-}" body code
+check() { # check <nom> <url> [motif] [codes_acceptes]  — codes_acceptes : liste de codes HTTP valant « joignable » (ex. "200 403")
+  local name="$1" url="$2" expect="${3:-}" codes="${4:-200}" body code
   body="$(curl -sS --max-time 15 -o /dev/stdout -w '\n%{http_code}' "$url" 2>/dev/null || true)"
   code="${body##*$'\n'}"; body="${body%$'\n'*}"
-  if [ "$code" = "200" ] && { [ -z "$expect" ] || printf '%s' "$body" | grep -q "$expect"; }; then
-    printf '%-10s %-45s OK\n' "$name" "$url"; ops_metric cpay_healthcheck_up 1 "target=\"$name\""
+  # 200 : le motif doit apparaitre ; autre code accepte (403 du vhost admin reserve au VPN) : nginx a repondu, c'est suffisant
+  if { [ "$code" = "200" ] && { [ -z "$expect" ] || printf '%s' "$body" | grep -q "$expect"; }; } \
+     || { [ "$code" != "200" ] && [ -n "$code" ] && printf ' %s ' "$codes" | grep -q " $code "; }; then
+    printf '%-10s %-45s OK%s\n' "$name" "$url" "$([ "$code" = "200" ] || printf ' (HTTP %s attendu)' "$code")"; ops_metric cpay_healthcheck_up 1 "target=\"$name\""
   else
     printf '%-10s %-45s KO (HTTP %s)\n' "$name" "$url" "${code:-?}"; ops_metric cpay_healthcheck_up 0 "target=\"$name\""; FAILED="$FAILED $name"
   fi
 }
 check api       "https://api.$DOMAIN/health" '"status":"ok"'
 check landing   "https://$DOMAIN/"            '<html'
-check admin     "https://admin.$DOMAIN/"      '<html'
+# admin : vhost reserve au VPN (allow 10.8.0.0/24 ; deny all) -> depuis le serveur, nginx repond 403 : joignable
+check admin     "https://admin.$DOMAIN/"      '<html' "200 403"
 check merchant  "https://merchant.$DOMAIN/"   '<html'
 check app       "https://app.$DOMAIN/"        '<html'
 check card      "https://card.$DOMAIN/"       '<html'

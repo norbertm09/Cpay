@@ -13,7 +13,7 @@
   configurations avec l'image non privilegiee.
 * Hote : `scripts/harden-host.sh` (appele par `init-vps.sh`) — `unattended-upgrades` securite + `needrestart`, redemarrage
   planifie 04:30 si requis (ou alerte seule), metrique `cpay_reboot_required` et alerte `HostRebootRequired` (48 h),
-  `sshd_config.d/10-cpay.conf` (cles uniquement, `PermitRootLogin prohibit-password` puis `no` apres `setup-deploy-user.sh`,
+  `sshd_config.d/00-cpay.conf` (cles uniquement, les directives permissives des autres fichiers sont neutralisees, `PermitRootLogin prohibit-password` puis `no` apres `setup-deploy-user.sh`,
   valide par `sshd -t`), jail fail2ban `nginx-limit-req`, rotation des journaux Docker imposee (fusion `daemon.json`).
 * Documentation et scripts : `backend/.env.example` genere depuis `env.js` (valeurs `change_me` detectees comme
   manquantes), `scripts/deploy-prod.sh` supprime (service `postgres` inexistant), anciens scripts dans `scripts/legacy/`
