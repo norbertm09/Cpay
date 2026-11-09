@@ -6,8 +6,10 @@
 #   1. unattended-upgrades (correctifs de securite seulement) + needrestart : redemarrage automatique des services,
 #      redemarrage de la machine a 04:30 (heure locale) si le noyau l'exige (--no-auto-reboot : alerte seulement)
 #   2. metrique cpay_reboot_required (textfile node-exporter, cron horaire) -> alerte HostRebootRequired
-#   3. sshd : /etc/ssh/sshd_config.d/10-cpay.conf (cles uniquement, root sans mot de passe ou interdit,
-#      X11/agent forwarding coupes, 4 essais) — valide par `sshd -t` avant rechargement
+#   3. sshd : /etc/ssh/sshd_config.d/00-cpay.conf (cles uniquement, root sans mot de passe ou interdit,
+#      X11/agent forwarding coupes, 4 essais) — valide par `sshd -t` avant rechargement. Prefixe 00- : sshd garde la
+#      PREMIERE valeur rencontree, le fichier doit donc passer avant tout autre (10-cpay-root.conf, 50-cloud-init.conf…) ;
+#      les `PasswordAuthentication yes` / `PermitRootLogin yes` des autres fichiers sont neutralises.
 #   4. fail2ban : jail nginx-limit-req (429 de l'API, docker/nginx.conf limit_req_status) en plus de sshd/nginx
 #   5. /etc/docker/daemon.json : rotation des journaux imposee meme si le fichier existe deja (fusion jq)
 # Appele par scripts/init-vps.sh ; peut etre relance seul apres toute modification.
@@ -103,7 +105,7 @@ if [ "$PERMIT_ROOT" = "no" ] && [ "$DRY" = false ] && ! id deploy >/dev/null 2>&
   die "PermitRootLogin no demande mais l'utilisateur deploy n'existe pas : lancer d'abord scripts/setup-deploy-user.sh"
 fi
 install -d /etc/ssh/sshd_config.d 2>/dev/null || true
-if write 644 /etc/ssh/sshd_config.d/10-cpay.conf <<CONF
+if write 644 /etc/ssh/sshd_config.d/00-cpay.conf <<CONF
 # C-Pay (scripts/harden-host.sh) — connexions par cle uniquement
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -124,17 +126,31 @@ then
   if [ "$DRY" = false ]; then
     if sshd -t 2>/tmp/cpay-sshd-t.log; then
       systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || warn "  sshd non recharge (systemctl reload ssh)"
-      log "  /etc/ssh/sshd_config.d/10-cpay.conf applique (sshd -t OK)"
+      log "  /etc/ssh/sshd_config.d/00-cpay.conf applique (sshd -t OK)"
     else
-      rm -f /etc/ssh/sshd_config.d/10-cpay.conf
+      rm -f /etc/ssh/sshd_config.d/00-cpay.conf
       die "sshd -t refuse la configuration (fichier retire) : $(cat /tmp/cpay-sshd-t.log)"
     fi
   fi
 fi
-# cloud-init / OVH laissent parfois un 50-cloud-init.conf avec PasswordAuthentication yes : notre fichier 10-* est lu
-# en premier et la premiere valeur gagne ; on le signale quand meme.
-if grep -rqsi '^PasswordAuthentication yes' /etc/ssh/sshd_config.d/ 2>/dev/null; then
-  warn "  un autre fichier de sshd_config.d autorise encore les mots de passe (sans effet : 10-cpay.conf est lu avant), a nettoyer"
+# Ancien nom du fichier (lot 7 initial) : 10-cpay.conf etait trie APRES 10-cpay-root.conf (tiret avant point) et perdait.
+[ -f /etc/ssh/sshd_config.d/10-cpay.conf ] && run rm -f /etc/ssh/sshd_config.d/10-cpay.conf
+# cloud-init / OVH / anciennes migrations laissent des fichiers avec PasswordAuthentication yes ou PermitRootLogin yes :
+# neutralises explicitement (la premiere valeur gagne, mais on ne laisse pas de directive contradictoire derriere).
+for f in /etc/ssh/sshd_config.d/*.conf; do
+  [ "$f" = /etc/ssh/sshd_config.d/00-cpay.conf ] && continue
+  if grep -qsiE '^(PasswordAuthentication|KbdInteractiveAuthentication|ChallengeResponseAuthentication) +yes|^PermitRootLogin +yes' "$f"; then
+    if [ "$DRY" = true ]; then echo "  (dry-run) neutraliserait les directives permissives de $f"; else
+      sed -i -E 's/^(PasswordAuthentication|KbdInteractiveAuthentication|ChallengeResponseAuthentication) +yes/\1 no/I; s/^PermitRootLogin +yes/PermitRootLogin prohibit-password/I' "$f"
+      warn "  $f : mots de passe / root par mot de passe desactives (directives neutralisees)"
+    fi
+  fi
+done
+if [ "$DRY" = false ]; then
+  if sshd -t 2>/dev/null; then systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true; fi
+  eff="$(sshd -T 2>/dev/null | grep -iE '^(passwordauthentication|permitrootlogin) ' | tr '\n' ' ')"
+  log "  sshd effectif : ${eff:-indisponible}"
+  printf '%s' "$eff" | grep -q 'passwordauthentication no' || warn "  passwordauthentication n'est PAS a no : verifier /etc/ssh/sshd_config et sshd_config.d"
 fi
 
 # ─── 4. fail2ban ─────────────────────────────────────────────────
