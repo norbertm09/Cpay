@@ -1,5 +1,27 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-lot7 (2026-11-09) — P2 infrastructure (audit du 2 novembre, § 8 a 13) + back-office des suppressions de compte
+* Conteneurs durcis : portails et vitrine sur `nginxinc/nginx-unprivileged:1.28-alpine` (processus sans root, port 8080,
+  ports hote inchanges), `security_opt no-new-privileges`, `cap_drop ALL`, limites memoire/CPU par service (API 1,5 Go /
+  2 CPU, portails 128 Mo, vitrine 64 Mo, cron 32 Mo), healthcheck du portail partenaires, en-tetes de securite + CSP sur
+  le portail partenaires ; `certbot/certbot:v4.1.1`, nginx autonome 1.28 ; Node 22 pour tous les builders et la CI.
+* Dependabot (`.github/dependabot.yml`) : actions GitHub (groupe hebdomadaire), images Docker, npm backend/portails/Expo,
+  Gradle. `release.yml` : `contents: read` par defaut, `contents: write` + `actions: write` reserves au job `release`.
+* CI : migrations rejouees deux fois sur un service PostgreSQL 16 (nombre de lignes `schema_migrations` = fichiers SQL,
+  fonctions `cpay_calculate_fee`/`calc_fee` presentes) ; l'image API est demarree (tini, entrypoint, migrations,
+  utilisateur non root) et doit repondre 200 sur `/health` ; `docker compose config -q` ; `nginx -t` sur les trois
+  configurations avec l'image non privilegiee.
+* Hote : `scripts/harden-host.sh` (appele par `init-vps.sh`) — `unattended-upgrades` securite + `needrestart`, redemarrage
+  planifie 04:30 si requis (ou alerte seule), metrique `cpay_reboot_required` et alerte `HostRebootRequired` (48 h),
+  `sshd_config.d/10-cpay.conf` (cles uniquement, `PermitRootLogin prohibit-password` puis `no` apres `setup-deploy-user.sh`,
+  valide par `sshd -t`), jail fail2ban `nginx-limit-req`, rotation des journaux Docker imposee (fusion `daemon.json`).
+* Documentation et scripts : `backend/.env.example` genere depuis `env.js` (valeurs `change_me` detectees comme
+  manquantes), `scripts/deploy-prod.sh` supprime (service `postgres` inexistant), anciens scripts dans `scripts/legacy/`
+  avec README, `docs/CI-CD.md` realigne (declencheurs, audit `high` bloquant, Node 22, limites connues), README.
+* Back-office : page « Suppressions de compte » (`/marchands/suppressions`, roles super_admin / ops_admin) — liste par
+  statut, solde a la demande, delai de retractation, fermeture (avertissements delai / solde) ou refus motive ;
+  `merchantsApi.deletionRequests/processDeletion` ; 4 tests vitest.
+
 ## 2.7.2-lot5 (2026-11-09) — application Expo (audit du 2 novembre, P0-3, P1-6, P1-7, P2-5)
 * Expo SDK 54 / React Native 0.81.5 / React 19.1 (API 36, iOS 26 SDK, Nouvelle Architecture), lockfile et `npm ci`
   (CI et EAS), `expo-doctor`/`check` dans les scripts npm.

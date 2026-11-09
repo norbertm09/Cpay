@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --no-audit --no-fund
@@ -12,7 +12,12 @@ ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
 # garanti par vite.config.js (modulePreload.polyfill: false).
 RUN npm run build
 
-FROM nginx:1.25-alpine
+# Lot 7 (audit 2026-11-02 infra P2-8/P2-9) : nginx non privilegie, port 8080, healthcheck
+FROM nginxinc/nginx-unprivileged:1.28-alpine
+USER root
 COPY --from=builder /app/build /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+RUN chown -R nginx:nginx /usr/share/nginx/html && nginx -t
+USER nginx
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=10s CMD wget -qO- http://127.0.0.1:8080/health || exit 1

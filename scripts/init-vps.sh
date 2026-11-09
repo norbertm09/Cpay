@@ -15,7 +15,8 @@
 # Etapes (chacune est idempotente) :
 #   1. paquets systeme (nginx, certbot, postgresql-client, git, ufw, fail2ban…)
 #   2. Docker Engine + Compose V2 (depot officiel Docker, repli sur les paquets Ubuntu)
-#   3. pare-feu UFW (22, 80, 443), fail2ban, sysctl, limites, swap 4 Go
+#   3. pare-feu UFW (22, 80, 443), fail2ban, sysctl, limites, swap 4 Go, puis scripts/harden-host.sh
+#      (lot 7 : unattended-upgrades, needrestart, sshd par cles, jail nginx-limit-req, rotation des journaux Docker)
 #   4. depot /opt/cplus (clone ou mise a jour), cles SSH (deploiement GitHub Actions, lecture GitHub)
 #   5. import de l'archive de l'ancien serveur (nginx, Let's Encrypt, .env, dhparam, crons…)
 #   6. nginx hote : vhost C-Pay, correction des proxy_pass vers 127.0.0.1, hook de renouvellement certbot
@@ -69,6 +70,7 @@ apt-get install -y -qq \
   postgresql-client \
   git curl wget rsync ca-certificates gnupg lsb-release openssl \
   ufw fail2ban logrotate cron rclone age \
+  unattended-upgrades needrestart \
   jq unzip htop ncdu tree
 systemctl enable --now nginx cron fail2ban >/dev/null 2>&1 || true
 
@@ -98,7 +100,8 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
 fi
 docker compose version >/dev/null 2>&1 || die "Docker Compose V2 absent"
 log "Docker $(docker version --format '{{.Server.Version}}') / $(docker compose version --short)"
-# Journaux Docker bornes (sinon le disque de 100 Go se remplit avec les logs des conteneurs)
+# Journaux Docker bornes (sinon le disque de 100 Go se remplit avec les logs des conteneurs) ; harden-host.sh (etape 3)
+# impose ensuite ces valeurs meme si un daemon.json different existe deja.
 if [ ! -f /etc/docker/daemon.json ]; then
   cat > /etc/docker/daemon.json <<'JSON'
 { "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file": "5" } }
@@ -187,6 +190,14 @@ else
   git -C "$APP" fetch --all --tags --prune -q || warn "fetch impossible (verifier l'acces GitHub)"
 fi
 git config --global --add safe.directory "$APP" >/dev/null 2>&1 || true
+
+# Lot 7 (audit P2-12) : mises a jour automatiques, sshd par cles, jail nginx-limit-req, rotation Docker.
+# PermitRootLogin reste prohibit-password tant que le deploiement passe par root ; apres setup-deploy-user.sh :
+#   bash scripts/harden-host.sh --permit-root-login no
+if [ -x "$APP/scripts/harden-host.sh" ]; then
+  log "Durcissement de l'hote (scripts/harden-host.sh)…"
+  CPAY_ROOT="$APP" bash "$APP/scripts/harden-host.sh" || warn "harden-host.sh en echec : relancer a la main"
+fi
 
 if [ -n "$DEPLOY_PUBKEY" ]; then
   touch /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys

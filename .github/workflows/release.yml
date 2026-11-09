@@ -11,9 +11,10 @@ on:
   push:
     tags: ['v*.*.*']
 
+# Lot 7 (audit 2026-11-02 infra P2-10) : lecture seule par defaut ; seul le job `release` ecrit la Release et lance
+# deploy.yml. Les jobs android/archives (plugins Gradle, actions tierces) n'ont plus de jeton capable de remplacer un APK publie.
 permissions:
-  contents: write
-  actions: write   # pour lancer deploy.yml (workflow_dispatch)
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -155,6 +156,9 @@ jobs:
     name: GitHub Release
     needs: [verify, android, archives]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write   # pour lancer deploy.yml (workflow_dispatch)
     env:
       VERSION: ${{ needs.verify.outputs.version }}
       GH_TOKEN: ${{ github.token }}

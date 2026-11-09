@@ -8,6 +8,7 @@ export const NAV = [
   ] },
   { label: 'Clients', items: [
     { to: '/marchands', label: 'Marchands', icon: 'store' },
+    { to: '/marchands/suppressions', label: 'Suppressions de compte', icon: 'shield', roles: PERMS.ops },
     { to: '/porteurs', label: 'Porteurs', icon: 'idcard' },
   ] },
   { label: 'Opérations', items: [

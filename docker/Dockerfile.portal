@@ -1,4 +1,5 @@
-FROM node:20-alpine AS builder
+# Lot 7 (audit 2026-11-02 infra P2-9) : Node 22 (Node 20 en fin de vie depuis le 30/04/2026)
+FROM node:22-alpine AS builder
 WORKDIR /app
 ARG APP_DIR
 ARG REACT_APP_API_BASE_URL=https://api.c-pay.global
@@ -17,14 +18,17 @@ COPY ${APP_DIR}/src ./src
 # voir vite.config.js du portail.
 RUN npm run build
 
-FROM nginx:1.25-alpine
+# Lot 7 (infra P2-8/P2-9) : nginx NON privilegie (processus maitre sans root, ecoute 8080), version maintenue
+FROM nginxinc/nginx-unprivileged:1.28-alpine
 ARG REACT_APP_API_BASE_URL=https://api.c-pay.global
+USER root
 COPY --from=builder /app/build /usr/share/nginx/html
 # Lot 2 : l'origine de l'API entre dans la CSP (connect-src / form-action) — meme valeur que le bundle.
 COPY docker/nginx-spa.conf /tmp/nginx-spa.conf
 RUN origin="$(printf '%s' "$REACT_APP_API_BASE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')" \
  && sed "s#__API_ORIGIN__#${origin}#g" /tmp/nginx-spa.conf > /etc/nginx/conf.d/default.conf \
- && rm -f /tmp/nginx-spa.conf && nginx -t
-EXPOSE 80
+ && rm -f /tmp/nginx-spa.conf && chown -R nginx:nginx /usr/share/nginx/html && nginx -t
+USER nginx
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s \
-  CMD wget -qO- http://127.0.0.1/ || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/ || exit 1

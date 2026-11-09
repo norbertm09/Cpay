@@ -58,6 +58,14 @@ groups:
         labels: { severity: warning }
         annotations: { summary: "certbot.timer inactif : plus de renouvellement automatique des certificats" }
 
+      # Lot 7 (infra P2-12) : /var/run/reboot-required present depuis plus de 2 jours (noyau ou libc mis a jour sans
+      # redemarrage — harden-host.sh redemarre a 04:30 sauf --no-auto-reboot)
+      - alert: HostRebootRequired
+        expr: cpay_reboot_required == 1
+        for: 48h
+        labels: { severity: warning }
+        annotations: { summary: "Redemarrage de l'hote requis depuis plus de 48 h (mise a jour noyau/libc non appliquee)" }
+
       - alert: BackupFailed
         expr: cpay_backup_last_status == 0
         for: 5m

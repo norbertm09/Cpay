@@ -14,7 +14,8 @@
 #   6. docker compose up -d --remove-orphans
 #   7. health checks : API 127.0.0.1:3001/health, vitrine 127.0.0.1:3006/, portails (non bloquants)
 # Lance par .github/workflows/deploy.yml via SSH, ou a la main depuis /opt/cplus.
-# Les scripts deploy-ovh.sh / deploy-prod.sh / deploy-wave-2.sh restent des scripts historiques.
+# Les anciens scripts (deploy-ovh.sh, deploy-wave-2.sh, init-ovh.sh, *-tls.sh) sont dans scripts/legacy/ (lecture seule) ;
+# deploy-prod.sh a ete supprime (lot 7).
 # ================================================================
 set -eu
 

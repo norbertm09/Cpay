@@ -1,0 +1,50 @@
+# Lot 7 (audit 2026-11-02 infra P2-9 / P2-10) : montees de version proposees automatiquement.
+# Les actions GitHub sont suivies ici (le depot ne peut pas lire les depots tiers pour epingler par SHA a la main) ;
+# Dependabot propose aussi les images Docker (node, nginx-unprivileged, alpine, certbot, exporters) et les lockfiles npm.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday, time: "06:00", timezone: Africa/Brazzaville }
+    labels: [dependances, ci]
+    groups:
+      actions: { patterns: ["*"] }
+
+  - package-ecosystem: docker
+    directories: ["/docker", "/portal/partners", "/monitoring"]
+    schedule: { interval: weekly, day: monday, time: "06:00", timezone: Africa/Brazzaville }
+    labels: [dependances, docker]
+
+  - package-ecosystem: npm
+    directory: /backend
+    schedule: { interval: weekly, day: monday, time: "06:00", timezone: Africa/Brazzaville }
+    labels: [dependances, backend]
+    open-pull-requests-limit: 5
+    groups:
+      backend-minor: { update-types: [minor, patch] }
+
+  - package-ecosystem: npm
+    directories: ["/portal/admin", "/portal/merchant", "/portal/cardholder", "/portal/partners", "/portal/bank", "/portal/agency", "/portal/agent"]
+    schedule: { interval: monthly }
+    labels: [dependances, portails]
+    open-pull-requests-limit: 3
+    groups:
+      portails-minor: { update-types: [minor, patch] }
+
+  - package-ecosystem: npm
+    directory: /mobile/cpay-mobile
+    schedule: { interval: monthly }
+    labels: [dependances, mobile]
+    open-pull-requests-limit: 2
+    ignore:
+      # Les versions des paquets Expo sont dictees par le SDK (npx expo install --fix), pas par Dependabot
+      - dependency-name: "expo*"
+      - dependency-name: "react-native*"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+
+  - package-ecosystem: gradle
+    directory: /android
+    schedule: { interval: monthly }
+    labels: [dependances, android]
+    open-pull-requests-limit: 2
