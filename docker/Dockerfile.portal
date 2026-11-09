@@ -19,7 +19,7 @@ COPY ${APP_DIR}/src ./src
 RUN npm run build
 
 # Lot 7 (infra P2-8/P2-9) : nginx NON privilegie (processus maitre sans root, ecoute 8080), version maintenue
-FROM nginxinc/nginx-unprivileged:1.28-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 ARG REACT_APP_API_BASE_URL=https://api.c-pay.global
 USER root
 COPY --from=builder /app/build /usr/share/nginx/html
