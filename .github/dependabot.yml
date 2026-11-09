@@ -14,6 +14,16 @@ updates:
     directories: ["/docker", "/portal/partners", "/monitoring"]
     schedule: { interval: weekly, day: monday, time: "06:00", timezone: Africa/Brazzaville }
     labels: [dependances, docker]
+    ignore:
+      # Node : on reste sur la LTS choisie (22, fin de support avril 2027) ; le passage a 24/26 se fait en une PR dediee
+      # (CI, Dockerfile.api, Dockerfile.portal, partners) apres test, pas image par image.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      # nginx : versions mineures impaires = branche mainline (1.29, 1.31…) ; on suit la branche stable (1.28 -> 1.30)
+      - dependency-name: nginxinc/nginx-unprivileged
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: nginx
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: npm
     directory: /backend
@@ -22,6 +32,10 @@ updates:
     open-pull-requests-limit: 5
     groups:
       backend-minor: { update-types: [minor, patch] }
+    ignore:
+      # uuid >= 13 est ESM uniquement : incompatible avec le backend CommonJS (remplacement prevu par crypto.randomUUID)
+      - dependency-name: uuid
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directories: ["/portal/admin", "/portal/merchant", "/portal/cardholder", "/portal/partners", "/portal/bank", "/portal/agency", "/portal/agent"]
@@ -30,6 +44,18 @@ updates:
     open-pull-requests-limit: 3
     groups:
       portails-minor: { update-types: [minor, patch] }
+    ignore:
+      # React 19 et Vitest 5 : migrations a mener en une fois sur les 7 portails (PR dediee), pas en 14 PR separees
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react-dom
+        update-types: ["version-update:semver-major"]
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: vite
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /mobile/cpay-mobile
@@ -39,7 +65,11 @@ updates:
     ignore:
       # Les versions des paquets Expo sont dictees par le SDK (npx expo install --fix), pas par Dependabot
       - dependency-name: "expo*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "babel-preset-expo"
       - dependency-name: "react-native*"
+      - dependency-name: "@react-native-async-storage/*"
+      - dependency-name: "@react-native-community/*"
       - dependency-name: "react"
       - dependency-name: "react-dom"
 
@@ -48,3 +78,7 @@ updates:
     schedule: { interval: monthly }
     labels: [dependances, android]
     open-pull-requests-limit: 2
+    groups:
+      # Room : runtime, ktx et compiler doivent bouger ensemble ; AndroidX groupe pour un seul build de verification
+      androidx: { patterns: ["androidx.*"] }
+      kotlin: { patterns: ["org.jetbrains.kotlin*", "com.google.devtools.ksp*"] }

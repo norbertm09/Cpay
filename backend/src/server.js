@@ -1,6 +1,6 @@
 'use strict';
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true }); // dotenv >= 17 : pas de banniere au demarrage
 
 const express = require('express');
 const helmet = require('helmet');
