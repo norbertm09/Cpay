@@ -94,3 +94,7 @@ TestFlight automatiquement. Le run affiche l'URL du build EAS ; durée 10 à 20 
 | Apple Developer Program | 99 USD / an | D-U-N-S 1 à 2 semaines pour une société |
 | Expo EAS | gratuit (file lente) ou 19 USD / mois (priorité) | immédiat |
 | Appareils de test | 1 Android récent, 1 iPhone | |
+
+## Identité de l'éditeur
+
+Dénomination, siège et RCCM à déclarer dans les consoles (statut de professionnel DSA, coordonnées de la fiche) : voir `docs/SOCIETE.md`.

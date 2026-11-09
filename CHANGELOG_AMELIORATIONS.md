@@ -1,5 +1,11 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-legal (2026-11-09) — identite de l'editeur et script nginx hote
+Mentions legales, CGU, confidentialite et page de suppression de compte : CALCULUS PLUS SAS, siege 25 rue Bangui,
+quartier Moungali, Brazzaville (Republique du Congo), RCCM Brazzaville CG-BZV-01-2026-B16-00002, droit congolais et
+tribunaux de Brazzaville ; fiche docs/SOCIETE.md (stores, DSA, contrats operateurs) et champs restant a renseigner.
+`scripts/add-spa-security-headers.sh` : installe le snippet CSP et l'include dans les blocs server des portails du vhost hote.
+
 ## 2.7.2-lot2 (2026-11-09) — P1 integrite et securite de l'audit du 2 novembre
 * Resultats operateur (P1-1) : une reponse HTTP 5xx, un corps illisible (page d'erreur d'un proxy) ou un delai ne
   sont plus classes « refus » : `classifyRailResult` rend `unknown` (code 5xx, `httpStatus`, TIMEOUT/UNPARSABLE),
