@@ -3,6 +3,7 @@ package global.cpay.app.db
 import android.content.Context
 import com.google.gson.Gson
 import global.cpay.app.common.Transaction
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -65,8 +66,11 @@ object CacheManager {
     // ─── WAVE-5 : cache JSON generique (resume de caisse, journal) ───
     private val gson = Gson()
 
-    const val KEY_CASH_SUMMARY = "cash_summary"
-    fun keyHistory(type: String?) = "cash_history_" + (type ?: "all")
+    // Lot 4 (audit 2026-11-02 mobile P1-3) : cles prefixees par l'utilisateur connecte — un autre marchand sur le
+    // meme terminal ne relit jamais le solde ou le journal du precedent ; tout est purge a la deconnexion.
+    private fun scope() = global.cpay.app.common.SessionManager.userId ?: "anon"
+    fun keyCashSummary() = "cash_summary_" + scope()
+    fun keyHistory(type: String?) = "cash_history_" + scope() + "_" + (type ?: "all")
 
     /** Valeur en cache + date d'enregistrement (epoch ms), ou null. */
     class Cached<T>(val value: T, val savedAt: Long)
@@ -87,5 +91,19 @@ object CacheManager {
 
     suspend fun clearJson(context: Context) {
         try { AppDatabase.get(context).cacheDao().clear() } catch (_: Exception) { }
+    }
+
+    /** Purge complete (deconnexion, session perdue) : cache JSON + transactions des deux profils. */
+    suspend fun clearAll(context: Context) {
+        clearJson(context)
+        try {
+            val dao = AppDatabase.get(context).transactionDao()
+            dao.clearAll("merchant"); dao.clearAll("cardholder")
+        } catch (_: Exception) { }
+    }
+
+    /** Variante hors coroutine (intercepteur OkHttp) : execution sur un thread IO, erreurs avalees. */
+    fun clearAllAsync(context: Context) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { clearAll(context) }
     }
 }

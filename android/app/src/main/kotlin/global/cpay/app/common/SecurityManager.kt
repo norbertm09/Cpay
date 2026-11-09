@@ -57,6 +57,9 @@ object SecurityManager {
     }
 
     // Sanitizer référence
+    /** Lot 4 (audit 2026-11-02 mobile P1-1) : cle d'idempotence = UUID, conservee par l'ecran tant que le resultat est inconnu. */
+    fun newIdempotencyKey(): String = java.util.UUID.randomUUID().toString()
+
     fun generateRef(prefix: String): String {
         val ts = System.currentTimeMillis().toString(36).uppercase()
         val rand = (1000..9999).random()

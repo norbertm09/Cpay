@@ -964,6 +964,31 @@ router.post('/settlements/:transferId/reject', requireRole('super_admin', 'finan
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Lot 4 (audit 2026-11-02 mobile P0-2) : demandes de suppression de compte ───────────
+router.get('/account-deletion-requests', requireRole('super_admin', 'ops_admin'), async (req, res) => {
+  try {
+    const { page, limit, offset } = parsePagination(req.query, 50);
+    const data = await require('../services/account/deletion.service').list({ status: req.query.status || 'pending', limit, offset });
+    res.json({ data, page, limit });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.patch('/account-deletion-requests/:id', requireRole('super_admin', 'ops_admin'), async (req, res) => {
+  const { status, note } = req.body || {};
+  if (!['processed', 'rejected'].includes(status)) return res.status(422).json({ error: 'status: processed | rejected', code: 'VALIDATION_ERROR' });
+  if (status === 'rejected' && !(note && String(note).trim())) return res.status(422).json({ error: 'note requise pour un refus', code: 'VALIDATION_ERROR' });
+  try {
+    const svc = require('../services/account/deletion.service');
+    const out = await svc.processRequest({ requestId: req.params.id, status, note, adminId: /^[0-9a-f-]{36}$/i.test(String(req.user?.sub || '')) ? req.user.sub : null });
+    if (out.error) return res.status(out.error.status).json(out.error.body);
+    try {
+      const { auditLog } = require('../middleware/pci.middleware');
+      await auditLog({ eventType: status === 'processed' ? 'ACCOUNT_DELETION_PROCESSED' : 'ACCOUNT_DELETION_REJECTED', actorType: 'admin', actorId: req.user?.sub || null,
+        entityType: 'merchant', entityId: out.request.merchant_id, details: { requestId: req.params.id, note: note || null }, ipAddress: req.ip, success: true });
+    } catch (e) { logger.warn('deletion audit failed', { err: e.message }); }
+    res.json({ success: true, ...svc.serialize(out.request) });
+  } catch (e) { res.status(e.statusCode || 500).json({ error: e.message, code: e.code || 'INTERNAL_ERROR' }); }
+});
+
 // ─── Reconciliation manuelle des transactions pending ───────────
 // Deplacee depuis merchant.routes.js (audit §2.18) : operation GLOBALE, reservee
 // aux roles super_admin / ops_admin.

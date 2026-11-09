@@ -1743,6 +1743,40 @@ const changeMerchantPassword = async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 };
 router.post('/account/change-password', merchantAuth, changeMerchantPassword);
+
+// ─── Lot 4 (audit 2026-11-02 mobile P0-2) : suppression de compte (Google Play / Apple) ──────────
+// Réservée au propriétaire ; confirmation step-up (code 2FA ou mot de passe) ; une seule demande en attente ;
+// rétractation possible pendant ACCOUNT_DELETION_RETRACT_DAYS (30 j) ; exécution par les opérations (back-office).
+const deletionService = () => require('../services/account/deletion.service');
+router.get('/account/deletion-request', merchantAuth, async (req, res) => {
+  try {
+    const pending = await deletionService().getPending(req.user.merchantId);
+    res.json({ request: pending ? deletionService().serialize(pending) : null, retractDays: deletionService().RETRACT_DAYS,
+      policyUrl: 'https://c-pay.global/legal/confidentialite.html', deletionUrl: 'https://c-pay.global/legal/suppression-compte.html' });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+router.post('/account/deletion-request', merchantAuth, async (req, res) => {
+  if (req.user.role !== 'owner') return res.status(403).json({ error: 'Seul le propriétaire du compte peut demander sa suppression', code: 'INSUFFICIENT_ROLE' });
+  try {
+    const step = await require('../services/cash/cash.service').verifyStepUp({ userId: req.user.sub, confirm: req.body?.confirm });
+    if (!step.ok) return res.status(step.status).json(step.body);
+    const out = await deletionService().requestDeletion({
+      merchantId: req.user.merchantId, userId: req.user.sub, email: req.body?.email || null,
+      reason: req.body?.reason, channel: req.headers['x-app-platform'] ? 'app' : 'web', ip: req.ip,
+    });
+    const body = { ...deletionService().serialize(out.request), retractDays: deletionService().RETRACT_DAYS,
+      message: out.already ? 'Une demande est déjà en attente' : `Demande enregistrée — annulable jusqu'au ${new Date(out.request.retract_until).toLocaleDateString('fr-FR')}` };
+    res.status(out.already ? 200 : 201).json(body);
+  } catch (e) { logger.error('deletion request failed', { err: e.message }); res.status(500).json({ error: 'Erreur serveur' }); }
+});
+router.delete('/account/deletion-request', merchantAuth, async (req, res) => {
+  if (req.user.role !== 'owner') return res.status(403).json({ error: 'Seul le propriétaire du compte peut annuler la demande', code: 'INSUFFICIENT_ROLE' });
+  try {
+    const r = await deletionService().cancelDeletion({ merchantId: req.user.merchantId, userId: req.user.sub });
+    if (!r) return res.status(404).json({ error: 'Aucune demande en attente', code: 'NOT_FOUND' });
+    res.json({ ...deletionService().serialize(r), message: 'Demande de suppression annulée' });
+  } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
 router.post('/auth/change-password',    merchantAuth, changeMerchantPassword);
 
 // HOTFIX (audit §2.6, §3.4) : autorisation NFC simulee (auth code aleatoire, aucun

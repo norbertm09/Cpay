@@ -40,7 +40,5 @@
 -keepclassmembers class kotlinx.coroutines.** { volatile <fields>; }
 
 # Bibliotheques UI tierces sans regles consommateur fiables
--dontwarn com.github.mikephil.charting.**
--keep class com.github.mikephil.charting.** { *; }
 -dontwarn com.journeyapps.**
 -dontwarn com.google.zxing.**

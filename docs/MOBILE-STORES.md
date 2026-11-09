@@ -55,6 +55,21 @@ ne casse rien (installer l'APK universel signé et refaire le plan de test).
 6. Chaque nouvelle version : `bump-version.sh`, tag, AAB de la release → Play Console. `versionCode` doit croître
    (le `bump-version.sh` l'incrémente).
 
+### 1.5 Build de recette `staging` (lot 4)
+
+`./gradlew :app:assembleStaging` (artefact CI `android-staging-apk`) : serveur de développement, R8 et ressources
+réduites comme la release, **aucun journal HTTP**, identifiant `global.cpay.app.staging` installable à côté de la
+release. C'est ce build qui doit être remis aux testeurs terrain ; le `debug` (journal des en-têtes, Authorization
+masqué) reste réservé aux développeurs.
+
+### 1.6 Suppression de compte et confidentialité dans l'app (lot 4, exigence Google Play / Apple)
+
+Profil et sécurité → **Confidentialité et données** : lien vers la politique de confidentialité et « Supprimer mon
+compte » (propriétaire, confirmation step-up). La demande (`POST /merchant/account/deletion-request`) ouvre un délai
+de rétractation de 30 jours affiché dans l'écran, annulable depuis l'app ; les opérations la traitent dans le
+back-office (`/admin/account-deletion-requests`). URL web équivalente, à déclarer dans la Play Console :
+`https://c-pay.global/legal/suppression-compte.html`.
+
 ## 2. Expo → App Store (iOS)
 
 ### 2.1 Comptes (une fois)

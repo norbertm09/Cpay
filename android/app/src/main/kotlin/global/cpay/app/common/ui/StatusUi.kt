@@ -22,6 +22,7 @@ object StatusUi {
         "rejected"       -> ctx.getString(R.string.status_rejected)
         "authorized"     -> ctx.getString(R.string.status_authorized)
         "expired"        -> ctx.getString(R.string.status_expired)
+        "unknown"        -> ctx.getString(R.string.status_unknown)   // lot 4 (P1-2) : resultat operateur incertain, fonds reserves
         null, ""         -> "—"
         else             -> status
     }

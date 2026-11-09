@@ -225,11 +225,11 @@ jobs:
             grep -E "^e: |Could not (resolve|find|determine)|Unsupported|requires|incompatible" "$RUNNER_TEMP/gradle.log" | head -20 | sed 's/^/::error::/'
             exit 1
           }
-      - name: gradlew :app:assembleRelease :app:bundleRelease (non signes — eprouve R8 et l'AAB avant toute release)
+      - name: gradlew :app:assembleRelease :app:bundleRelease :app:assembleStaging (release non signee — eprouve R8 et l'AAB ; staging = recette)
         working-directory: android
         run: |
           set -o pipefail
-          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-release.log" || {
+          ./gradlew :app:assembleRelease :app:bundleRelease :app:assembleStaging --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-release.log" || {
             grep -A25 "What went wrong" "$RUNNER_TEMP/gradle-release.log" | grep -v "^\s*$" | head -40 | sed 's/^/::error::/'
             grep -E "^e: |Missing class|ERROR: R8|Could not (resolve|find|determine)|Unsupported|incompatible|missing_rules" "$RUNNER_TEMP/gradle-release.log" | head -40 | sed 's/^/::error::/'
             [ -f app/build/outputs/mapping/release/missing_rules.txt ] && { echo "::error::missing_rules.txt :"; sed 's/^/::error::/' app/build/outputs/mapping/release/missing_rules.txt | head -40; }
@@ -240,6 +240,13 @@ jobs:
           name: android-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 7
+          if-no-files-found: error
+      # Lot 4 (audit 2026-11-02 mobile P2-2) : build de recette terrain (serveur de dev, R8, aucun journal HTTP, .staging)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-staging-apk
+          path: android/app/build/outputs/apk/staging/*.apk
+          retention-days: 14
           if-no-files-found: error
 
   # ────────────────────────────────────────────────────────────────

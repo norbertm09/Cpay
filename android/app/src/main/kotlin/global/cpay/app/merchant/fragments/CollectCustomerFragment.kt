@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
 class CollectCustomerFragment : Fragment() {
 
     companion object {
+        private const val S_IDEM = "idem_key"; private const val S_REF = "pending_ref"
         const val TAG = "collect_customer"
         private const val ARG_AMOUNT = "amount"
         private const val ARG_CURRENCY = "currency"
@@ -65,6 +66,7 @@ class CollectCustomerFragment : Fragment() {
     }
 
     override fun onViewCreated(v: View, s: Bundle?) {
+        idemKey = s?.getString(S_IDEM) ?: idemKey; pendingRef = s?.getString(S_REF) ?: pendingRef
         amount   = requireArguments().getDouble(ARG_AMOUNT)
         currency = requireArguments().getString(ARG_CURRENCY) ?: currency
 
@@ -197,8 +199,10 @@ class CollectCustomerFragment : Fragment() {
         }
         val phone = d?.phone?.takeIf { it.isNotBlank() } ?: SecurityManager.normalizePhone(rawPhone)
         val desc = b.etDescription.text.toString().trim()
-        val ref  = SecurityManager.generateRef("ENC")
-        val idem = SecurityManager.generateRef("IDK")
+        // Lot 4 (audit 2026-11-02 mobile P1-1) : une cle (et une reference) STABLES par intention — conservees tant que
+        // le serveur n'a pas repondu definitivement (reseau, 5xx, 409 en cours, 428), liberees sur succes ou refus.
+        val ref  = pendingRef ?: SecurityManager.generateRef("ENC").also { pendingRef = it }
+        val idem = idemKey ?: SecurityManager.newIdempotencyKey().also { idemKey = it }
         val opLabelGuess = if (chosenOperator != null) CashLabels.operator(chosenOperator) else d?.operatorLabel ?: getString(R.string.method_mobile_money)
 
         b.tvError.visibility = View.GONE
@@ -211,6 +215,7 @@ class CollectCustomerFragment : Fragment() {
                 if (_b == null) return@launch
                 val body = r.body()
                 if (r.isSuccessful && body != null) {
+                    idemKey = null; pendingRef = null
                     val cur = body.currency?.takeIf { it.isNotBlank() } ?: currency
                     val opLabel = body.operatorLabel
                         ?: (body.operator ?: chosenOperator ?: d?.operator)?.let { CashLabels.operator(it) }
@@ -226,14 +231,24 @@ class CollectCustomerFragment : Fragment() {
                         act?.push(CollectWaitingFragment.newInstance(txnId, amt, cur, reference, phone, opLabel, body.fee ?: 0.0), CollectWaitingFragment.TAG)
                     }
                 } else {
-                    error(ApiErrors.cashMessage(r, currency, getString(R.string.collect_refused)))
+                    val e = ApiErrors.of(r)
+                    if (!ApiErrors.keepIdempotencyKey(r.code(), e)) { idemKey = null; pendingRef = null }
+                    error(ApiErrors.cashMessage(r.code(), e, currency, getString(R.string.collect_refused)))
                 }
             } catch (e: Exception) {
+                // reseau / delai : l'ordre a peut-etre ete cree — la cle est conservee, le prochain appui rejoue la MEME intention
                 if (_b != null) error(getString(R.string.network_error))
             } finally {
                 if (_b != null) loading(false)
             }
         }
+    }
+
+    private var idemKey: String? = null
+    private var pendingRef: String? = null
+    override fun onSaveInstanceState(out: Bundle) {
+        super.onSaveInstanceState(out)
+        out.putString(S_IDEM, idemKey); out.putString(S_REF, pendingRef)
     }
 
     private fun error(m: String) { b.tvError.text = m; b.tvError.visibility = View.VISIBLE }

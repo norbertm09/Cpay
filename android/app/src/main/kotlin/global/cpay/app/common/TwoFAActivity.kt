@@ -32,6 +32,8 @@ class TwoFAActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Lot 4 (audit 2026-11-02 mobile P2-1) : pas de capture d'ecran ni d'apercu dans les apps recentes (solde, numeros, secret TOTP)
+        window.setFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE, android.view.WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_2fa)
 
         val userType   = intent.getStringExtra(AuthFlow.EXTRA_USER_TYPE) ?: SessionManager.userType ?: "cardholder"

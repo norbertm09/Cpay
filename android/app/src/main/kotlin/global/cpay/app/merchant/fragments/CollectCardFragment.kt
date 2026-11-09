@@ -56,6 +56,7 @@ class CollectCardFragment : Fragment() {
     }
 
     override fun onViewCreated(v: View, s: Bundle?) {
+        idemKey = s?.getString("idem_key") ?: idemKey; pendingRef = s?.getString("pending_ref") ?: pendingRef; url = s?.getString("url") ?: url
         amount = requireArguments().getDouble(A_AMOUNT)
         currency = requireArguments().getString(A_CUR) ?: currency
         b.header.tvScreenTitle.text = getString(R.string.collect_card_title)
@@ -83,16 +84,23 @@ class CollectCardFragment : Fragment() {
         if (url == null) create()
     }
 
+    private var idemKey: String? = null
+    private var pendingRef: String? = null
+    override fun onSaveInstanceState(out: Bundle) { super.onSaveInstanceState(out); out.putString("idem_key", idemKey); out.putString("pending_ref", pendingRef); out.putString("url", url) }
+
     private fun create() {
-        val idem = SecurityManager.generateRef("IDK")
+        // Lot 4 (P1-1) : cle et reference stables tant que le lien n'est pas cree (rotation d'ecran, reseau)
+        val idem = idemKey ?: SecurityManager.newIdempotencyKey().also { idemKey = it }
+        val ref = pendingRef ?: SecurityManager.generateRef("CRD").also { pendingRef = it }
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val r = ApiClient.api.cashCollect(idem, CashCollectRequest(
-                    amount = amount, method = "card", reference = SecurityManager.generateRef("CRD")))
+                    amount = amount, method = "card", reference = ref))
                 if (_b == null) return@launch
                 val link = r.body()?.payLink
                 val u = link?.shortUrl
                 if (r.isSuccessful && !u.isNullOrBlank()) {
+                    idemKey = null; pendingRef = null
                     url = u
                     val bmp = withContext(Dispatchers.Default) { qrBitmap(u, 720) }
                     if (_b == null) return@launch
@@ -106,7 +114,9 @@ class CollectCardFragment : Fragment() {
                 } else if (r.isSuccessful) {
                     fail(getString(R.string.collect_card_unavailable))
                 } else {
-                    fail(ApiErrors.cashMessage(r, currency, getString(R.string.collect_card_error)))
+                    val e = ApiErrors.of(r)
+                    if (!ApiErrors.keepIdempotencyKey(r.code(), e)) { idemKey = null; pendingRef = null }
+                    fail(ApiErrors.cashMessage(r.code(), e, currency, getString(R.string.collect_card_error)))
                 }
             } catch (e: Exception) {
                 if (_b != null) fail(getString(R.string.network_error))

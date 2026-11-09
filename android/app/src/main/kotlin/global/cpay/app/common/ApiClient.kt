@@ -65,9 +65,12 @@ object ApiClient {
     fun init(context: Context) {
         appContext = context.applicationContext
 
+        // Lot 4 (audit 2026-11-02 mobile P2-2) : plus jamais les corps HTTP (mots de passe, codes TOTP, refresh
+        // token, numeros clients) dans logcat ; en debug : en-tetes seulement, Authorization masque.
         val logging = HttpLoggingInterceptor().apply {
-            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.HEADERS
                     else HttpLoggingInterceptor.Level.NONE
+            redactHeader("Authorization"); redactHeader("Cookie"); redactHeader("Idempotency-Key")
         }
 
         // Client dedie au refresh : aucun intercepteur d'auth (evite toute recursion).
@@ -237,6 +240,7 @@ object ApiClient {
         SessionManager.clearSession()
         global.cpay.app.merchant.CashSession.clear()
         global.cpay.app.merchant.StepUp.reset()
+        global.cpay.app.db.CacheManager.clearAllAsync(appContext)   // lot 4 (P1-3) : rien ne reste du marchand precedent
         appContext.sendBroadcast(Intent(ACTION_LOGOUT).setPackage(appContext.packageName))
         Handler(Looper.getMainLooper()).post {
             val i = Intent(appContext, ProfileSelectActivity::class.java)
@@ -266,6 +270,7 @@ object ApiClient {
         } catch (e: Exception) {
             Log.w(TAG, "logout: ${e.message}")
         }
+        global.cpay.app.db.CacheManager.clearAll(appContext)        // lot 4 (P1-3) : purge Room (journal, solde, wallet)
         SessionManager.clearSession()
         global.cpay.app.merchant.CashSession.clear()
         global.cpay.app.merchant.StepUp.reset()
