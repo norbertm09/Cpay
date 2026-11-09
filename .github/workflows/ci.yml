@@ -50,8 +50,8 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: cplus_ci
-          POSTGRES_PASSWORD: ci-${{ github.run_id }}   # non secret, differe a chaque run (GitGuardian)
           POSTGRES_DB: cplus_ci
+          POSTGRES_HOST_AUTH_METHOD: trust   # base jetable du runner : aucun mot de passe a stocker dans le workflow
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U cplus_ci -d cplus_ci"
@@ -80,10 +80,9 @@ jobs:
           DB_PORT: '5432'
           DB_NAME: cplus_ci
           DB_USER: cplus_ci
-          DB_PASSWORD: ci-${{ github.run_id }}
-          PGPASSWORD: ci-${{ github.run_id }}
           LOG_LEVEL: warn
         run: |
+          export DB_PASSWORD="$(openssl rand -hex 12)"   # ignore par le service (trust) ; valeur requise par le client pg
           node src/config/migrate.js
           node src/config/migrate.js   # deja appliquees : aucune erreur de checksum
           expected=$(ls database/ | grep -cE '^[0-9]+_.*\.sql$')
@@ -291,8 +290,8 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: cplus_ci
-          POSTGRES_PASSWORD: ci-${{ github.run_id }}   # non secret, differe a chaque run (GitGuardian)
           POSTGRES_DB: cplus_ci
+          POSTGRES_HOST_AUTH_METHOD: trust   # base jetable du runner : aucun mot de passe a stocker dans le workflow
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U cplus_ci -d cplus_ci"
@@ -313,6 +312,7 @@ jobs:
       - name: Demarrage de l'image API (migrations + /health) — lot 7
         run: |
           # Valeurs factices valides pour validateEnv (NODE_ENV=production) : rien n'est publie, aucun operateur n'est appele.
+          CI_DB_PASSWORD="$(openssl rand -hex 12)"   # ignore par le service (trust)
           cat > "$RUNNER_TEMP/api.env" <<ENV
           NODE_ENV=production
           PORT=3000
@@ -320,7 +320,7 @@ jobs:
           DB_PORT=5432
           DB_NAME=cplus_ci
           DB_USER=cplus_ci
-          DB_PASSWORD=ci-${{ github.run_id }}
+          DB_PASSWORD=$CI_DB_PASSWORD
           JWT_SECRET=ci-jwt-secret-0123456789abcdef0123456789abcdef
           INTERNAL_TOKEN=ci-internal-token-0123456789abcdef
           METRICS_TOKEN=ci-metrics-token-0123456789abcdef
@@ -329,7 +329,7 @@ jobs:
           API_BASE_URL=https://api.ci.invalid
           PAY_LINK_BASE_URL=https://pay.ci.invalid
           ALLOWED_ORIGINS=https://admin.ci.invalid
-          GRAFANA_PASSWORD=ci-grafana-0123456789
+          GRAFANA_PASSWORD=$CI_DB_PASSWORD
           CERTBOT_EMAIL=ci@ci.invalid
           RECONCILE_ENABLED=false
           LOG_LEVEL=warn
