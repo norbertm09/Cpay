@@ -1,5 +1,10 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-deps (2026-11-09) — tri de la premiere vague Dependabot
+* `dependabot.yml` : majeures ignorees pour Node (images), React / Vitest / Vite (portails), uuid (backend, ESM-only),
+  babel-preset-expo et modules React Native lies au SDK Expo ; nginx suivi sur la branche stable (mineures impaires =
+  mainline ignorees) ; AndroidX et Kotlin/KSP groupes. `dotenv.config({ quiet: true })` avant le passage a dotenv 18.
+
 ## 2.7.2-lot7 (2026-11-09) — P2 infrastructure (audit du 2 novembre, § 8 a 13) + back-office des suppressions de compte
 * Conteneurs durcis : portails et vitrine sur `nginxinc/nginx-unprivileged:1.28-alpine` (processus sans root, port 8080,
   ports hote inchanges), `security_opt no-new-privileges`, `cap_drop ALL`, limites memoire/CPU par service (API 1,5 Go /
