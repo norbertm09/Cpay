@@ -43,5 +43,8 @@ Let's Encrypt sont gérés par `certbot` sur l'hôte (`certbot.timer`), les cont
 include snippets/cpay-security-spa.conf;
 ```
 
+Installation automatique (copie du snippet, insertion dans les blocs des portails, sauvegarde, `nginx -t`, reload) :
+`sudo bash /opt/cplus/scripts/add-spa-security-headers.sh` (`--dry-run` pour prévisualiser ; `API_ORIGIN=https://api.dev.c-pay.global VHOST=… ` sur le serveur de développement).
+
 Les conteneurs portails posent déjà la même CSP (`docker/nginx-spa.conf`, origine de l'API injectée au build par
 `Dockerfile.portal`). Sur le serveur de développement, remplacer `https://api.c-pay.global` par `https://api.dev.c-pay.global`.
