@@ -153,14 +153,19 @@ Sur le serveur (ou via `deploy.yml` avec `ref` = tag précédent) :
 cd /opt/cplus && ./scripts/deploy.sh --rollback
 ```
 
-- Revient au commit `previous` de `.deployed`, reconstruit les images (`CPLUS_TAG` = ancienne `VERSION`),
-  `docker compose up -d`, vérifie `/health`, puis inverse `current`/`previous` (un second `--rollback` revient donc
-  en avant).
+- Revient au commit `previous` de `.deployed`. Depuis le lot 3 (audit 2026-11-02 infra P1-5), chaque déploiement
+  étiquette ses images `cplus-*:<VERSION>-<sha12>` : le rollback redémarre les images précédentes **sans rebuild**
+  (`docker compose up -d` sur l'ancien tag, quelques secondes) et ne reconstruit que si elles ont été purgées. Il
+  vérifie `/health`, puis inverse `current`/`previous` (un second `--rollback` revient donc en avant). Les images des
+  trois derniers déploiements sont conservées (`.deploy-history`), les autres purgées.
 - Les **migrations ne sont pas annulées** : les migrations sont additives et compatibles avec la version précédente ;
   si une restauration de données est nécessaire, utiliser la sauvegarde `pre-<version>` :
   `scripts/restore-db.sh` (voir `docs/HOTFIX-V1.md`).
-- Alternative sans rebuild : les images précédentes restent présentes (`docker images cplus-api`) ;
-  `CPLUS_TAG=<ancienne version> docker compose up -d --no-build` depuis `docker/`.
+- Alternative manuelle : `docker images cplus-api` liste les tags disponibles ;
+  `CPLUS_TAG=<version>-<sha12> docker compose up -d --no-build` depuis `docker/`.
+- Déploiement SSH : le runner n'exécute plus de script arbitraire sur le serveur. Avec l'utilisateur `deploy`
+  (`scripts/setup-deploy-user.sh`), la clé porte une commande forcée (`scripts/deploy-remote.sh`) qui valide la ref et
+  les options, saute un commit déjà déployé (plus de double déploiement `main` + tag) puis lance `deploy.sh`.
 
 ## 8. Vérifier localement avant de pousser
 

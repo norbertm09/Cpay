@@ -9,7 +9,7 @@
 #   1. enregistre le commit en cours/precedent dans .deployed (pour --rollback)
 #   2. verifie backend/.env (backend/scripts/check-production-env.js, dans l'image api)
 #   3. sauvegarde PostgreSQL (scripts/backup-db.sh --label pre-<version>)
-#   4. docker compose build (api + portails ; CPLUS_TAG=<version>)
+#   4. docker compose build (api + portails ; CPLUS_TAG=<version>-<sha12>, lot 3 : une image par commit)
 #   5. migrations (docker compose run --rm --no-deps -e RUN_MIGRATIONS=false api node src/config/migrate.js)
 #   6. docker compose up -d --remove-orphans
 #   7. health checks : API 127.0.0.1:3001/health, vitrine 127.0.0.1:3006/, portails (non bloquants)
@@ -78,7 +78,16 @@ command -v curl >/dev/null 2>&1 || die "curl introuvable"
 
 CURRENT_SHA="$(git rev-parse HEAD)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-export CPLUS_TAG="$VERSION"
+# Lot 3 (audit 2026-11-02 infra P1-5) : une image par commit (VERSION-sha12). Deux deploiements successifs avec la
+# meme VERSION n'ecrasent plus la meme etiquette : le rollback redemarre l'image precedente SANS rebuild.
+tag_for() { echo "$VERSION-$(git rev-parse --short=12 "$1")"; }
+export CPLUS_TAG="$(tag_for HEAD)"
+images_present() { # images_present <tag> : toutes les images cplus-* du compose existent pour ce tag
+  for img in $(compose config --images 2>/dev/null | grep '^cplus-' | sed 's/:.*//'); do
+    docker image inspect "$img:$1" >/dev/null 2>&1 || return 1
+  done
+  return 0
+}
 
 # ─── Rollback : revenir au commit precedent ─────────────────────
 if [ "$ROLLBACK" = true ]; then
@@ -86,9 +95,14 @@ if [ "$ROLLBACK" = true ]; then
   [ -n "$PREV" ] || die "Pas de commit precedent dans $STATE_FILE — rollback impossible"
   log "ROLLBACK : $CURRENT_SHA -> $PREV"
   git -c advice.detachedHead=false checkout --detach "$PREV" || die "git checkout $PREV impossible"
-  VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"; export CPLUS_TAG="$VERSION"
-  log "Version restauree : $VERSION ; reconstruction des images"
-  compose build
+  VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"; export CPLUS_TAG="$(tag_for HEAD)"
+  if images_present "$CPLUS_TAG"; then
+    log "Version restauree : $VERSION ($CPLUS_TAG) ; images presentes, redemarrage sans rebuild"
+  else
+    # ancien deploiement (etiquette = VERSION seule) ou images purgees : reconstruction
+    if images_present "$VERSION"; then export CPLUS_TAG="$VERSION"; log "Images historiques $VERSION presentes, redemarrage sans rebuild"
+    else log "Images $CPLUS_TAG absentes : reconstruction"; compose build; fi
+  fi
   log "Les migrations ne sont pas annulees (schema compatible ascendant) ; restauration DB manuelle : scripts/restore-db.sh"
   compose up -d --remove-orphans
   wait_http http://127.0.0.1:3001/health 45 '"status":"ok"' || die "API KO apres rollback (127.0.0.1:3001/health)"
@@ -165,8 +179,13 @@ for portal in "merchant 3002" "cardholder 3003" "admin 3004" "partners 3005"; do
   if wait_http "http://127.0.0.1:$2/" 10 '<html'; then log "  portail $1 OK (:$2)"; else warn "  portail $1 injoignable (:$2)"; fi
 done
 
-log "Nettoyage des images obsoletes…"
-docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true
+log "Nettoyage des images obsoletes (les 3 derniers deploiements sont conserves pour le rollback)…"
+KEEP_TAGS="$(tail -n 3 "$HISTORY_FILE" 2>/dev/null | awk '{print $2}' | while read -r sha; do [ -n "$sha" ] && echo "$VERSION-$(git rev-parse --short=12 "$sha" 2>/dev/null || echo "$sha")"; done | tr '\n' ' ')"
+for ref in $(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^cplus-' || true); do
+  tag="${ref#*:}"
+  case " $KEEP_TAGS $VERSION $CPLUS_TAG " in *" $tag "*) ;; *) docker image rm "$ref" >/dev/null 2>&1 || true ;; esac
+done
+docker image prune -f >/dev/null 2>&1 || true
 
 compose ps | tee -a "$LOG_FILE"
 log "Deploiement $VERSION termine (commit $CURRENT_SHA). Rollback : ./scripts/deploy.sh --rollback"

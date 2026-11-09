@@ -48,8 +48,13 @@ environnement à la fois ; `develop` ne peut pas atteindre la production.
 
 | Environnement | Secrets (mêmes noms dans les deux) | Variables | Règles |
 |---|---|---|---|
-| `production` | `OVH_SSH_HOST=137.74.46.246`, `OVH_SSH_USER=root`, `OVH_KNOWN_HOSTS=<empreinte 137.74.46.246>`, `OVH_SSH_KEY` (ou au niveau dépôt) | `CPAY_DOMAIN=c-pay.global` | Required reviewers : vous ; Deployment branches and tags : `main` et `v*` |
-| `development` | `OVH_SSH_HOST=51.91.98.115`, `OVH_SSH_USER=root`, `OVH_KNOWN_HOSTS=<empreinte 51.91.98.115>`, `OVH_SSH_KEY` (ou au niveau dépôt) | `CPAY_DOMAIN=dev.c-pay.global` | aucune (déploiement automatique) |
+| `production` | `OVH_SSH_HOST=137.74.46.246`, `OVH_SSH_USER=deploy` (ou `root` avant le lot 3), `OVH_KNOWN_HOSTS=<empreinte 137.74.46.246>`, `OVH_SSH_KEY` (ou au niveau dépôt) | `CPAY_DOMAIN=c-pay.global` | Required reviewers : vous ; Deployment branches and tags : `main` et `v*` |
+| `development` | `OVH_SSH_HOST=51.91.98.115`, `OVH_SSH_USER=deploy` (ou `root` avant le lot 3), `OVH_KNOWN_HOSTS=<empreinte 51.91.98.115>`, `OVH_SSH_KEY` (ou au niveau dépôt) | `CPAY_DOMAIN=dev.c-pay.global` | aucune (déploiement automatique) |
+
+**Lot 3 (audit 2026-11-02 infra P1-2)** : remplacer `OVH_SSH_USER=root` par `OVH_SSH_USER=deploy` après avoir créé
+l'utilisateur sur chaque serveur : `sudo bash /opt/cplus/scripts/setup-deploy-user.sh --pubkey "<clé publique cpay_deploy2>"
+--remove-root-key`. La clé n'autorise alors que la commande forcée `scripts/deploy-remote.sh` (ref et options validées) ;
+le workflow continue de fonctionner avec `root` tant que la bascule n'est pas faite.
 
 `OVH_SSH_KEY` peut rester un secret de dépôt : la même clé `cpay_deploy2` est autorisée sur les deux serveurs. Les secrets
 `OVH_SSH_HOST` / `OVH_KNOWN_HOSTS` **de dépôt** deviennent inutiles : les supprimer évite toute ambiguïté.

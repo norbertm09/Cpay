@@ -68,7 +68,7 @@ apt-get install -y -qq \
   nginx certbot python3-certbot-nginx \
   postgresql-client \
   git curl wget rsync ca-certificates gnupg lsb-release openssl \
-  ufw fail2ban logrotate cron \
+  ufw fail2ban logrotate cron rclone age \
   jq unzip htop ncdu tree
 systemctl enable --now nginx cron fail2ban >/dev/null 2>&1 || true
 
@@ -191,7 +191,7 @@ git config --global --add safe.directory "$APP" >/dev/null 2>&1 || true
 if [ -n "$DEPLOY_PUBKEY" ]; then
   touch /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys
   grep -qF "$DEPLOY_PUBKEY" /root/.ssh/authorized_keys || echo "$DEPLOY_PUBKEY" >> /root/.ssh/authorized_keys
-  log "Cle de deploiement GitHub Actions autorisee"
+  log "Cle de deploiement GitHub Actions autorisee (root) — recommande (lot 3) : scripts/setup-deploy-user.sh --pubkey '…' --remove-root-key pour passer a l'utilisateur deploy avec commande forcee"
 fi
 
 # ─── 5. Import de l'archive de l'ancien serveur ─────────────────
@@ -272,11 +272,15 @@ cat > /etc/cron.d/cpay <<CRON
 # C-Pay 2.7 — taches planifiees (root : /opt/cplus appartient a root, deploiement GitHub Actions en root)
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# Sauvegarde PostgreSQL quotidienne 01:00 (retention 30 j, copie distante si BACKUP_REMOTE)
+# Sauvegarde PostgreSQL quotidienne 01:00 — chiffree + copie hors serveur + metriques/alertes (lot 3 : /etc/cplus/backup.env)
 0 1 * * * root $APP/scripts/backup-db.sh >> /var/log/cplus/backup.log 2>&1
-# Health check toutes les 5 minutes
+# Health check toutes les 5 minutes (tous les vhosts, metriques cpay_healthcheck_up, alerte Alertmanager)
 */5 * * * * root $APP/scripts/healthcheck-prod.sh >> /var/log/cplus/healthcheck.log 2>&1
+# Expiration des certificats TLS -> metriques (alertes CertificateExpiringSoon / CertbotTimerDisabled)
+15 6 * * * root $APP/scripts/cert-expiry-metric.sh >> /var/log/cplus/cert-expiry.log 2>&1
 CRON
+install -d -m 0755 /var/lib/node_exporter/textfile
+[ -f /etc/cplus/backup.env ] || { install -d -m 0700 /etc/cplus; install -m 0600 "$APP/monitoring/backup.env.example" /etc/cplus/backup.env; warn "/etc/cplus/backup.env cree depuis le modele : renseigner BACKUP_REMOTE et la cle de chiffrement (docs/EXPLOITATION.md)"; }
 cat > /etc/logrotate.d/cpay <<'LR'
 /var/log/cplus/*.log {
   daily
