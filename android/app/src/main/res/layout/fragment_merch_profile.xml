@@ -75,6 +75,33 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Lot 4 (audit 2026-11-02 mobile P0-2) : confidentialite et suppression de compte (Google Play / Apple) -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_section_privacy"
+            android:textAppearance="@style/TextAppearance.CPay.Secondary" android:textStyle="bold" android:layout_marginTop="20dp" android:layout_marginBottom="8dp"/>
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                <LinearLayout android:id="@+id/row_privacy" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+                    android:gravity="center_vertical" android:minHeight="64dp" android:padding="12dp" android:background="?attr/selectableItemBackground" android:clickable="true" android:focusable="true">
+                    <ImageView android:layout_width="40dp" android:layout_height="40dp" android:padding="9dp" android:background="@drawable/bg_circle" android:src="@drawable/ic_shield" app:tint="@color/brand_primary" android:contentDescription="@null"/>
+                    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="14dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_privacy_policy" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_privacy_policy_sub" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    </LinearLayout>
+                </LinearLayout>
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/outline" android:layout_marginStart="66dp"/>
+                <LinearLayout android:id="@+id/row_delete_account" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+                    android:gravity="center_vertical" android:minHeight="64dp" android:padding="12dp" android:background="?attr/selectableItemBackground" android:clickable="true" android:focusable="true">
+                    <ImageView android:layout_width="40dp" android:layout_height="40dp" android:padding="9dp" android:background="@drawable/bg_circle" android:src="@drawable/ic_warning" app:tint="@color/error_main" android:contentDescription="@null"/>
+                    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="14dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_delete_account" android:textAppearance="@style/TextAppearance.CPay.Body" android:textStyle="bold" android:textColor="@color/error_main"/>
+                        <TextView android:id="@+id/tv_delete_sub" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/profile_delete_account_sub" android:textAppearance="@style/TextAppearance.CPay.Secondary"/>
+                    </LinearLayout>
+                </LinearLayout>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btn_cancel_deletion" style="@style/Widget.CPay.Button.Danger" android:visibility="gone"
+                    android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/profile_delete_cancel" android:layout_margin="12dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <com.google.android.material.button.MaterialButton android:id="@+id/btn_logout" style="@style/Widget.CPay.Button.Danger"
             android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/profile_logout"
             app:icon="@drawable/ic_logout" app:iconGravity="textStart" android:layout_marginTop="24dp"/>

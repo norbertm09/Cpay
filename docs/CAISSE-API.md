@@ -304,3 +304,18 @@ Déploiement : backend et portails marchand/admin ensemble, avec la sauvegarde s
 supplémentaire dans ce lot. Vérifier le premier cycle réussi, ses trois étapes et l'actualisation d'un ordre
 existant en recette. Ne pas relancer une transaction réelle pour tester une coupure. Les tests locaux simulent
 les frontières fournisseurs/SMTP et ne prouvent pas l'accès réel aux comptes opérateurs en production.
+
+## 12. Suppression de compte (lot 4, audit 2026-11-02 mobile P0-2)
+
+| Route | Rôle | Effet |
+|---|---|---|
+| `GET /merchant/account/deletion-request` | tout utilisateur | `{ request\|null, retractDays, policyUrl, deletionUrl }` |
+| `POST /merchant/account/deletion-request` `{ reason?, confirm }` | **owner** + step-up | `201 { requestId, status:"pending", retractUntil, canCancel:true, balanceAtRequest }` ; `200` si une demande est déjà en attente ; `403 INSUFFICIENT_ROLE` ; `428 STEP_UP_REQUIRED` |
+| `DELETE /merchant/account/deletion-request` | **owner** | rétractation tant que `pending` → `status:"cancelled"` ; `404` sinon |
+| `GET /admin/account-deletion-requests?status=pending\|processed\|rejected\|cancelled\|all` | `super_admin`, `ops_admin` | liste avec `businessName`, `country`, `balanceAtRequest` |
+| `PATCH /admin/account-deletion-requests/:id` `{ status: processed\|rejected, note }` | `super_admin`, `ops_admin` | `processed` : utilisateurs désactivés, marchand `suspended`, sessions révoquées, e-mail ; `rejected` : note obligatoire, compte conservé ; `409` si déjà traitée |
+
+Règles : une seule demande `pending` par marchand (index unique) ; délai `ACCOUNT_DELETION_RETRACT_DAYS` (30 j) ;
+e-mails au marchand et aux opérations (`ADMIN_ALERT_EMAIL`) ; le solde disponible est mémorisé — à reverser avant
+exécution. L'anonymisation des données personnelles hors obligations légales (LCB-FT, comptabilité) est réalisée par
+les opérations selon `portal/landing/legal/suppression-compte.html`. Migration `014_account_deletion_requests.sql`.

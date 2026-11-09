@@ -228,14 +228,6 @@ data class DisburseRequest(
     @SerializedName("description")    val description: String = "",
 )
 
-/** Ancien retrait direct (POST /merchant/withdraw, 410 depuis le hotfix v1). */
-data class LegacyWithdrawRequest(
-    @SerializedName("amount")      val amount: Double,
-    @SerializedName("phone")       val phone: String,
-    @SerializedName("operator")    val operator: String,
-    @SerializedName("description") val description: String = "",
-)
-
 data class PaymentResponse(
     @SerializedName("success")   val success: Boolean = false,
     @SerializedName("txnId")     val txnId: String? = null,
@@ -754,6 +746,9 @@ data class WithdrawResponse(
     @SerializedName("fee")        val fee: Double? = null,
     @SerializedName("net")        val net: Double? = null,
     @SerializedName("wallet")     val wallet: CashWallet? = null,
+    @SerializedName("outcome")    val outcome: String? = null,   // lot 4 : "unknown" = operateur sans reponse, fonds reserves
+    @SerializedName("message")    val message: String? = null,
+    @SerializedName("replayed")   val replayed: Boolean? = null, // IDEMPOTENCY_REPLAY : reponse d'origine rejouee
 )
 
 /** POST /merchant/cash/transfers { direction, accountId?, amount, description?, confirm } */
@@ -924,6 +919,7 @@ object CashLabels {
         "rejected"       -> "Rejeté"
         "authorized"     -> "Autorisé"
         "expired"        -> "Expiré"
+        "unknown"        -> "Résultat incertain"
         else             -> status ?: "—"
     }
 
@@ -934,3 +930,25 @@ object CashLabels {
         else                                    -> "#c47000"
     }
 }
+
+// ─── Lot 4 (audit 2026-11-02 mobile P0-2) : suppression de compte ───
+/** POST /merchant/account/deletion-request { reason?, confirm } */
+data class DeletionRequestBody(
+    @SerializedName("reason")  val reason: String? = null,
+    @SerializedName("confirm") val confirm: Map<String, String>,
+)
+data class DeletionRequest(
+    @SerializedName("requestId")    val requestId: String? = null,
+    @SerializedName("status")       val status: String? = null,
+    @SerializedName("requestedAt")  val requestedAt: String? = null,
+    @SerializedName("retractUntil") val retractUntil: String? = null,
+    @SerializedName("canCancel")    val canCancel: Boolean? = null,
+    @SerializedName("message")      val message: String? = null,
+)
+/** GET /merchant/account/deletion-request → { request|null, retractDays, policyUrl, deletionUrl } */
+data class DeletionState(
+    @SerializedName("request")     val request: DeletionRequest? = null,
+    @SerializedName("retractDays") val retractDays: Int? = null,
+    @SerializedName("policyUrl")   val policyUrl: String? = null,
+    @SerializedName("deletionUrl") val deletionUrl: String? = null,
+)

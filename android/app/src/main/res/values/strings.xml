@@ -457,4 +457,29 @@
     <string name="status_rejected">Rejeté</string>
     <string name="status_authorized">Approuvé</string>
     <string name="status_expired">Expiré</string>
+    <string name="status_unknown">Résultat incertain</string>
+
+    <!-- Lot 4 : retrait au resultat incertain / en cours -->
+    <string name="withdraw_uncertain_title">Retrait en cours de vérification</string>
+    <string name="withdraw_uncertain_body">L’opérateur n’a pas encore confirmé. Les fonds restent réservés : ne relancez pas le retrait, suivez son état dans le Journal.</string>
+    <string name="withdraw_processing_title">Retrait en cours</string>
+    <string name="withdraw_processing_body">L’opérateur traite votre retrait. Son état final apparaîtra dans le Journal.</string>
+    <string name="withdraw_replayed">Cette demande avait déjà été enregistrée : voici son état actuel.</string>
+
+    <!-- Lot 4 : confidentialite et suppression de compte -->
+    <string name="profile_section_privacy">Confidentialité et données</string>
+    <string name="profile_privacy_policy">Politique de confidentialité</string>
+    <string name="profile_privacy_policy_sub">Données collectées, durées de conservation, vos droits</string>
+    <string name="profile_delete_account">Supprimer mon compte</string>
+    <string name="profile_delete_account_sub">Demande traitée sous 30 jours, annulable pendant ce délai</string>
+    <string name="profile_delete_confirm_title">Supprimer votre compte C-Pay ?</string>
+    <string name="profile_delete_confirm_body">Vos accès seront désactivés et vos données personnelles supprimées à l’issue d’un délai de rétractation de 30 jours. Les données que la loi nous impose de conserver (transactions, pièces KYB) sont archivées. Retirez d’abord votre solde disponible.</string>
+    <string name="profile_delete_confirm_cta">Demander la suppression</string>
+    <string name="profile_delete_stepup_title">Confirmer la suppression du compte</string>
+    <string name="profile_delete_pending_fmt">Suppression demandée — annulable jusqu’au %1$s. Vos accès seront ensuite désactivés.</string>
+    <string name="profile_delete_cancel">Annuler la demande de suppression</string>
+    <string name="profile_delete_cancelled">Demande de suppression annulée</string>
+    <string name="profile_delete_requested">Demande de suppression enregistrée</string>
+    <string name="profile_delete_owner_only">Seul le propriétaire du compte peut demander sa suppression</string>
+    <string name="profile_open_link_error">Impossible d’ouvrir le lien</string>
 </resources>

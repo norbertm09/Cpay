@@ -102,7 +102,7 @@ class CaisseHomeFragment : Fragment() {
                     CashSession.summary = s
                     cachedAt = null
                     render(s)
-                    CacheManager.putJson(ctx, CacheManager.KEY_CASH_SUMMARY, s)
+                    CacheManager.putJson(ctx, CacheManager.keyCashSummary(), s)
                 } else if (ApiErrors.isFeatureDisabled(r)) {
                     showError(getString(R.string.caisse_feature_pending))
                 } else {
@@ -112,7 +112,7 @@ class CaisseHomeFragment : Fragment() {
                 online = false
                 if (_b == null) return@launch
                 if (CashSession.summary == null) {
-                    val cached = CacheManager.getJson(ctx, CacheManager.KEY_CASH_SUMMARY, CashSummary::class.java)
+                    val cached = CacheManager.getJson(ctx, CacheManager.keyCashSummary(), CashSummary::class.java)
                     if (_b == null) return@launch
                     if (cached != null) { cachedAt = cached.savedAt; render(cached.value) }
                     else showError(getString(R.string.network_error))

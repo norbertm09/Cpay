@@ -132,8 +132,13 @@ interface ApiService {
     @POST("merchant/disburse")
     suspend fun merchantDisburse(@Body body: DisburseRequest): Response<PaymentResponse>
 
-    @POST("merchant/withdraw")
-    suspend fun merchantWithdraw(@Body body: LegacyWithdrawRequest): Response<PaymentResponse>
+    // Lot 4 (audit 2026-11-02 mobile P0-2) : suppression de compte (Google Play / Apple) — proprietaire + step-up
+    @GET("merchant/account/deletion-request")
+    suspend fun accountDeletionState(): Response<DeletionState>
+    @POST("merchant/account/deletion-request")
+    suspend fun accountDeletionRequest(@Body body: DeletionRequestBody): Response<DeletionRequest>
+    @DELETE("merchant/account/deletion-request")
+    suspend fun accountDeletionCancel(): Response<DeletionRequest>
 
     // ═══════════ MERCHANT — CAISSE (WAVE-4, docs/CAISSE-API.md) ═══════════
     // Toute operation qui cree un mouvement exige l'en-tete Idempotency-Key (8-128 car.).

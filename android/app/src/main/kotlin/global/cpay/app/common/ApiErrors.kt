@@ -44,6 +44,19 @@ object ApiErrors {
     const val WALLET_MISSING       = "WALLET_MISSING"
     const val CURRENCY_MISMATCH    = "CURRENCY_MISMATCH"
     const val FUNDING_UNAVAILABLE  = "FUNDING_UNAVAILABLE"
+    // Lot 4 (P1-1) : idempotence (docs/CAISSE-API.md §0)
+    const val IDEMPOTENCY_REPLAY            = "IDEMPOTENCY_REPLAY"
+    const val IDEMPOTENCY_IN_PROGRESS       = "IDEMPOTENCY_IN_PROGRESS"
+    const val IDEMPOTENCY_RETRY_AFTER_ERROR = "IDEMPOTENCY_RETRY_AFTER_ERROR"
+    const val IDEMPOTENCY_CONFLICT          = "IDEMPOTENCY_CONFLICT"
+
+    /**
+     * Vrai si la cle d'idempotence doit etre CONSERVEE pour la prochaine tentative : le serveur n'a pas donne de
+     * reponse definitive (5xx, 428 step-up, operation en cours, derniere tentative en erreur). Un refus metier (4xx)
+     * libere la cle.
+     */
+    fun keepIdempotencyKey(httpCode: Int, e: ApiError?): Boolean =
+        httpCode >= 500 || httpCode == 428 || e?.code == IDEMPOTENCY_IN_PROGRESS || e?.code == IDEMPOTENCY_RETRY_AFTER_ERROR
 
     fun isStepUp(response: Response<*>, err: ApiError? = null): Boolean =
         response.code() == 428 || err?.code == STEP_UP_REQUIRED
@@ -63,6 +76,9 @@ object ApiErrors {
             STEP_UP_REQUIRED     -> "Confirmation requise (code 2FA ou mot de passe)"
             CURRENCY_MISMATCH    -> "La devise du numéro client ne correspond pas à celle de votre compte"
             FUNDING_UNAVAILABLE  -> "Aucun compte de collecte C-Pay pour votre devise — contactez le support"
+            IDEMPOTENCY_IN_PROGRESS       -> "Opération déjà en cours — patientez quelques secondes puis consultez le Journal"
+            IDEMPOTENCY_RETRY_AFTER_ERROR -> "La tentative précédente a échoué côté serveur — vérifiez le Journal avant de réessayer"
+            IDEMPOTENCY_CONFLICT          -> "Une autre opération utilise cette référence — recommencez une nouvelle saisie"
             "MERCHANT_INACTIVE"  -> "Compte marchand inactif — contactez le support"
             "VALIDATION_ERROR"   -> e.error?.takeIf { it.isNotBlank() } ?: "Données invalides"
             "INVALID_TOTP", "INVALID_PASSWORD", "INVALID_CONFIRMATION" -> "Confirmation invalide"

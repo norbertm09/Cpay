@@ -1,5 +1,20 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-lot4 (2026-11-09) — application mobile : publication (audit du 2 novembre)
+* Suppression de compte (Google Play / Apple) : migration 014, service `account/deletion.service`, routes
+  `GET/POST/DELETE /merchant/account/deletion-request` (proprietaire, step-up, retractation 30 j, une demande en
+  attente, e-mails) et `/admin/account-deletion-requests` (liste, `processed` = desactivation + suspension +
+  revocation des sessions, `rejected`) ; ecran Android « Confidentialite et donnees » (politique, demande, annulation).
+* Android : cle d'idempotence UUID stable par intention (encaissement, retrait, lien carte ; conservee sur reseau/5xx/
+  428/409 en cours, liberee sur reponse definitive, etat sauvegarde), codes IDEMPOTENCY_* traites ; statut `unknown`
+  et `processing` affiches comme attente (feuille PENDING, « ne relancez pas », suivi Journal) ; cache Room purge a
+  la deconnexion et a la perte de session, cles prefixees par utilisateur ; FLAG_SECURE (accueil marchand, 2FA, recu,
+  connexion) ; journal HTTP en debug reduit aux en-tetes (Authorization masque) ; deep link pay.c-pay.global factice
+  retire ; profil porteur masque, scanner QR / CameraX / ML Kit / Glide / MPAndroidChart retires, permission CAMERA
+  supprimee ; ancien retrait direct remplace par la caisse ; build `staging` (serveur de dev, R8, sans journal,
+  `.staging`) construit en CI (`android-staging-apk`).
+* Tests : `lot4-account-deletion.test.js` (7 cas PGlite).
+
 ## 2.7.2-lot3 (2026-11-09) — P1 exploitation de l'audit du 2 novembre
 * Deploiement : utilisateur `deploy` dedie (`scripts/setup-deploy-user.sh`) avec commande forcee `scripts/deploy-remote.sh`
   (ref et options validees, commit deja deploye ignore sauf --force) ; `deploy.yml` compatible root (mode historique) et

@@ -2,9 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <supports-screens
         android:smallScreens="true"
@@ -47,10 +45,6 @@
 
         <activity android:name=".cardholder.CardholderMainActivity"
             android:screenOrientation="portrait" android:exported="false"/>
-        <activity android:name=".cardholder.QRScanActivity"
-            android:screenOrientation="portrait" android:exported="false"/>
-        <activity android:name=".cardholder.PaymentConfirmActivity"
-            android:screenOrientation="portrait" android:exported="false"/>
 
         <activity android:name=".merchant.MerchantMainActivity"
             android:screenOrientation="portrait" android:exported="false"/>
@@ -66,14 +60,8 @@
             android:screenOrientation="portrait" android:exported="false"
             android:windowSoftInputMode="adjustResize"/>
 
-        <activity android:name=".common.DeepLinkActivity" android:exported="true">
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="https" android:host="pay.c-pay.global"/>
-            </intent-filter>
-        </activity>
+        <!-- Lot 4 (audit 2026-11-02 mobile P1-4) : l'intent-filter https://pay.c-pay.global a ete retire — un deep link
+             exporte sans traitement avalait les liens de paiement. A reintroduire avec assetlinks.json et un vrai routage. -->
             <activity android:name=".merchant.PairingActivity" android:exported="false" />
     </application>
 </manifest>

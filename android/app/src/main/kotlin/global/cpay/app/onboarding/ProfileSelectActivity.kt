@@ -21,9 +21,9 @@ class ProfileSelectActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.session_expired, Toast.LENGTH_LONG).show()
         }
 
-        binding.btnCardholder.setOnClickListener {
-            startLogin("cardholder")
-        }
+        // Lot 4 (audit 2026-11-02 mobile P1-5) : application MARCHANDE — le profil porteur (cartes virtuelles, QR, GTP)
+        // n'est pas en pilote et n'est plus propose ; le code porteur reste compile pour une future app dediee.
+        binding.btnCardholder.visibility = android.view.View.GONE
 
         binding.btnMerchant.setOnClickListener {
             startLogin("merchant")

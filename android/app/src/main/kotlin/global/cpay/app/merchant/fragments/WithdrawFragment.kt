@@ -63,6 +63,7 @@ class WithdrawFragment : Fragment() {
     }
 
     override fun onViewCreated(v: View, s: Bundle?) {
+        idemKey = s?.getString("idem_key") ?: idemKey
         b.header.tvScreenTitle.text = getString(R.string.withdraw_title)
         b.header.btnBack.setOnClickListener { act?.pop() }
 
@@ -275,7 +276,8 @@ class WithdrawFragment : Fragment() {
         val remaining = s?.limits?.withdrawDailyRemaining
         if (remaining != null && amt!! > remaining) { showErr(getString(R.string.withdraw_limit_fmt, money(remaining))); return }
         val desc = b.etDescription.text.toString().trim()
-        val idem = SecurityManager.generateRef("IDK")
+        // Lot 4 (P1-1) : cle d'idempotence stable tant que le resultat est inconnu (jamais deux retraits pour un appui repete)
+        val idem = idemKey ?: SecurityManager.newIdempotencyKey().also { idemKey = it }
         val ctx = requireContext()
         b.tvError.visibility = View.GONE
         b.progressBar.visibility = View.VISIBLE
@@ -288,16 +290,19 @@ class WithdrawFragment : Fragment() {
                 if (_b == null || r == null) return@launch
                 val body = r.body()
                 if (r.isSuccessful && body != null) {
+                    idemKey = null
                     b.etAmount.text?.clear(); b.etDescription.text?.clear()
                     showResult(body, amt!!)
                     load()
                 } else {
                     val e = ApiErrors.of(r)
+                    if (!ApiErrors.keepIdempotencyKey(r.code(), e)) idemKey = null
                     if (r.code() == 410 || e.code == ApiErrors.FEATURE_DISABLED) setFeatureDisabled()
                     if (e.code == ApiErrors.WALLET_MISSING) { wallet = null; renderWallet() }
                     showErr(ApiErrors.cashMessage(r.code(), e, currency, getString(R.string.withdraw_refused)))
                 }
             } catch (e: Exception) {
+                // reseau / delai : le retrait a peut-etre ete cree — meme cle au prochain appui (rejeu idempotent)
                 if (_b != null) showErr(getString(R.string.network_error))
             } finally {
                 if (_b != null) {
@@ -308,13 +313,24 @@ class WithdrawFragment : Fragment() {
         }
     }
 
+    private var idemKey: String? = null
+    override fun onSaveInstanceState(out: Bundle) { super.onSaveInstanceState(out); out.putString("idem_key", idemKey) }
+
     private fun showResult(r: WithdrawResponse, amt: Double) {
         val w = r.wallet ?: wallet
+        // Lot 4 (audit 2026-11-02 mobile P1-2) : `unknown` (operateur muet, fonds reserves) et `processing` ne sont PAS
+        // des succes — feuille d'attente, consigne de ne pas relancer, suivi dans le Journal.
+        val uncertain = r.status == "unknown" || r.outcome == "unknown"
+        val inFlight = r.status == "processing" || r.status == "pending"
+        val kind = if (uncertain || inFlight) ResultSheet.Kind.PENDING else ResultSheet.Kind.SUCCESS
+        val title = when { uncertain -> getString(R.string.withdraw_uncertain_title); inFlight -> getString(R.string.withdraw_processing_title); else -> getString(R.string.withdraw_done) }
+        val bodyText = (when { uncertain -> getString(R.string.withdraw_uncertain_body); inFlight -> getString(R.string.withdraw_processing_body); else -> getString(R.string.withdraw_done_body) }) +
+            (if (r.replayed == true) "\n" + getString(R.string.withdraw_replayed) else "")
         ResultSheet.show(requireContext(), ResultSheet.Spec(
-            kind = ResultSheet.Kind.SUCCESS,
-            title = getString(R.string.withdraw_done),
+            kind = kind,
+            title = title,
             amount = money(r.net ?: r.amount ?: amt),
-            body = getString(R.string.withdraw_done_body),
+            body = bodyText,
             rows = listOf(
                 getString(R.string.reference) to (r.reference ?: r.transferId),
                 getString(R.string.status) to StatusUi.statusLabel(requireContext(), r.status),

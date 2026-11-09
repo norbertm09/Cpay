@@ -12,7 +12,11 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import global.cpay.app.BuildConfig
 import global.cpay.app.R
+import android.net.Uri
 import global.cpay.app.common.ApiClient
+import global.cpay.app.common.ApiErrors
+import global.cpay.app.common.DeletionRequest
+import global.cpay.app.common.DeletionRequestBody
 import global.cpay.app.common.AuthFlow
 import global.cpay.app.common.BiometricHelper
 import global.cpay.app.common.ChangePasswordActivity
@@ -75,6 +79,11 @@ class MerchProfileFragment : Fragment() {
         b.btnPair.setOnClickListener { startActivity(Intent(requireContext(), PairingActivity::class.java)) }
         b.rowTerminal.setOnClickListener { act?.openTerminals() }
 
+        // Lot 4 (audit 2026-11-02 mobile P0-2) : politique de confidentialite et suppression de compte dans l'app
+        b.rowPrivacy.setOnClickListener { openUrl(policyUrl) }
+        b.rowDeleteAccount.setOnClickListener { if (pendingDeletion == null) confirmDeletion() else openUrl(deletionUrl) }
+        b.btnCancelDeletion.setOnClickListener { cancelDeletion() }
+
         b.btnLogout.setOnClickListener {
             MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.profile_logout)
@@ -86,7 +95,90 @@ class MerchProfileFragment : Fragment() {
         loadMe()
     }
 
-    override fun onResume() { super.onResume(); loadMe() }
+    override fun onResume() { super.onResume(); loadMe(); loadDeletionState() }
+
+    // ─── Lot 4 : suppression de compte ──────────────────────────────
+    private var policyUrl = "https://c-pay.global/legal/confidentialite.html"
+    private var deletionUrl = "https://c-pay.global/legal/suppression-compte.html"
+    private var pendingDeletion: DeletionRequest? = null
+
+    private fun openUrl(u: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u))) }
+        catch (_: Exception) { Toast.makeText(requireContext(), R.string.profile_open_link_error, Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun loadDeletionState() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val r = ApiClient.api.accountDeletionState()
+                val st = r.body()
+                if (_b == null || !r.isSuccessful || st == null) return@launch
+                st.policyUrl?.takeIf { it.isNotBlank() }?.let { policyUrl = it }
+                st.deletionUrl?.takeIf { it.isNotBlank() }?.let { deletionUrl = it }
+                renderDeletion(st.request)
+            } catch (_: Exception) { }
+        }
+    }
+
+    private fun renderDeletion(req: DeletionRequest?) {
+        if (_b == null) return
+        pendingDeletion = req?.takeIf { it.status == "pending" }
+        val p = pendingDeletion
+        if (p != null) {
+            val until = p.retractUntil?.let { global.cpay.app.common.ui.Fmt.shortDate(it) } ?: "—"
+            b.tvDeleteSub.text = getString(R.string.profile_delete_pending_fmt, until)
+            b.btnCancelDeletion.visibility = View.VISIBLE
+        } else {
+            b.tvDeleteSub.setText(R.string.profile_delete_account_sub)
+            b.btnCancelDeletion.visibility = View.GONE
+        }
+    }
+
+    private fun confirmDeletion() {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.profile_delete_confirm_title)
+            .setMessage(R.string.profile_delete_confirm_body)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.profile_delete_confirm_cta) { _, _ -> requestDeletion() }
+            .show()
+    }
+
+    private fun requestDeletion() {
+        val ctx = requireContext()
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val r = StepUp.run(ctx, getString(R.string.profile_delete_stepup_title)) { confirm ->
+                    ApiClient.api.accountDeletionRequest(DeletionRequestBody(reason = null, confirm = confirm))
+                }
+                if (_b == null || r == null) return@launch
+                val body = r.body()
+                if (r.isSuccessful && body != null) {
+                    renderDeletion(body)
+                    Toast.makeText(ctx, body.message ?: getString(R.string.profile_delete_requested), Toast.LENGTH_LONG).show()
+                } else {
+                    val e = ApiErrors.of(r)
+                    val msg = if (e.code == "INSUFFICIENT_ROLE") getString(R.string.profile_delete_owner_only) else ApiErrors.cashMessage(r.code(), e)
+                    Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                }
+            } catch (_: Exception) {
+                if (_b != null) Toast.makeText(ctx, R.string.network_error, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun cancelDeletion() {
+        val ctx = requireContext()
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val r = ApiClient.api.accountDeletionCancel()
+                if (_b == null) return@launch
+                if (r.isSuccessful) { renderDeletion(null); Toast.makeText(ctx, R.string.profile_delete_cancelled, Toast.LENGTH_SHORT).show() }
+                else Toast.makeText(ctx, ApiErrors.message(r), Toast.LENGTH_LONG).show()
+            } catch (_: Exception) {
+                if (_b != null) Toast.makeText(ctx, R.string.network_error, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     private fun loadMe() {
         viewLifecycleOwner.lifecycleScope.launch {

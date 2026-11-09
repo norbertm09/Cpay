@@ -8,7 +8,6 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import global.cpay.app.cardholder.QRScanActivity
 import global.cpay.app.cardholder.TransactionAdapter
 import global.cpay.app.common.ApiClient
 import global.cpay.app.common.SessionManager
@@ -35,7 +34,7 @@ class DashboardFragment : Fragment() {
         binding.rvTransactions.layoutManager = LinearLayoutManager(context)
 
         binding.btnScanQr.setOnClickListener {
-            startActivity(Intent(requireContext(), QRScanActivity::class.java))
+            android.widget.Toast.makeText(requireContext(), "Paiement par QR non disponible dans cette version", android.widget.Toast.LENGTH_SHORT).show()
         }
 
         loadData()

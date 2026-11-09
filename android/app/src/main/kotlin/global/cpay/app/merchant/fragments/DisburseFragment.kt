@@ -124,45 +124,10 @@ class DisburseFragment : Fragment() {
         }
     }
 
+    // Lot 4 (audit 2026-11-02 mobile P1-5) : l'ancien retrait direct (POST /merchant/withdraw, 410 depuis le hotfix v1)
+    // est remplace par la caisse — meme ecran que l'onglet Plus → Retirer (reservation, step-up, statut suivi).
     private fun doWithdraw() {
-        val amt   = b.etAmountWithdraw.text.toString().toDoubleOrNull()
-        val phone = b.etPhoneWithdraw.text.toString().trim()
-        val ref   = b.etRefWithdraw.text.toString().trim()
-
-        val e1 = if (amt == null) "Montant invalide" else SecurityManager.validateAmount(amt, 1000.0)
-        if (e1 != null) { err(false, e1); return }
-        val e2 = SecurityManager.validatePhone(phone)
-        if (e2 != null) { err(false, e2); return }
-
-        b.tvErrWithdraw.visibility = View.GONE
-        b.progressWithdraw.visibility = View.VISIBLE
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val r = ApiClient.api.merchantWithdraw(LegacyWithdrawRequest(
-                    amount = amt!!, phone = phone, operator = withdrawOp, description = ref))
-                if (r.isSuccessful && r.body() != null) {
-                    val d = r.body()!!
-                    Toast.makeText(requireContext(), "Retrait de ${fmt.format(amt)} XAF demandé", Toast.LENGTH_LONG).show()
-                    startActivity(Intent(requireContext(), ReceiptActivity::class.java).apply {
-                        putExtra("amount", d.amount ?: amt)
-                        putExtra("reference", d.reference ?: ref)
-                        putExtra("type", "Retrait")
-                        putExtra("method", withdrawOp)
-                        putExtra("phone", phone)
-                        putExtra("status", d.status ?: "authorized")
-                        putExtra("fee", d.fee ?: 0.0)
-                    })
-                    b.etAmountWithdraw.text?.clear(); b.etPhoneWithdraw.text?.clear()
-                    b.etRefWithdraw.setText(SecurityManager.generateRef("WDR"))
-                    loadBalance()
-                } else {
-                    // WAVE-3 : /merchant/withdraw repond 410 FEATURE_DISABLED (hotfix v1).
-                    if (ApiErrors.isFeatureDisabled(r)) b.btnWithdraw.isEnabled = false
-                    err(false, ApiErrors.message(r))
-                }
-            } catch (e: Exception) { err(false, "Erreur réseau") }
-            finally { if (_b != null) b.progressWithdraw.visibility = View.GONE }
-        }
+        (activity as? global.cpay.app.merchant.MerchantMainActivity)?.openWithdraw()
     }
 
     private fun err(isDis: Boolean, m: String) {
