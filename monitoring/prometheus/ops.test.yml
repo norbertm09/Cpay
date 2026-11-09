@@ -42,13 +42,14 @@ tests:
         exp_alerts:
           - exp_labels: { severity: critical, target: admin, instance: "node-exporter:9100", job: node }
             exp_annotations: { summary: "Health check externe KO sur admin depuis 10 minutes" }
-  - interval: 1h
+  - interval: 1m
     input_series:
-      # expiration dans 10 jours au départ, le temps avance d'une heure par pas
+      # expiration dans 10 jours (timestamp absolu 864000, le test demarre a t=0) ; echantillons a la minute :
+      # avec des echantillons horaires, la serie serait perimee (> 5 min) entre deux evaluations et `for: 1h` ne tiendrait jamais
       - series: 'cpay_cert_expiry_timestamp_seconds{cert="c-pay.global-0001", instance="node-exporter:9100", job="node"}'
-        values: '864000x30'
+        values: '864000x150'
       - series: 'cpay_certbot_timer_enabled{instance="node-exporter:9100", job="node"}'
-        values: '0x30'
+        values: '0x150'
     alert_rule_test:
       - eval_time: 2h
         alertname: CertificateExpiringSoon
