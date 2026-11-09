@@ -1,5 +1,18 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-lot3 (2026-11-09) — P1 exploitation de l'audit du 2 novembre
+* Deploiement : utilisateur `deploy` dedie (`scripts/setup-deploy-user.sh`) avec commande forcee `scripts/deploy-remote.sh`
+  (ref et options validees, commit deja deploye ignore sauf --force) ; `deploy.yml` compatible root (mode historique) et
+  deploy ; images `cplus-*:<VERSION>-<sha12>`, rollback sans rebuild, conservation des 3 derniers deploiements.
+* Sauvegardes : chiffrement age/openssl avant toute copie, copie rclone obligatoire en production, purge apres copie
+  reussie, empreinte SHA-256, metriques et alertes, battement de coeur ; `restore-db.sh --yes --db` (dechiffrement) ;
+  `restore-test.sh` mensuel ; `/etc/cplus/backup.env` (modele `monitoring/backup.env.example`).
+* Supervision : node-exporter et postgres-exporter demarres par `setup-monitoring.sh` ; alertes ExporterDown, certificats
+  (`cert-expiry-metric.sh`), sauvegardes, health check (tous les vhosts, `healthcheck-prod.sh`), test de restauration ;
+  scenarios promtool `ops.test.yml`.
+* `scripts/lib/env.sh` : lecture des .env sans execution, utilisee par backup/restore/monitoring ; test CI.
+* Docs : `docs/EXPLOITATION.md`, CI-CD §7, ENVIRONNEMENTS, GO-LIVE-CG, LOT-5B.
+
 ## 2.7.2-legal (2026-11-09) — identite de l'editeur et script nginx hote
 Mentions legales, CGU, confidentialite et page de suppression de compte : CALCULUS PLUS SAS, siege 25 rue Bangui,
 quartier Moungali, Brazzaville (Republique du Congo), RCCM Brazzaville CG-BZV-01-2026-B16-00002, droit congolais et

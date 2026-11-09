@@ -31,6 +31,75 @@ groups:
         labels: { severity: critical }
         annotations: { summary: "PostgreSQL inaccessible" }
 
+  # Lot 3 (audit 2026-11-02 infra P1-4) : exporters et crons d'exploitation réellement surveillés.
+  - name: cplus-ops
+    rules:
+      - alert: ExporterDown
+        expr: up{job=~"node|postgres"} == 0
+        for: 3m
+        labels: { severity: warning }
+        annotations: { summary: "Exporter {{ $labels.job }} injoignable : les alertes disque / memoire / PostgreSQL sont aveugles" }
+
+      - alert: CertificateExpiringSoon
+        expr: (cpay_cert_expiry_timestamp_seconds - time()) < 14 * 86400
+        for: 1h
+        labels: { severity: warning }
+        annotations: { summary: "Certificat TLS {{ $labels.cert }} expire dans moins de 14 jours" }
+
+      - alert: CertificateExpiryCritical
+        expr: (cpay_cert_expiry_timestamp_seconds - time()) < 5 * 86400
+        for: 10m
+        labels: { severity: critical }
+        annotations: { summary: "Certificat TLS {{ $labels.cert }} expire dans moins de 5 jours — verifier certbot" }
+
+      - alert: CertbotTimerDisabled
+        expr: cpay_certbot_timer_enabled == 0
+        for: 1h
+        labels: { severity: warning }
+        annotations: { summary: "certbot.timer inactif : plus de renouvellement automatique des certificats" }
+
+      - alert: BackupFailed
+        expr: cpay_backup_last_status == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "La derniere sauvegarde PostgreSQL a echoue" }
+
+      - alert: BackupStale
+        expr: (time() - cpay_backup_last_success_timestamp_seconds) > 36 * 3600
+        for: 10m
+        labels: { severity: critical }
+        annotations: { summary: "Aucune sauvegarde PostgreSQL reussie depuis plus de 36 heures" }
+
+      - alert: BackupNotOffsite
+        expr: cpay_backup_remote_copied == 0 and cpay_backup_last_status == 1
+        for: 1h
+        labels: { severity: warning }
+        annotations: { summary: "La derniere sauvegarde n'a pas ete copiee hors du serveur (BACKUP_REMOTE)" }
+
+      - alert: BackupMetricsMissing
+        expr: up{job="node"} == 1 unless on() cpay_backup_last_success_timestamp_seconds
+        for: 2h
+        labels: { severity: warning }
+        annotations: { summary: "Aucune metrique de sauvegarde publiee : cron backup-db.sh absent ou textfile non monte" }
+
+      - alert: HealthcheckFailing
+        expr: cpay_healthcheck_up == 0
+        for: 10m
+        labels: { severity: critical }
+        annotations: { summary: "Health check externe KO sur {{ $labels.target }} depuis 10 minutes" }
+
+      - alert: HealthcheckStale
+        expr: (time() - cpay_healthcheck_last_run_timestamp_seconds) > 30 * 60
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Le cron de health check ne s'execute plus (derniere execution > 30 min)" }
+
+      - alert: RestoreTestStale
+        expr: (time() - cpay_restore_test_last_success_timestamp_seconds) > 40 * 86400
+        for: 1h
+        labels: { severity: warning }
+        annotations: { summary: "Aucun test de restauration reussi depuis plus de 40 jours" }
+
   # Aggregate replicas: only one session can own the shared database lock.
   # These rules assume one reconciliation database per job/env/service group.
   - name: cplus-reconciliation

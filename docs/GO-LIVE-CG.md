@@ -87,9 +87,12 @@ Manager OVH → Cloud Databases → instance PostgreSQL → **IP autorisées** �
 (garder `51.91.98.115/32` jusqu'à la fin de la migration). Vérifier depuis le nouveau serveur :
 
 ```sh
-cd /opt/cplus && set -a && . backend/.env && set +a
+cd /opt/cplus && source scripts/lib/env.sh && load_env_vars backend/.env DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD
 PGPASSWORD="$DB_PASSWORD" PGSSLMODE=require psql -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" -d "$DB_NAME" -c 'select now(), current_user;'
 ```
+
+> Ne jamais `source` `backend/.env` : une valeur contenant `( ) # $ ' "` ou un espace casserait le shell, voire
+> exécuterait une commande (audit 2026-11-02 infra P1-7). `scripts/lib/env.sh` lit le fichier sans l'exécuter.
 
 ### 1.4 [serveur nouveau] Compléter `backend/.env` pour le Congo
 

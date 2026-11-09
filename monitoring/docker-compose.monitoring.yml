@@ -16,6 +16,14 @@
 #   ALERT_SMTP_PASSWORD_FILE        fichier privé du mot de passe SMTP (même chemin dans le conteneur)
 #   MONITORING_TEMPLATE_DIR         chemin absolu de monitoring/alertmanager sur l'hôte
 #   CPLUS_NETWORK                   réseau applicatif (défaut docker_cplus-internal)
+#   POSTGRES_EXPORTER_URI           lot 3 : "<hôte>:<port>/<base>?sslmode=require" (sans identifiants)
+#   POSTGRES_EXPORTER_USER_FILE     lot 3 : fichier privé contenant l'utilisateur PostgreSQL (lecture seule de préférence)
+#   POSTGRES_EXPORTER_PASS_FILE     lot 3 : fichier privé contenant son mot de passe
+#   OPS_TEXTFILE_DIR                lot 3 : répertoire des métriques des crons (défaut /var/lib/node_exporter/textfile)
+#
+# Lot 3 (audit 2026-11-02 infra P1-4) : node-exporter et postgres-exporter sont désormais DÉMARRÉS (les règles
+# DiskSpaceLow / HighMemory / PostgreSQLDown étaient mortes faute de cible) ; les crons d'exploitation
+# (sauvegarde, health check, certificats) publient leurs métriques via le collecteur textfile du node-exporter.
 #
 # Validation avant démarrage :
 #   docker compose -f monitoring/docker-compose.monitoring.yml --env-file <privé> config
@@ -65,6 +73,49 @@ services:
       - alertmanager-data:/alertmanager
     ports:
       - "127.0.0.1:9093:9093"
+    networks:
+      - cplus-internal
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    container_name: cplus-node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.textfile.directory=/textfile
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.meminfo
+      - --collector.filesystem
+      - --collector.loadavg
+      - --collector.netdev
+      - --collector.textfile
+      - --collector.uname
+      - --collector.time
+    volumes:
+      - /:/host:ro,rslave
+      - ${OPS_TEXTFILE_DIR:-/var/lib/node_exporter/textfile}:/textfile:ro
+    expose:
+      - "9100"
+    networks:
+      - cplus-internal
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    container_name: cplus-postgres-exporter
+    restart: unless-stopped
+    user: "65534:65534"
+    environment:
+      DATA_SOURCE_URI: ${POSTGRES_EXPORTER_URI:?POSTGRES_EXPORTER_URI requis}
+      DATA_SOURCE_USER_FILE: /run/secrets/pg_user
+      DATA_SOURCE_PASS_FILE: /run/secrets/pg_pass
+      PG_EXPORTER_DISABLE_SETTINGS_METRICS: "true"
+    volumes:
+      - ${POSTGRES_EXPORTER_USER_FILE:?POSTGRES_EXPORTER_USER_FILE requis}:/run/secrets/pg_user:ro
+      - ${POSTGRES_EXPORTER_PASS_FILE:?POSTGRES_EXPORTER_PASS_FILE requis}:/run/secrets/pg_pass:ro
+    expose:
+      - "9187"
     networks:
       - cplus-internal
 

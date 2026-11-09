@@ -136,25 +136,24 @@ jobs:
           fi
           echo "cible : $TARGET_ENV = $OVH_SSH_USER@$OVH_SSH_HOST ($CPAY_DOMAIN)"
 
-      - name: Deploiement distant (git checkout + scripts/deploy.sh)
+      - name: Deploiement distant (scripts/deploy-remote.sh)
+        # Lot 3 (audit 2026-11-02 infra P1-2) : avec l'utilisateur `deploy`, la cle porte une COMMANDE FORCEE
+        # (scripts/deploy-remote.sh) qui lit et valide REF/DEPLOY_ARGS dans SSH_ORIGINAL_COMMAND : la chaine envoyee
+        # ici n'est jamais executee telle quelle. Avec root (historique), le shell l'execute : on lance alors
+        # deploy-remote.sh s'il existe sur le serveur, sinon les etapes inline (premier deploiement du lot 3).
         run: |
           set -eu
+          case "$REF" in *[!A-Za-z0-9._/-]*|"") echo "::error::ref invalide : $REF"; exit 1 ;; esac
+          case "$DEPLOY_ARGS" in *[!A-Za-z0-9._\ -]*) echo "::error::arguments invalides : $DEPLOY_ARGS"; exit 1 ;; esac
+          if [ "$OVH_SSH_USER" = "root" ]; then
+            REMOTE_CMD="REF='$REF' DEPLOY_ARGS='$DEPLOY_ARGS' sh -c 'cd /opt/cplus && if [ -x scripts/deploy-remote.sh ]; then exec scripts/deploy-remote.sh; fi; echo \"== $(hostname) : \$(git rev-parse --short HEAD) -> \$REF (mode historique)\"; git fetch --all --tags --prune --force; T=\"\$REF\"; if git rev-parse -q --verify refs/remotes/origin/\$REF >/dev/null 2>&1; then T=origin/\$REF; fi; git -c advice.detachedHead=false checkout --detach \"\$T\"; echo \"== commit \$(git rev-parse HEAD) — version \$(cat VERSION)\"; ./scripts/deploy.sh \$DEPLOY_ARGS'"
+          else
+            REMOTE_CMD="REF='$REF' DEPLOY_ARGS='$DEPLOY_ARGS'"
+          fi
           ssh -i "$RUNNER_TEMP/ssh/key" -p "$OVH_SSH_PORT" \
               -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" -o StrictHostKeyChecking=yes \
               -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
-              "$OVH_SSH_USER@$OVH_SSH_HOST" "REF='$REF' DEPLOY_ARGS='$DEPLOY_ARGS' sh -s" <<'REMOTE'
-          set -eu
-          cd /opt/cplus
-          echo "== $(hostname) : $(git rev-parse --short HEAD) -> $REF"
-          # --force : un tag deplace (release relancee) ne doit pas bloquer le deploiement (« would clobber existing tag »)
-          git fetch --all --tags --prune --force
-          TARGET="$REF"
-          # une branche se deploie depuis origin/<branche> (la branche locale n'est pas mise a jour par fetch)
-          if git rev-parse -q --verify "refs/remotes/origin/$REF" >/dev/null 2>&1; then TARGET="origin/$REF"; fi
-          git -c advice.detachedHead=false checkout --detach "$TARGET"
-          echo "== commit $(git rev-parse HEAD) — version $(cat VERSION)"
-          ./scripts/deploy.sh $DEPLOY_ARGS
-          REMOTE
+              "$OVH_SSH_USER@$OVH_SSH_HOST" "$REMOTE_CMD"
 
       - name: Smoke test HTTP depuis le runner
         run: |

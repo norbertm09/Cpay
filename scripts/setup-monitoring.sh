@@ -46,7 +46,8 @@ fi
 
 # ─── lecture des reglages ───────────────────────────────────────
 [ -f "$ENV_FILE" ] || die "fichier $ENV_FILE absent — le creer a partir de monitoring/monitoring.env.example (voir en-tete)"
-read_var() { sed -n "s/^[[:space:]]*\(export[[:space:]]\+\)\?$2=//p" "$1" | tail -1 | sed -e "s/^'\(.*\)'\s*$/\1/" -e 's/^"\(.*\)"\s*$/\1/'; }
+source "$ROOT/scripts/lib/env.sh"   # lot 3 : lecteur .env partagé (jamais sourcé)
+read_var() { read_env_var "$1" "$2"; }
 for v in ALERT_SMTP_HOST ALERT_SMTP_PORT ALERT_SMTP_USER ALERT_SMTP_FROM ALERT_SMTP_TO ALERT_SMTP_PASSWORD ALERT_SMTP_PASSWORD_FILE ALERT_SMTP_CA_FILE; do
   printf -v "$v" '%s' "$(read_var "$ENV_FILE" "$v")"
 done
@@ -66,6 +67,16 @@ chown root:65534 "$ALERT_SMTP_PASSWORD_FILE"; chmod 0440 "$ALERT_SMTP_PASSWORD_F
 METRICS_FILE="$PRIV/metrics_token"; printf '%s' "$METRICS_TOKEN" > "$METRICS_FILE"; chown root:65534 "$METRICS_FILE"; chmod 0440 "$METRICS_FILE"
 TEMPLATE_DIR="$ROOT/monitoring/alertmanager"
 AM_CONFIG="$PRIV/alertmanager.yml"
+
+# ─── lot 3 : postgres-exporter (identifiants dans des fichiers 0440 root:65534) et node-exporter (textfile) ─────
+for v in DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSL; do printf -v "$v" '%s' "$(read_var "$ROOT/backend/.env" "$v")"; done
+PGX_USER="${PG_EXPORTER_USER:-$(read_var "$ENV_FILE" PG_EXPORTER_USER)}"; PGX_PASS="${PG_EXPORTER_PASSWORD:-$(read_var "$ENV_FILE" PG_EXPORTER_PASSWORD)}"
+[ -n "$PGX_USER" ] || { PGX_USER="$DB_USER"; PGX_PASS="$DB_PASSWORD"; warn "PG_EXPORTER_USER absent de $ENV_FILE : l'exporter utilise DB_USER (créer un rôle lecture seule est recommandé, docs/EXPLOITATION.md)"; }
+[ -n "$DB_HOST" ] && [ -n "$DB_NAME" ] || die "DB_HOST / DB_NAME absents de backend/.env"
+PGX_URI="$DB_HOST:${DB_PORT:-5432}/$DB_NAME?sslmode=$([ "${DB_SSL:-false}" = "true" ] && echo require || echo disable)"
+printf '%s' "$PGX_USER" > "$PRIV/pg_exporter_user"; printf '%s' "$PGX_PASS" > "$PRIV/pg_exporter_pass"
+chown root:65534 "$PRIV/pg_exporter_user" "$PRIV/pg_exporter_pass"; chmod 0440 "$PRIV/pg_exporter_user" "$PRIV/pg_exporter_pass"
+TEXTFILE_DIR="${OPS_TEXTFILE_DIR:-/var/lib/node_exporter/textfile}"; install -d -m 0755 "$TEXTFILE_DIR"
 
 # ─── generation de la configuration Alertmanager dans le conteneur api (memes chemins absolus) ─────
 log "Generation de $AM_CONFIG (scripts/configure-monitoring.cjs)…"
@@ -87,6 +98,10 @@ ALERTMANAGER_CONFIG_FILE=$AM_CONFIG
 ALERT_SMTP_PASSWORD_FILE=$ALERT_SMTP_PASSWORD_FILE
 MONITORING_TEMPLATE_DIR=$TEMPLATE_DIR
 CPLUS_NETWORK=$NET
+POSTGRES_EXPORTER_URI=$PGX_URI
+POSTGRES_EXPORTER_USER_FILE=$PRIV/pg_exporter_user
+POSTGRES_EXPORTER_PASS_FILE=$PRIV/pg_exporter_pass
+OPS_TEXTFILE_DIR=$TEXTFILE_DIR
 ENV
 chmod 0600 "$COMPOSE_ENV"
 

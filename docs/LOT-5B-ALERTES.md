@@ -154,3 +154,16 @@ secrets dans `/etc/cplus/monitoring/` lisibles par l'uid 65534, token de scrape 
 l'exécuter, génération de la configuration Alertmanager dans le conteneur `api` (pas de Node sur l'hôte), validation
 (`compose config`, `promtool check config`), démarrage, état des cibles. `--test` envoie une alerte de test qui doit
 arriver par e-mail en 1 à 2 minutes ; `--down` arrête la pile. Ports 9090 et 9093 liés à `127.0.0.1` uniquement.
+
+## Exporters et alertes d'exploitation (lot 3, 2026-11-09)
+
+`setup-monitoring.sh` démarre désormais aussi `node-exporter` (disque, mémoire, charge ; collecteur *textfile* sur
+`/var/lib/node_exporter/textfile`) et `postgres-exporter` (DSN construit depuis `backend/.env`, identifiants dans des
+fichiers `0440 root:65534` ; un rôle PostgreSQL en lecture seule peut être fourni via `PG_EXPORTER_USER` /
+`PG_EXPORTER_PASSWORD` dans `/etc/cplus/monitoring.env`). Les règles `DiskSpaceLow`, `HighMemory` et `PostgreSQLDown`
+deviennent effectives ; le groupe `cplus-ops` ajoute `ExporterDown`, `CertificateExpiringSoon` / `CertificateExpiryCritical`,
+`CertbotTimerDisabled`, `BackupFailed` / `BackupStale` / `BackupNotOffsite` / `BackupMetricsMissing`,
+`HealthcheckFailing` / `HealthcheckStale`, `RestoreTestStale`. Les crons (`backup-db.sh`, `healthcheck-prod.sh`,
+`cert-expiry-metric.sh`, `restore-test.sh`) publient leurs métriques via `scripts/lib/alert.sh` et poussent en plus une
+alerte immédiate à Alertmanager en cas d'échec. Scénarios testés : `monitoring/prometheus/ops.test.yml` (promtool, CI).
+Détail des procédures : `docs/EXPLOITATION.md`.
