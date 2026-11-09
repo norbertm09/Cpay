@@ -55,7 +55,7 @@ Script tout-en-un (étapes 1 à 5 ci-dessous, idempotent, `--dry-run` pour prév
 
 ```bash
 cd /opt/cplus && git fetch origin && git checkout main && git pull origin main
-./scripts/deploy-wave-2.sh --dry-run && ./scripts/deploy-wave-2.sh
+./scripts/legacy/deploy-wave-2.sh --dry-run && ./scripts/legacy/deploy-wave-2.sh   # historique (lot 7) : utiliser scripts/deploy.sh
 ```
 
 Ou manuellement :

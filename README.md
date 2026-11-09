@@ -101,34 +101,23 @@ Domaines cibles:
 - Marchand: `https://merchant.c-pay.global`
 - Paiement/QR: `https://pay.c-pay.global`
 
-Preparation serveur Linux:
+Preparation d'un nouveau serveur (Ubuntu LTS, root) — nginx hote, Docker, pare-feu, durcissement :
 ```bash
-cp backend/.env.production.example backend/.env
-nano backend/.env
+bash scripts/init-vps.sh --deploy-pubkey "ssh-ed25519 AAAA… cpay_deploy"   # appelle scripts/harden-host.sh
+cp backend/.env.example backend/.env && nano backend/.env                   # remplacer chaque « change_me »
 ./scripts/preflight.sh
 ```
 
-Demarrage production Docker:
+Deploiement (le meme script est lance par `deploy.yml` apres chaque merge dans `main`) :
 ```bash
-cd docker
-docker compose --env-file ../backend/.env up -d --build
+./scripts/deploy.sh              # build, sauvegarde, migrations, demarrage, health checks
+./scripts/deploy.sh --rollback   # retour a la version precedente (images conservees, sans rebuild)
 ```
 
-Initialisation TLS Let's Encrypt:
-```bash
-export LETSENCRYPT_EMAIL=ops@c-pay.global
-./scripts/init-tls.sh
-```
-
-Deploiement automatise:
-```bash
-./scripts/deploy-prod.sh
-```
-
-Sauvegarde et restauration:
+Sauvegarde et restauration (chiffrees, copie hors serveur — `docs/EXPLOITATION.md`) :
 ```bash
 ./scripts/backup-db.sh
-./scripts/restore-db.sh backups/cplus-db-YYYYMMDD-HHMMSS.sql.gz
+./scripts/restore-db.sh --yes /var/backups/cpay/cplus-db-YYYYMMDD-HHMMSS.sql.gz.age
 ```
 
 Verification apres deploiement:
@@ -136,7 +125,9 @@ Verification apres deploiement:
 ./scripts/healthcheck-prod.sh
 ```
 
-La CI GitHub Actions inclut les tests backend, les builds des portails, une verification mobile Expo et une validation Docker Compose.
+La CI GitHub Actions inclut les tests backend (jest + migrations rejouees sur PostgreSQL 16), les builds des portails,
+une verification mobile Expo, les images Docker (l'image API est demarree et doit repondre sur `/health`),
+`docker compose config` et `nginx -t`. Dependabot (`.github/dependabot.yml`) propose les montees de version.
 
 ## Feuille de route CPlus 3.0
 

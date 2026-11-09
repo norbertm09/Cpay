@@ -4,7 +4,7 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "== CPlus 2.6.0 preflight =="
+echo "== C-Pay preflight =="
 
 if [ ! -f backend/.env ]; then
   echo "backend/.env manquant. Copiez backend/.env.example puis renseignez les secrets." >&2

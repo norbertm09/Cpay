@@ -14,7 +14,7 @@ branche wave-N ── PR ──▶ main ── tag vX.Y.Z ──▶ release.yml 
 
 | Workflow | Déclencheur | Rôle |
 |----------|-------------|------|
-| `ci.yml` | `pull_request`, `push` sur `main` et `wave-*` | Qualité : backend (syntaxe, jest, audit), build des 7 portails, vitrine, PHP, SDK JS, Expo, Android debug, images Docker + `nginx -t`, cohérence des versions. |
+| `ci.yml` | `pull_request`, `push` sur `main`, `develop` et `wave-*` | Qualité : backend (syntaxe, jest, audit, migrations sur PostgreSQL 16), build des 7 portails, vitrine, PHP, SDK JS, Expo, Android debug + staging, images Docker (API démarrée, `/health`), `docker compose config`, `nginx -t`, alertes Prometheus (promtool), cohérence des versions. |
 | `release.yml` | push d'un tag `vX.Y.Z` | Vérifie `VERSION` = tag, tests backend, APK/AAB release (signés si secrets), archives SDK/plugin, **GitHub Release** avec la section du changelog, puis lance `deploy.yml` sur le tag. |
 | `deploy.yml` | `workflow_dispatch` (ref, skip_backup), `release: published`, ou lancé par `release.yml` | SSH vers OVH : `git checkout --detach <ref>` puis `./scripts/deploy.sh` ; smoke test HTTPS depuis le runner. Protégé par l'environnement GitHub `production`. |
 
@@ -25,8 +25,8 @@ exécuté en parallèle d'un autre (`concurrency: deploy-production`).
 
 | Job | Ce qu'il fait | Notes |
 |-----|---------------|-------|
-| `backend` | Node 22, `npm ci`, `scripts/check-js-syntax.sh src` (`node --check` sur `src/**/*.js`), `npm test` (jest, 475 tests, sans base de données), `npm audit --omit=dev --audit-level=critical` | L'audit est **informatif** (`continue-on-error`). |
-| `portals` | Matrice `admin, merchant, cardholder, partners, bank, agency, agent` : Node 20 (comme `docker/Dockerfile.portal`), `npm ci`, `npm test`, `npm run build` (Vite, sortie `build/`), artefact `portal-<nom>` (7 jours) | Les 7 portails ont un lockfile (installation reproductible). |
+| `backend` | Node 22, `npm ci`, `scripts/check-js-syntax.sh src` (`node --check` sur `src/**/*.js`), `npm test` (jest, ~880 tests sur PGlite), migrations rejouées deux fois sur un service PostgreSQL 16 (`node src/config/migrate.js`, nombre de lignes `schema_migrations` = fichiers SQL, fonctions de frais présentes — lot 7), `npm audit --omit=dev --audit-level=high` | L'audit est **bloquant** (niveau `high`). |
+| `portals` | Matrice `admin, merchant, cardholder, partners, bank, agency, agent` : Node 22 (comme `docker/Dockerfile.portal`, lot 7), `npm ci`, `npm test`, `npm run build` (Vite, sortie `build/`), artefact `portal-<nom>` (7 jours) | Les 7 portails ont un lockfile (installation reproductible). |
 | `landing` | `python3 -I scripts/check-landing.py portal/landing` | Équilibre des balises, `id` dupliqués, liens/ressources/ancres internes résolus comme `nginx-landing.conf` (`$uri`, `$uri/`, `$uri.html`), `sitemap.xml`, `node --check` sur `app.js`/`assistant.js`. |
 | `php` | `php -l` sur `sdk/php` et `plugins/` en PHP 7.4 (minimum annoncé par le plugin) et 8.3 | `shivammathur/setup-php`. |
 | `sdk-js` | `node --check` sur `sdk/javascript` | Le SDK JS a sa propre version (`1.1.0`). |
@@ -121,8 +121,9 @@ POSIX `sh`, idempotent, utilisable à la main depuis `/opt/cplus` :
 7. **Health checks** : `127.0.0.1:3001/health` (API, bloquant, 90 s), `127.0.0.1:3006/` (vitrine, bloquant),
    portails `3002`-`3005` (avertissement seulement). En cas d'échec le script indique la commande de rollback.
 
-`scripts/deploy-ovh.sh`, `scripts/deploy-prod.sh` et le mode opératoire de `docs/WAVE-2.md` §3 restent des
-procédures historiques ; `deploy.sh` est le standard à partir de la 2.7.0.
+Les anciens scripts (`scripts/legacy/deploy-ovh.sh`, `deploy-wave-2.sh`, `init-ovh.sh`, `init-tls.sh`, `renew-tls.sh`) et le
+mode opératoire de `docs/WAVE-2.md` §3 sont des procédures historiques à ne pas lancer sur la 2.7 (`scripts/legacy/README.md`) ;
+`deploy-prod.sh` a été supprimé au lot 7. `deploy.sh` est le standard à partir de la 2.7.0.
 
 ## 6. Procédure de mise en production
 
@@ -183,11 +184,13 @@ python3 -c "import yaml,sys;[yaml.safe_load(open(f)) for f in sys.argv[1:]]" .gi
 - Les builds Android (debug en CI, release + signature dans `release.yml`) n'ont pas pu être exécutés hors GitHub
   (pas de SDK Android dans l'environnement de développement) : le premier run sur GitHub fait foi.
   `minifyEnabled true` en release peut nécessiter des règles ProGuard supplémentaires.
-- Cinq portails n'ont pas de `package-lock.json` : leurs builds CI dépendent du registre npm au moment du run.
-  Générer et committer un lockfile (`npm install --package-lock-only`) les rendrait reproductibles et plus rapides (`npm ci`).
-- `docker/Dockerfile.api` ne copie pas `backend/scripts/` : `deploy.sh` monte ce dossier en lecture seule pour le
-  contrôle d'environnement ; les commandes `docker compose run … node scripts/…` citées dans `docs/WAVE-2.md` /
-  `docs/WAVE-3.md` nécessitent le même montage (`-v "$PWD/../backend/scripts:/app/scripts:ro"`).
+- Les actions GitHub tierces restent référencées par tag majeur (`@v4`…) : le jeton CI de ce dépôt ne peut pas lire les
+  dépôts tiers pour résoudre les SHA ; Dependabot (`.github/dependabot.yml`, groupe `actions`) suit leurs mises à jour et
+  `release.yml` ne donne plus `contents: write` / `actions: write` qu'au job `release` (lot 7).
+- Les images de base sont épinglées par tag mineur (`node:22-alpine`, `nginxinc/nginx-unprivileged:1.28-alpine`,
+  `postgres:16-alpine` en CI, `certbot/certbot:v4.1.1`), pas par digest : Dependabot `docker` propose les montées.
+- `deploy.sh` n'est jamais exécuté en CI (il tourne sur le serveur) ; la CI démarre l'image API contre PostgreSQL 16
+  et valide `docker compose config`, mais pas le scénario complet build → sauvegarde → migrations → `compose up`.
 
 ## Deux environnements (depuis le 2026-10-24)
 

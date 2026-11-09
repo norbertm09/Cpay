@@ -41,8 +41,21 @@ jobs:
 
   # ────────────────────────────────────────────────────────────────
   backend:
-    name: Backend (syntaxe, jest, audit)
+    name: Backend (syntaxe, jest, audit, migrations PostgreSQL)
     runs-on: ubuntu-latest
+    # Lot 7 (audit P2-11) : les migrations sont aussi rejouees sur un vrai PostgreSQL 16 (meme version majeure que la
+    # base managee OVH), pas seulement sur PGlite — verrous, extensions et transaction unique de migrate.js compris.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cplus_ci
+          POSTGRES_DB: cplus_ci
+          POSTGRES_HOST_AUTH_METHOD: trust   # base jetable du runner : aucun mot de passe a stocker dans le workflow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cplus_ci -d cplus_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     defaults:
       run:
         working-directory: backend
@@ -61,6 +74,23 @@ jobs:
         env:
           CI: 'true'
           NODE_ENV: test
+      - name: Migrations sur PostgreSQL 16 (base vierge, puis rejeu idempotent)
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '5432'
+          DB_NAME: cplus_ci
+          DB_USER: cplus_ci
+          LOG_LEVEL: warn
+        run: |
+          export DB_PASSWORD="$(openssl rand -hex 12)"   # ignore par le service (trust) ; valeur requise par le client pg
+          node src/config/migrate.js
+          node src/config/migrate.js   # deja appliquees : aucune erreur de checksum
+          expected=$(ls database/ | grep -cE '^[0-9]+_.*\.sql$')
+          applied=$(psql -h 127.0.0.1 -U cplus_ci -d cplus_ci -tAc 'SELECT count(*) FROM schema_migrations')
+          echo "migrations : $applied appliquees / $expected fichiers"
+          [ "$applied" = "$expected" ] || { echo "::error::schema_migrations ($applied) != fichiers SQL ($expected)"; exit 1; }
+          # la fonction de frais (migration 010) et le wrapper de compatibilite calc_fee (migration 013) existent
+          psql -h 127.0.0.1 -U cplus_ci -d cplus_ci -tAc "SELECT count(*) FROM pg_proc WHERE proname IN ('cpay_calculate_fee','calc_fee')" | grep -qx 2
       - name: npm audit (dependances de production, niveau high) — bloquant
         run: npm audit --omit=dev --audit-level=high
 
@@ -79,8 +109,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # meme Node que docker/Dockerfile.portal (Vite 5)
-          node-version: 20
+          # meme Node que docker/Dockerfile.portal (lot 7 : Node 22, Node 20 en fin de vie depuis avril 2026)
+          node-version: 22
           cache: npm
           cache-dependency-path: portal/${{ matrix.portal }}/package-lock.json
       - name: Dependances verrouillees (tous les portails ont un package-lock.json)
@@ -184,7 +214,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: mobile/cpay-mobile/package-lock.json
       - run: npm ci --no-audit --no-fund
@@ -253,6 +283,19 @@ jobs:
   docker:
     name: Images Docker + nginx -t
     runs-on: ubuntu-latest
+    # Lot 7 (audit P2-11) : l'image API est demarree (tini, entrypoint, migrations, utilisateur cplus) contre un
+    # PostgreSQL 16 et doit repondre 200 sur /health — jusqu'ici elle n'etait validee qu'en production.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cplus_ci
+          POSTGRES_DB: cplus_ci
+          POSTGRES_HOST_AUTH_METHOD: trust   # base jetable du runner : aucun mot de passe a stocker dans le workflow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cplus_ci -d cplus_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -262,9 +305,44 @@ jobs:
           context: .
           file: docker/Dockerfile.api
           push: false
+          load: true
           tags: cplus-api:ci
           cache-from: type=gha,scope=api
           cache-to: type=gha,scope=api,mode=max
+      - name: Demarrage de l'image API (migrations + /health) — lot 7
+        run: |
+          # Valeurs factices valides pour validateEnv (NODE_ENV=production) : rien n'est publie, aucun operateur n'est appele.
+          CI_DB_PASSWORD="$(openssl rand -hex 12)"   # ignore par le service (trust)
+          cat > "$RUNNER_TEMP/api.env" <<ENV
+          NODE_ENV=production
+          PORT=3000
+          DB_HOST=127.0.0.1
+          DB_PORT=5432
+          DB_NAME=cplus_ci
+          DB_USER=cplus_ci
+          DB_PASSWORD=$CI_DB_PASSWORD
+          JWT_SECRET=ci-jwt-secret-0123456789abcdef0123456789abcdef
+          INTERNAL_TOKEN=ci-internal-token-0123456789abcdef
+          METRICS_TOKEN=ci-metrics-token-0123456789abcdef
+          CONFIG_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          WEBHOOK_PATH_SECRET=ci-webhook-path-secret-0123456789
+          API_BASE_URL=https://api.ci.invalid
+          PAY_LINK_BASE_URL=https://pay.ci.invalid
+          ALLOWED_ORIGINS=https://admin.ci.invalid
+          GRAFANA_PASSWORD=$CI_DB_PASSWORD
+          CERTBOT_EMAIL=ci@ci.invalid
+          RECONCILE_ENABLED=false
+          LOG_LEVEL=warn
+          ENV
+          docker run -d --name api-ci --network host --env-file "$RUNNER_TEMP/api.env" cplus-api:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/health >"$RUNNER_TEMP/health.json" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/health.json" 2>/dev/null || true
+          grep -q '"status":"ok"' "$RUNNER_TEMP/health.json" 2>/dev/null || { echo "::error::l'image API ne repond pas 200 sur /health"; docker logs api-ci | tail -50; exit 1; }
+          docker exec api-ci id -u | grep -qv '^0$' || { echo "::error::l'API tourne en root dans le conteneur"; exit 1; }
+          docker rm -f api-ci >/dev/null
       - name: Image portail marchand (docker/Dockerfile.portal, APP_DIR=portal/merchant)
         uses: docker/build-push-action@v6
         with:
@@ -282,10 +360,18 @@ jobs:
           docker run --rm \
             -v "$PWD/docker/nginx-landing.conf:/etc/nginx/conf.d/default.conf:ro" \
             -v "$PWD/portal/landing:/usr/share/nginx/html:ro" \
-            nginx:1.27-alpine nginx -t
+            nginxinc/nginx-unprivileged:1.28-alpine nginx -t
           docker run --rm \
             -v "$PWD/docker/nginx-spa.conf:/etc/nginx/conf.d/default.conf:ro" \
-            nginx:1.25-alpine nginx -t
+            nginxinc/nginx-unprivileged:1.28-alpine nginx -t
+          docker run --rm \
+            -v "$PWD/portal/partners/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginxinc/nginx-unprivileged:1.28-alpine nginx -t
+      - name: docker compose config (lot 7, audit P2-11 — un compose invalide ne doit plus attendre le deploiement)
+        run: |
+          printf 'DB_HOST=x\nDB_NAME=x\nDB_USER=x\nDB_PASSWORD=x\nJWT_SECRET=x\nINTERNAL_TOKEN=x\n' > backend/.env
+          docker compose -f docker/docker-compose.yml config -q
+          rm -f backend/.env
       - name: nginx -t — reverse proxy hote (nginx.conf, certificats factices)
         run: |
           mkdir -p "$RUNNER_TEMP/le/live/c-pay.global"
@@ -301,7 +387,7 @@ jobs:
             -v "$PWD/docker/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$RUNNER_TEMP/le:/etc/letsencrypt:ro" \
             -v "$RUNNER_TEMP/dhparam.pem:/etc/nginx/dhparam.pem:ro" \
-            nginx:1.25-alpine nginx -t 2>&1 | tee "$RUNNER_TEMP/nginx-t.log"
+            nginx:1.28-alpine nginx -t 2>&1 | tee "$RUNNER_TEMP/nginx-t.log"
           if grep -qE "emerg|error" "$RUNNER_TEMP/nginx-t.log"; then
             grep -E "emerg|error" "$RUNNER_TEMP/nginx-t.log" | head -10 | sed 's/^/::error::nginx: /'; exit 1
           fi

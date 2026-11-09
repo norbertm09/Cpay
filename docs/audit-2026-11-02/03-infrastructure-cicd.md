@@ -31,6 +31,11 @@ limitation), les réglages de l'environnement GitHub `production` (required revi
 | 12 | P2 | Hôte : pas d'`unattended-upgrades`, pas de suivi de redémarrage noyau, sshd non durci par script, `daemon.json` non idempotent |
 | 13 | P2 | Documentation désalignée et scripts hérités cassés (`deploy-prod.sh` cible un service `postgres` inexistant, `renew-tls.sh` cible le nginx conteneurisé, `backend/.env.example` absent) |
 
+> **Suivi lot 7 (2026-11-09)** : § 8 à 13 traités (`CHANGELOG_AMELIORATIONS.md` 2.7.2-lot7). Exceptions assumées : actions
+> GitHub toujours par tag majeur (Dependabot les suit, le jeton CI ne lit pas les dépôts tiers) ; images par tag mineur, pas
+> par digest ; `settlement-cron` conserve `env_file: backend/.env` (le passage à un fichier dédié demande une action serveur,
+> documentée dans `docs/EXPLOITATION.md`) ; `deploy.sh` reste hors CI.
+
 Aucun P0 bloquant pour le pilote dans le périmètre infra ; les 7 P1 sont à traiter avant l'ouverture aux marchands.
 
 ---

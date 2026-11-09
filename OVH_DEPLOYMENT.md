@@ -57,6 +57,6 @@ mot de passe à la première connexion.
 
 ## Historique
 
-`scripts/init-ovh.sh`, `scripts/deploy-ovh.sh`, `scripts/deploy-prod.sh`, `scripts/init-tls.sh` et le conteneur
+`scripts/legacy/init-ovh.sh`, `scripts/legacy/deploy-ovh.sh`, `scripts/legacy/init-tls.sh` (historiques, lot 7) et le conteneur
 `nginx` (profil `standalone-nginx`) correspondent à l'architecture 2.6 (nginx conteneurisé). Ils sont conservés pour
 référence et ne sont plus utilisés en production.

@@ -20,7 +20,7 @@ Let's Encrypt sont gérés par `certbot` sur l'hôte (`certbot.timer`), les cont
   Airtel ont communiqué leurs plages d'adresses (voir `docs/OPERATEURS-A-CONFIRMER.md` § 2).
 - Le vhost complet (`/etc/nginx/sites-available/cpay`) et les snippets de sécurité vivent sur le serveur ; ils sont
   transportés d'un serveur à l'autre par `scripts/vps-export.sh` → `scripts/init-vps.sh --import`. Après une
-  migration, copier le vhost ici (`docker/nginx-host/cpay.conf`) pour le versionner : c'est la seule partie de
+  migration, copier le vhost ici (`docker/nginx-host/cpay.conf.example`, nom attendu par `init-vps.sh`) pour le versionner : c'est la seule partie de
   l'infrastructure encore hors dépôt.
 
 ## Pièges connus

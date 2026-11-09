@@ -141,6 +141,9 @@ export const merchantsApi = {
   testEvent: (id, data) => api.post(`/integrations/merchant/${id}/test-event`, data),
   pilotState: (id) => api.get(`/pilot/merchants/${id}`, quiet),
   countryDefaults: () => api.get('/country-defaults'),
+  // Lot 4/7 : demandes de suppression de compte (super_admin, ops_admin) — status = pending | processed | rejected | cancelled | all
+  deletionRequests: (params) => api.get('/account-deletion-requests', { params }),
+  processDeletion: (id, data) => api.patch(`/account-deletion-requests/${id}`, data),
 };
 
 // Utilisateurs marchands (merchant_users) et réinitialisation (vague 3).

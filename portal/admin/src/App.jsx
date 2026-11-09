@@ -14,6 +14,7 @@ import DashboardPage from './pages/dashboard/DashboardPage';
 import MerchantsPage from './pages/merchants/MerchantsPage';
 import MerchantDetailPage from './pages/merchants/MerchantDetailPage';
 import MerchantUsersPage from './pages/merchants/MerchantUsersPage';
+import AccountDeletionsPage from './pages/merchants/AccountDeletionsPage';
 import CardholdersPage from './pages/cardholders/CardholdersPage';
 import TransactionsPage from './pages/operations/TransactionsPage';
 import CashPage from './pages/operations/CashPage';
@@ -39,6 +40,7 @@ const Protected = () => {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/marchands" element={<MerchantsPage />} />
         <Route path="/marchands/utilisateurs" element={<MerchantUsersPage />} />
+        <Route path="/marchands/suppressions" element={<RequireRole roles={PERMS.ops}><AccountDeletionsPage /></RequireRole>} />
         <Route path="/marchands/:id" element={<MerchantDetailPage />} />
         <Route path="/porteurs" element={<CardholdersPage />} />
         <Route path="/operations/transactions" element={<TransactionsPage />} />

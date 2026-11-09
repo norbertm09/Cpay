@@ -47,7 +47,7 @@ jobs:
           [ -n "$EXPO_TOKEN" ] || { echo "::error::secret EXPO_TOKEN manquant — creer un jeton sur expo.dev (Account settings → Access tokens) et l'ajouter dans Settings → Secrets (docs/MOBILE-STORES.md)"; exit 1; }
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - uses: expo/expo-github-action@v8
         with:
           eas-version: latest

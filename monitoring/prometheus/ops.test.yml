@@ -64,3 +64,18 @@ tests:
         exp_alerts:
           - exp_labels: { severity: warning, instance: "node-exporter:9100", job: node }
             exp_annotations: { summary: "certbot.timer inactif : plus de renouvellement automatique des certificats" }
+  - interval: 1m
+    input_series:
+      # echantillons a la minute (une serie horaire serait perimee entre deux evaluations, cf. scenario certificat) :
+      # 0 pendant 1 h, puis 1 pendant 49 h -> l'alerte (for: 48h) se declenche vers 49 h
+      - series: 'cpay_reboot_required{instance="node-exporter:9100", job="node"}'
+        values: '0x60 1x2940'
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: HostRebootRequired
+        exp_alerts: []
+      - eval_time: 50h
+        alertname: HostRebootRequired
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: "node-exporter:9100", job: node }
+            exp_annotations: { summary: "Redemarrage de l'hote requis depuis plus de 48 h (mise a jour noyau/libc non appliquee)" }
