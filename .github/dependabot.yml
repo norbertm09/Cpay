@@ -92,3 +92,9 @@ updates:
       # Room : runtime, ktx et compiler doivent bouger ensemble ; AndroidX groupe pour un seul build de verification
       androidx: { patterns: ["androidx.*"] }
       kotlin: { patterns: ["org.jetbrains.kotlin*", "com.google.devtools.ksp*"] }
+    ignore:
+      # AndroidX / Kotlin / KSP : les montees groupees cassent le build (AGP, compileSdk, Room, Compose a aligner ensemble).
+      # Suspendues jusqu'au lot Android P2 (montee manuelle avec build release eprouve), puis a retirer.
+      - dependency-name: "androidx.*"
+      - dependency-name: "org.jetbrains.kotlin*"
+      - dependency-name: "com.google.devtools.ksp*"
