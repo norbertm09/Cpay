@@ -50,7 +50,7 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: cplus_ci
-          POSTGRES_PASSWORD: cplus_ci
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}   # non secret, differe a chaque run (GitGuardian)
           POSTGRES_DB: cplus_ci
         ports: ["5432:5432"]
         options: >-
@@ -80,17 +80,18 @@ jobs:
           DB_PORT: '5432'
           DB_NAME: cplus_ci
           DB_USER: cplus_ci
-          DB_PASSWORD: cplus_ci
+          DB_PASSWORD: ci-${{ github.run_id }}
+          PGPASSWORD: ci-${{ github.run_id }}
           LOG_LEVEL: warn
         run: |
           node src/config/migrate.js
           node src/config/migrate.js   # deja appliquees : aucune erreur de checksum
           expected=$(ls database/ | grep -cE '^[0-9]+_.*\.sql$')
-          applied=$(PGPASSWORD=cplus_ci psql -h 127.0.0.1 -U cplus_ci -d cplus_ci -tAc 'SELECT count(*) FROM schema_migrations')
+          applied=$(psql -h 127.0.0.1 -U cplus_ci -d cplus_ci -tAc 'SELECT count(*) FROM schema_migrations')
           echo "migrations : $applied appliquees / $expected fichiers"
           [ "$applied" = "$expected" ] || { echo "::error::schema_migrations ($applied) != fichiers SQL ($expected)"; exit 1; }
           # la fonction de frais (migration 010) et le wrapper de compatibilite calc_fee (migration 013) existent
-          PGPASSWORD=cplus_ci psql -h 127.0.0.1 -U cplus_ci -d cplus_ci -tAc "SELECT count(*) FROM pg_proc WHERE proname IN ('cpay_calculate_fee','calc_fee')" | grep -qx 2
+          psql -h 127.0.0.1 -U cplus_ci -d cplus_ci -tAc "SELECT count(*) FROM pg_proc WHERE proname IN ('cpay_calculate_fee','calc_fee')" | grep -qx 2
       - name: npm audit (dependances de production, niveau high) — bloquant
         run: npm audit --omit=dev --audit-level=high
 
@@ -290,7 +291,7 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: cplus_ci
-          POSTGRES_PASSWORD: cplus_ci
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}   # non secret, differe a chaque run (GitGuardian)
           POSTGRES_DB: cplus_ci
         ports: ["5432:5432"]
         options: >-
@@ -319,7 +320,7 @@ jobs:
           DB_PORT=5432
           DB_NAME=cplus_ci
           DB_USER=cplus_ci
-          DB_PASSWORD=cplus_ci
+          DB_PASSWORD=ci-${{ github.run_id }}
           JWT_SECRET=ci-jwt-secret-0123456789abcdef0123456789abcdef
           INTERNAL_TOKEN=ci-internal-token-0123456789abcdef
           METRICS_TOKEN=ci-metrics-token-0123456789abcdef
