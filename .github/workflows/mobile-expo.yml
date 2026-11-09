@@ -39,13 +39,13 @@ jobs:
       run:
         working-directory: mobile/cpay-mobile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Secret EXPO_TOKEN present
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           [ -n "$EXPO_TOKEN" ] || { echo "::error::secret EXPO_TOKEN manquant — creer un jeton sur expo.dev (Account settings → Access tokens) et l'ajouter dans Settings → Secrets (docs/MOBILE-STORES.md)"; exit 1; }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: expo/expo-github-action@v8
@@ -71,7 +71,7 @@ jobs:
           for p in $( [ "$PLATFORM" = all ] && echo "android ios" || echo "$PLATFORM" ); do
             eas submit --platform "$p" --profile "${{ inputs.profile }}" --latest --non-interactive
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: eas-build-${{ inputs.platform }}-${{ inputs.profile }}

@@ -20,8 +20,8 @@ jobs:
     name: Alertes de rapprochement (promtool)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Preparer Alertmanager officiel (SHA256)
@@ -60,8 +60,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -106,8 +106,8 @@ jobs:
       run:
         working-directory: portal/${{ matrix.portal }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           # meme Node que docker/Dockerfile.portal (lot 7 : Node 22, Node 20 en fin de vie depuis avril 2026)
           node-version: 22
@@ -124,7 +124,7 @@ jobs:
         run: npm run build
         env:
           REACT_APP_API_BASE_URL: https://api.c-pay.global
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: portal-${{ matrix.portal }}
           path: portal/${{ matrix.portal }}/build
@@ -137,8 +137,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -166,8 +166,8 @@ jobs:
     name: Vitrine (HTML, liens, JS)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: python3 -I scripts/check-landing.py portal/landing
@@ -181,7 +181,7 @@ jobs:
       matrix:
         php: ['7.4', '8.3']   # 7.4 = minimum annonce par le plugin WooCommerce
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
@@ -197,8 +197,8 @@ jobs:
     name: SDK JavaScript (node --check)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: sh scripts/check-js-syntax.sh sdk/javascript
@@ -211,8 +211,8 @@ jobs:
       run:
         working-directory: mobile/cpay-mobile
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -231,15 +231,15 @@ jobs:
     name: Android (assembleDebug)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools platforms;android-36 build-tools;36.0.0
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - name: SDK du runner (android/local.properties pointe sur /opt/android-sdk du poste de dev)
@@ -265,14 +265,14 @@ jobs:
             [ -f app/build/outputs/mapping/release/missing_rules.txt ] && { echo "::error::missing_rules.txt :"; sed 's/^/::error::/' app/build/outputs/mapping/release/missing_rules.txt | head -40; }
             exit 1
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 7
           if-no-files-found: error
       # Lot 4 (audit 2026-11-02 mobile P2-2) : build de recette terrain (serveur de dev, R8, aucun journal HTTP, .staging)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-staging-apk
           path: android/app/build/outputs/apk/staging/*.apk
@@ -297,10 +297,10 @@ jobs:
           --health-cmd "pg_isready -U cplus_ci -d cplus_ci"
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
       - name: Image API (docker/Dockerfile.api)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile.api
@@ -344,7 +344,7 @@ jobs:
           docker exec api-ci id -u | grep -qv '^0$' || { echo "::error::l'API tourne en root dans le conteneur"; exit 1; }
           docker rm -f api-ci >/dev/null
       - name: Image portail marchand (docker/Dockerfile.portal, APP_DIR=portal/merchant)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile.portal
@@ -397,8 +397,8 @@ jobs:
     name: Versions et scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Toutes les versions = VERSION
