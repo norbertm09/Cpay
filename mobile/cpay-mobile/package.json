@@ -13,7 +13,7 @@
     "check": "node -e \"require('@babel/core').transformFileSync('App.js',{presets:['babel-preset-expo'],filename:'App.js',babelrc:false,configFile:false});console.log('App.js OK')\""
   },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-async-storage/async-storage": "3.1.1",
     "expo": "~54.0.38",
     "expo-clipboard": "~8.0.8",
     "expo-secure-store": "~15.0.8",
