@@ -13,15 +13,9 @@ const { query, withTransaction } = require('../config/database');
 
 // === Regles metier CPay (velocite, limites, frais) ===
 const OPERATOR_LIMITS = { airtel: 1000000, mtn: 1000000 };
-const FEE_RATES = { collect: 0.015, disburse: 0.01, payout: 0.01 };
-const CONFIRM_TIMEOUT_MS = 30000;
-
-function computeFees(amount, rate, status) {
-  if (status !== 'authorized') return { fee: 0, net: 0 };
-  const fee = Math.round(amount * rate);
-  return { fee, net: amount - fee };
-}
-
+// Lot 2 (audit 2026-11-02 P1-4) : plus de barème local (constantes de frais, computeFees, getFeeRate) — les frais viennent
+// de cpay_calculate_fee (orchestrateur, finalize.service) et de cash.feeRate ; OPERATOR_LIMITS reste un garde-fou
+// synchrone avant les plafonds KYB de l'orchestrateur.
 async function checkVelocity(merchantId, amount, type) {
   const m = await query(`SELECT velocity_max_per_txn, velocity_max_daily_amount,
     velocity_max_daily_count, velocity_max_monthly_amount, velocity_max_monthly_count
@@ -49,71 +43,10 @@ async function checkVelocity(merchantId, amount, type) {
   return null;
 }
 
-// Recupere le taux de frais applicable (marchand puis defaut)
-async function getFeeRate(merchantId, txnType, operator) {
-  try {
-    const r = await query(
-      `SELECT fee_rate FROM merchant_fees
-       WHERE (merchant_id=$1 OR merchant_id IS NULL) AND txn_type=$2 AND operator=$3
-       ORDER BY merchant_id NULLS LAST LIMIT 1`,
-      [merchantId, txnType, operator]);
-    if (r.rows.length) return parseFloat(r.rows[0].fee_rate);
-  } catch (e) { console.error('[getFeeRate]', e.message); }
-  // Fallback ultime si table indisponible
-  const def = { collect: 0.04, disburse: 0.04, payout: 0.04 };
-  return def[txnType] || 0.04;
-}
+// Lot 1 / lot 2 (audit 2026-11-02 P0 #2, P1-4) : les pollings Airtel en mémoire (setTimeout) ont été retirés —
+// POST /collect passe par l'orchestrateur et POST /disburse par cash.createPayout ; les statuts sont relus par
+// reconcileOne (GET …/status) et par la réconciliation périodique. Plus aucune écriture `failed` sur délai.
 
-// Lot 1 (audit 2026-11-02 P0 #2) : le polling Airtel des décaissements a été retiré — POST /disburse
-// délègue à cash.createPayout (résultat incertain → statut `unknown`, fonds réservés, rapprochement
-// par sweepUncertainPayouts) ; plus aucune écriture `failed` sur un simple délai.
-function scheduleAirtelPolling(transactionId, airtelTxId) {
-  const delays = [5000, 10000, 15000, 20000, 25000];
-  const cfg = {
-    baseUrl:   process.env.AIRTEL_CG_BASE_URL,
-    apiKey:    process.env.AIRTEL_CG_COLL_CLIENT_ID,
-    apiSecret: process.env.AIRTEL_CG_COLL_CLIENT_SECRET,
-    env:       process.env.AIRTEL_CG_ENV,
-  };
-  delays.forEach(d => setTimeout(async () => {
-    try {
-      const row = await query(`SELECT status FROM transactions WHERE transaction_id=$1`, [transactionId]);
-      if (!row.rows.length || row.rows[0].status !== 'pending') return;
-      const airtel = require('../services/mobilemoney/providers/airtel.provider');
-      const s = await airtel.queryTransaction({ txId: airtelTxId, currency: 'XAF', config: cfg });
-      if (s.success) {
-        const auth = 'AUTH' + Math.random().toString(36).slice(2, 8).toUpperCase();
-        await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Paiement Airtel confirme', gateway_order_id=COALESCE($3, gateway_order_id), provider_raw_response=$4, fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW() WHERE transaction_id=$2`, [auth, transactionId, s.airtelMoneyId || null, s.rawResponse || null]);
-        try { const { settleTransaction } = require('../services/settlement.service'); settleTransaction(transactionId).catch(e => console.error('[settlement]', e.message)); } catch(e){}
-      } else if (s.failed) {
-        const msg = s.rawStatus === 'TE' ? 'Delai de confirmation Airtel depasse.' : (s.message || 'Paiement Airtel echoue.');
-        await query(`UPDATE transactions SET status='failed', response_message=$1, completed_at=NOW() WHERE transaction_id=$2`, [msg, transactionId]);
-      }
-    } catch (e) { console.error('[airtel polling]', e.message); }
-  }, d));
-  // Regle: timeout 30s - dernier check operateur avant echec
-  setTimeout(async () => {
-    try {
-      const row = await query(`SELECT status FROM transactions WHERE transaction_id=$1`, [transactionId]);
-      if (!row.rows.length || row.rows[0].status !== 'pending') return;
-      const airtel = require('../services/mobilemoney/providers/airtel.provider');
-      const s = await airtel.queryTransaction({ txId: airtelTxId, currency: 'XAF', config: cfg });
-      if (s.success) {
-        const auth = 'AUTH' + Math.random().toString(36).slice(2, 8).toUpperCase();
-        await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Paiement Airtel confirme', gateway_order_id=COALESCE($3, gateway_order_id), provider_raw_response=$4, fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW() WHERE transaction_id=$2 AND status='pending'`, [auth, transactionId, s.airtelMoneyId || null, s.rawResponse || null]);
-      } else if (s.failed) {
-        await query(`UPDATE transactions SET status='failed', response_message=$1, provider_raw_response=$3, gateway_order_id=COALESCE($4, gateway_order_id), fee_amount=0, net_amount=0, completed_at=NOW() WHERE transaction_id=$2 AND status='pending'`, [s.message || 'Transaction echouee', transactionId, s.rawResponse || null, s.airtelMoneyId || null]);
-      } else {
-        // Lot 1 (P0 #2) : un délai n'est pas un refus — la transaction reste `pending`, la réconciliation
-        // (reconcileOne / reconcilePending) applique le statut réel de l'opérateur.
-        await query(`UPDATE transactions SET response_message='En attente de confirmation operateur (delai 30s depasse, verification en cours)', provider_raw_response=COALESCE($2, provider_raw_response) WHERE transaction_id=$1 AND status='pending'`, [transactionId, s.rawResponse || null]);
-      }
-    } catch (e) {
-      console.error('[airtel timeout]', e.message);
-      // Lot 1 : opérateur injoignable → on laisse `pending` (jamais `failed` sans refus explicite)
-    }
-  }, 30000);
-}
 // WAVE-2 : module d'auth unique (audit §1.1) — aucun jwt.sign/verify local
 const {
   merchantAuth, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
@@ -234,6 +167,7 @@ const MERCHANT_USER_COLS = `u.user_id, u.merchant_id, u.email, u.phone, u.first_
 const merchantClaims = (user) => ({
   type: 'merchant', merchantId: user.merchant_id, role: user.role,
   businessName: user.business_name, country: user.country, currency: user.currency,
+  ...(user.temp_password ? { pwdTemp: true } : {}), // Lot 2 : mot de passe temporaire → API limitée au changement
 });
 
 const merchantProfile = (user) => ({
@@ -422,7 +356,7 @@ router.post('/auth/refresh', async (req, res) => {
       actorType: 'merchant', token: refreshToken, req, res,
       buildClaims: async ({ actorId }) => {
         const r = await query(
-          `SELECT u.user_id, u.role, m.merchant_id, m.business_name, m.country, m.currency
+          `SELECT u.user_id, u.role, u.temp_password, m.merchant_id, m.business_name, m.country, m.currency
            FROM merchant_users u JOIN merchants m ON u.merchant_id = m.merchant_id
            WHERE u.user_id = $1 AND u.is_active = TRUE AND m.merchant_status = 'active'`,
           [actorId]
@@ -1454,234 +1388,121 @@ router.patch('/support/tickets/:id/resolve', merchantAuth, async (req, res) => {
 
 // ─── PAIEMENT SANS CONTACT (NFC) ─────────────────────────────────
 // ─── MOBILE APP COLLECT (JWT Auth) ───────────────────────────────
+// Lot 2 (audit 2026-11-02 P1-4) : route historique de l'application Android, désormais une simple délégation à
+// l'orchestrateur (même chemin que POST /merchant/cash/collect : plafonds KYB, antifraude, routage par pays,
+// frais cpay_calculate_fee, journal). Plus de second moteur de paiement ni de polling en mémoire ; le statut se
+// relit via GET /collect/:txnId/status (reconcileOne). Réponse compatible : success, txnId, reference, amount,
+// fee, net, status, message, requiresConfirmation.
 router.post('/collect', merchantAuth, idempotency, async (req, res) => {
-  const { amount, customerPhone, method, description, terminalId } = req.body;
+  const { amount, customerPhone, method, description, terminalId } = req.body || {};
   if (!amount || parseFloat(amount) < 1)
     return res.status(422).json({ error: 'Montant minimum 1 XAF' });
   if (!customerPhone) return res.status(422).json({ error: 'customerPhone requis' });
   if (!method) return res.status(422).json({ error: 'method requis (airtel_money, mtn_momo)' });
+  const operatorHint = method === 'mtn_momo' ? 'mtn_momo' : method === 'airtel_money' ? 'airtel_money' : null;
+  if (!operatorHint) return res.status(422).json({ error: 'Methode non supportee: ' + method, code: 'UNSUPPORTED_METHOD' });
 
+  const cash = require('../services/cash/cash.service');
+  const { attachResource } = require('../middleware/idempotency');
   const merchantId = req.merchant?.merchantId || req.user?.merchantId;
-  const amt   = parseFloat(amount);
-  const fee   = 0;
-  const net   = 0;
-  const ref   = 'MOB-' + Date.now().toString(36).toUpperCase();
-  const phone = String(customerPhone).replace(/[^0-9]/g, '');
-
-  const pmMap = { airtel_money: 'mobile_money', mtn_momo: 'mobile_money', card: 'card_nfc', qr: 'qr' };
-  const pm = pmMap[method] || 'mobile_money';
-
-  const operator = method === 'mtn_momo' ? 'mtn'
-                 : method === 'airtel_money' ? 'airtel' : null;
-  if (operator && OPERATOR_LIMITS[operator] && amt > OPERATOR_LIMITS[operator])
-    return res.status(422).json({ error: 'Montant superieur a la limite operateur (max ' + OPERATOR_LIMITS[operator] + ' XAF)' });
-  const velErr = await checkVelocity(merchantId, amt, 'collect');
-  if (velErr) return res.status(422).json({ error: velErr });
-
-  let txnId = null;
+  const amt = parseFloat(amount);
+  if (!Number.isInteger(amt)) return res.status(422).json({ error: 'Montant entier attendu en XAF' });
 
   try {
-    // 1. Creer la transaction en PENDING
-    const txn = await query(
-      `INSERT INTO transactions (
-        merchant_id, type, amount, currency, fee_amount, net_amount,
-        payment_method, status, detected_operator, gateway_name,
-        description, initiated_at
-        , device_id
-      ) VALUES ($1,'collect',$2,'XAF',$3,$4,$5,'pending',$6,$7,$8,NOW(),$9)
-      RETURNING transaction_id`,
-      [merchantId, amt, fee, net, pm, operator, operator || 'unknown',
-       description || 'Encaissement mobile', terminalId || null]);
-    txnId = txn.rows[0].transaction_id;
+    const merchant = await cash.getMerchant(merchantId);
+    if (!merchant) return res.status(404).json({ error: 'Marchand introuvable', code: 'MERCHANT_NOT_FOUND' });
+    if (merchant.merchant_status && merchant.merchant_status !== 'active')
+      return res.status(403).json({ error: 'Compte marchand inactif', code: 'MERCHANT_INACTIVE' });
+    const currency = String(merchant.currency || 'XAF').toUpperCase();
 
-    // 2. Appel reel a l'operateur
-    if (operator === 'mtn') {
-      const mtn = require('../services/rails/mtn-momo.client');
+    const d = cash.detectWallet(customerPhone, { country: merchant.country, operator: operatorHint });
+    if (!d.success) return res.status(422).json({ error: d.error || 'Numero client invalide', code: d.code || 'PHONE_INVALID' });
+    const operatorCode = cash.normalizeOperatorCode(d.operator);
+    if (String(d.currency).toUpperCase() !== currency)
+      return res.status(422).json({ error: `Numero ${d.countryName || d.country} en ${d.currency} : devise differente de celle du marchand (${currency})`, code: 'CURRENCY_MISMATCH' });
 
-      const rtp = await mtn.requestToPay({
-        amount: amt,
-        phone,
-        description: description || 'Paiement C-Pay',
-        externalId: ref,
-      });
+    const limitKey = operatorCode === 'mtn_momo' ? 'mtn' : operatorCode === 'airtel_money' ? 'airtel' : null;
+    if (limitKey && OPERATOR_LIMITS[limitKey] && amt > OPERATOR_LIMITS[limitKey])
+      return res.status(422).json({ error: 'Montant superieur a la limite operateur (max ' + OPERATOR_LIMITS[limitKey] + ' XAF)' });
+    const velErr = await checkVelocity(merchantId, amt, 'collect');
+    if (velErr) return res.status(422).json({ error: velErr });
 
-      await query(
-        `UPDATE transactions
-         SET gateway_payment_id=$1, gateway_order_id=$2, response_message=$3
-         WHERE transaction_id=$4`,
-        [rtp.referenceId, ref, 'Push USSD envoye — en attente de confirmation', txnId]);
+    const rail = cash.collectRail(d.gateway);
+    if (!rail.available) return res.status(410).json({ ...FEATURE_DISABLED_BODY, method: 'mobile_money', operator: operatorCode, country: d.country });
 
-      return res.json({
-        success: true,
-        txnId,
-        reference: ref,
-        gatewayReference: rtp.referenceId,
-        amount: amt,
-        fee,
-        net,
-        status: 'pending',
-        message: 'Demande envoyee — le client doit confirmer sur son telephone',
-        requiresConfirmation: true,
-      });
+    const ref = cash.generateReference('MOB');
+    const desc = [ref, description].filter(Boolean).join(' — ');
+    const orchestrator = require('../services/orchestration/orchestrator');
+    const result = await orchestrator.processTransaction({
+      merchantId, type: 'collect', amount: amt, customerPhone: d.phone, description: desc,
+      deviceId: terminalId || null, operatorOverride: d.overridden ? d.operator : undefined,
+    });
+    if (result.txnId) await attachResource(req, { type: 'transaction', id: result.txnId });
+    if (!result.success && !result.pending) {
+      const body = { txnId: result.txnId || null };
+      if (result.code === 'FRAUD_UNAVAILABLE') return res.status(503).json({ error: result.error, code: 'FRAUD_UNAVAILABLE', ...body });
+      if (result.limitInfo) return res.status(429).json({ error: result.error || 'Plafond atteint', code: 'LIMIT_EXCEEDED', ...body, limit: result.limitInfo.limit, currentVolume: result.limitInfo.currentVolume });
+      if (result.status === 'failed' || result.code === 'PAYMENT_DECLINED') return res.status(402).json({ error: result.error || result.message || 'Paiement refuse', code: 'PAYMENT_DECLINED', ...body });
+      return res.status(result.statusCode || 422).json({ error: result.error || 'Encaissement impossible', code: result.code || 'VALIDATION_ERROR', ...body });
     }
-
-    if (operator === 'airtel') {
-      const airtel = require('../services/mobilemoney/providers/airtel.provider');
-      const airtelConfig = {
-        baseUrl:   process.env.AIRTEL_CG_BASE_URL,
-        apiKey:    process.env.AIRTEL_CG_COLL_CLIENT_ID,
-        apiSecret: process.env.AIRTEL_CG_COLL_CLIENT_SECRET,
-        env:       process.env.AIRTEL_CG_ENV,
-      };
-      const ar = await airtel.collectPayment({ txnId, amount: amt, currency: 'XAF', phone, config: airtelConfig });
-      const ok = ar?.success === true;
-      await query(
-        `UPDATE transactions SET gateway_payment_id=$1, response_message=$2, provider_raw_response=$4 WHERE transaction_id=$3`,
-        [ar?.transactionId || ref, ok ? 'Airtel: demande envoyee' : (ar?.errorMessage || 'Airtel: echec'), txnId, ar?.rawResponse || null]);
-      if (ok) scheduleAirtelPolling(txnId, ar?.transactionId || ref);
-      return res.json({
-        success: !!ok,
-        txnId,
-        reference: ref,
-        amount: amt, fee, net,
-        status: ok ? 'pending' : 'failed',
-        message: ok ? 'Demande Airtel envoyee — le client doit confirmer' : (ar?.errorMessage || 'Echec Airtel'),
-        requiresConfirmation: !!ok,
-      });
-    }
-
-    // Autres methodes (card_nfc, qr) : pas encore branchees
-    await query(
-      `UPDATE transactions SET status='failed',
-       response_message='Methode non supportee' WHERE transaction_id=$1`, [txnId]);
-    return res.status(422).json({ error: 'Methode non supportee: ' + method, txnId });
-
+    const { fee, net } = cash.computeFee(amt, await cash.feeRate(merchantId, 'collect', operatorCode));
+    return res.json({
+      success: true, txnId: result.txnId, reference: ref,
+      amount: amt, fee, net, feeEstimated: true, currency,
+      operator: operatorCode, country: d.country,
+      status: result.status || 'pending',
+      message: result.message || 'Demande envoyee — le client doit confirmer sur son telephone',
+      requiresConfirmation: result.status !== 'authorized',
+      statusUrl: `/api/v1/merchant/collect/${result.txnId}/status`,
+    });
   } catch (err) {
     console.error('[collect]', err.message);
-    if (txnId) {
-      await query(
-        `UPDATE transactions SET status='failed', response_message=$1
-         WHERE transaction_id=$2`, [err.message.slice(0, 200), txnId]).catch(() => {});
-    }
-    res.status(502).json({ error: err.message, txnId, code: 'GATEWAY_ERROR' });
+    return res.status(500).json({ error: 'Encaissement impossible pour le moment', code: 'INTERNAL_ERROR' });
   }
 });
 
 // ─── STATUT D'UNE TRANSACTION ────────────────────────────────────
 router.get('/collect/:txnId/status', merchantAuth, async (req, res) => {
   const merchantId = req.merchant?.merchantId || req.user?.merchantId;
-  try {
-    const r = await query(
-      `SELECT transaction_id, amount, fee_amount, net_amount, status,
-              detected_operator, gateway_payment_id, gateway_order_id,
-              auth_code, response_message, initiated_at, completed_at
+  const load = () => query(
+    `SELECT transaction_id, merchant_id, type, amount, currency, fee_amount, net_amount, status, payment_method,
+            detected_operator, detected_country, gateway_name, gateway_payment_id, gateway_order_id, pay_link_id,
+            auth_code, response_message, description, initiated_at, completed_at
        FROM transactions
-       WHERE transaction_id=$1 AND merchant_id=$2`,
-      [req.params.txnId, merchantId]);
-
+      WHERE transaction_id=$1 AND merchant_id=$2`,
+    [req.params.txnId, merchantId]);
+  try {
+    let r = await load();
     if (!r.rows[0]) return res.status(404).json({ error: 'Transaction introuvable' });
-    const t = r.rows[0];
-
-    // Si en attente, interroger l'operateur
-    if (t.status === 'pending' && t.gateway_payment_id && t.detected_operator === 'mtn') {
+    let t = r.rows[0];
+    // Lot 2 (P1-4) : en attente → statut réel de l'opérateur par la même machine d'état que la réconciliation
+    // et les webhooks (reconcileOne → finalize.service). Jamais `failed` sur délai ou erreur réseau.
+    if (t.status === 'pending' && t.gateway_payment_id) {
       try {
-        const mtn = require('../services/rails/mtn-momo.client');
-        const s = await mtn.getCollectionStatus(t.gateway_payment_id);
-
-        if (s.status === 'SUCCESSFUL') {
-          const auth = 'AUTH' + Math.random().toString(36).slice(2, 8).toUpperCase();
-          await query(
-            `UPDATE transactions SET status='authorized', auth_code=$1,
-             response_message='Paiement confirme',
-             fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW()
-             WHERE transaction_id=$2`, [auth, t.transaction_id]);
-          t.status = 'authorized';
-          t.auth_code = auth;
-          t.response_message = 'Paiement confirme';
-          t.completed_at = new Date();
-          // CR#3 : settlement temps reel (non bloquant)
-          try {
-            const { settleTransaction } = require('../services/settlement.service');
-            settleTransaction(t.transaction_id).catch(e => console.error('[settlement]', e.message));
-          } catch(e) { console.error('[settlement trigger]', e.message); }
-        } else if (s.status === 'FAILED') {
-          const raisonsMtn = {
-            COULD_NOT_PERFORM_TRANSACTION: 'Transaction impossible. Vérifiez que le compte Mobile Money est actif et approvisionné.',
-            NOT_ENOUGH_FUNDS:              'Solde insuffisant sur le compte du client.',
-            PAYER_LIMIT_REACHED:           'Plafond de transaction atteint pour ce compte.',
-            PAYER_NOT_FOUND:               'Numéro Mobile Money introuvable.',
-            PAYEE_NOT_ALLOWED_TO_RECEIVE:  'Ce compte marchand ne peut pas recevoir ce paiement.',
-            APPROVAL_REJECTED:             'Paiement refusé par le client.',
-            EXPIRED:                       'Délai de confirmation dépassé.',
-            INTERNAL_PROCESSING_ERROR:     'Erreur temporaire MTN. Veuillez réessayer.',
-            ACCOUNT_HOLDER_NOT_ACTIVE:     'Le compte Mobile Money du client n\'est pas actif.',
-          };
-          const msg = raisonsMtn[s.reason] || s.reason || 'Paiement refusé';
-          await query(
-            `UPDATE transactions SET status='failed', response_message=$1,
-             completed_at=NOW() WHERE transaction_id=$2`,
-            [msg, t.transaction_id]);
-          t.status = 'failed';
-          t.response_message = msg;
-        }
-      } catch (e) { /* on renvoie le statut en base */ }
+        const { reconcileOne } = require('../services/reconcile.service');
+        const out = await reconcileOne(t);
+        if (out && out.updated) { r = await load(); t = r.rows[0] || t; }
+      } catch (e) { console.error('[collect status]', e.message); }
     }
-    // Airtel : enquiry si en attente (GET /standard/v1/payments/{id})
-    if (t.status === 'pending' && t.gateway_payment_id && t.detected_operator === 'airtel') {
-      try {
-        const airtel = require('../services/mobilemoney/providers/airtel.provider');
-        const airtelConfig = {
-          baseUrl:   process.env.AIRTEL_CG_BASE_URL,
-          apiKey:    process.env.AIRTEL_CG_COLL_CLIENT_ID,
-          apiSecret: process.env.AIRTEL_CG_COLL_CLIENT_SECRET,
-          env:       process.env.AIRTEL_CG_ENV,
-        };
-        const s = await airtel.queryTransaction({ txId: t.gateway_payment_id, currency: 'XAF', config: airtelConfig });
-        if (s.success) {
-          const auth = 'AUTH' + Math.random().toString(36).slice(2, 8).toUpperCase();
-          await query(
-            `UPDATE transactions SET status='authorized', auth_code=$1,
-             response_message='Paiement Airtel confirme',
-             gateway_order_id=COALESCE($3, gateway_order_id),
-             fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW()
-             WHERE transaction_id=$2`, [auth, t.transaction_id, s.airtelMoneyId || null]);
-          t.status = 'authorized';
-          t.auth_code = auth;
-          t.response_message = 'Paiement Airtel confirme';
-          t.completed_at = new Date();
-          try {
-            const { settleTransaction } = require('../services/settlement.service');
-            settleTransaction(t.transaction_id).catch(e => console.error('[settlement]', e.message));
-          } catch(e) { console.error('[settlement trigger]', e.message); }
-        } else if (s.failed) {
-          const msg = s.rawStatus === 'TE' ? 'Delai de confirmation Airtel depasse.' : (s.message || 'Paiement Airtel refuse.');
-          await query(
-            `UPDATE transactions SET status='failed', response_message=$1,
-             completed_at=NOW() WHERE transaction_id=$2`, [msg, t.transaction_id]);
-          t.status = 'failed';
-          t.response_message = msg;
-        }
-      } catch (e) { /* garder pending */ }
-    }
-
     const labels = {
       pending:    'En attente de confirmation client',
       authorized: 'Paiement confirme',
       failed:     'Paiement echoue',
       reversed:   'Transaction annulee',
     };
-
+    const cash = require('../services/cash/cash.service');
     res.json({
       txnId: t.transaction_id,
       amount: parseFloat(t.amount),
       fee: parseFloat(t.fee_amount || 0),
       net: parseFloat(t.net_amount || 0),
+      currency: t.currency,
       status: t.status,
       label: labels[t.status] || t.status,
       operator: t.detected_operator,
       authCode: t.auth_code,
       message: t.response_message,
-      reference: t.gateway_order_id,
+      reference: cash.referenceFromDescription(t.description) || t.gateway_order_id || null,
       initiatedAt: t.initiated_at,
       completedAt: t.completed_at,
     });

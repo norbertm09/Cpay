@@ -4,7 +4,7 @@
 // (/dashboard, /operations, /transactions…) redirigent vers les nouvelles.
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, Guard } from './hooks/useAuth';
+import { AuthProvider, Guard, useAuth } from './hooks/useAuth';
 import { Toast } from './components';
 import { AppShell } from './layout/AppShell';
 import { LEGACY_REDIRECTS } from './layout/nav';
@@ -13,6 +13,7 @@ import { Register } from './pages/auth/Register';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
 import { ResetPassword } from './pages/auth/ResetPassword';
 import { Accept } from './pages/auth/Accept';
+import { ForcePassword } from './pages/auth/ForcePassword';
 import { Accueil } from './pages/accueil/Accueil';
 import { Encaisser } from './pages/caisse/Encaisser';
 import { Retirer } from './pages/caisse/Retirer';
@@ -36,6 +37,13 @@ import { NotFound } from './pages/NotFound';
 // Purge unique des jetons hérités de l'ancien stockage localStorage.
 try { localStorage.removeItem('merchant_token'); localStorage.removeItem('merchant_refresh'); localStorage.removeItem('merchant_user'); } catch (e) { /* navigation privée */ }
 
+// Lot 2 (audit 2026-11-02 portails P1-1) : mot de passe temporaire → seul l'écran de changement est rendu,
+// quel que soit l'URL ou le rechargement (plus de simple bannière contournable).
+const PasswordGate = ({ children }) => {
+  const { user } = useAuth();
+  return user?.mustChangePassword ? <ForcePassword /> : children;
+};
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -46,9 +54,10 @@ export default function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/accept" element={<Guard><Accept /></Guard>} />
+          <Route path="/accept" element={<Guard><PasswordGate><Accept /></PasswordGate></Guard>} />
           <Route path="/*" element={
             <Guard>
+              <PasswordGate>
               <AppShell>
                 <Routes>
                   <Route index element={<Accueil />} />
@@ -73,6 +82,7 @@ export default function App() {
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </AppShell>
+              </PasswordGate>
             </Guard>
           } />
         </Routes>

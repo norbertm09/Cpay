@@ -8,7 +8,8 @@ const POINTS = [
   { icon: 'shield-check', text: 'Sécurité renforcée : PIN, double authentification, alertes' },
 ];
 
-export default function AuthLayout() {
+// `children` (lot 2) : rendu hors routeur imbriqué, ex. écran de mot de passe forcé ; sinon la route enfant (Outlet).
+export default function AuthLayout({ children }) {
   return (
     <div className="auth">
       <aside className="auth-side">
@@ -25,7 +26,7 @@ export default function AuthLayout() {
       <main className="auth-main">
         <div className="auth-box">
           <div className="ab-logo"><img src="/logo-calculus.png" alt="" />C-Pay</div>
-          <Outlet />
+          {children || <Outlet />}
           <div className="ab-legal">C-Pay est un produit de Calculus Plus SAS</div>
         </div>
       </main>

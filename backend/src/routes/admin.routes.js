@@ -894,31 +894,33 @@ router.get('/settlements/summary', adminAuth, async (req, res) => {
 });
 
 // Marquer un retrait comme vire (settlement manuel)
-router.post('/settlements/:transferId/complete', requireRole('super_admin', 'finance_admin'), async (req, res) => {
-  const { settlementRef, note } = req.body;
-  const adminId = req.admin?.adminId || req.user?.adminId || req.user?.sub;
-
+// Lot 2 (audit 2026-11-02 P1-5) : plus d'UPDATE direct sur merchant_transfers — même point de passage que
+// /admin/cash/transfers/:id/mark-executed|reject (cash.transitionTransfer : claim de statut, événement JSONB,
+// needs_review, audit_logs). Rôles et réponses conservés pour le portail admin.
+const adminTransferAudit = async (req, action, t, details) => {
   try {
-    const t = await query(
-      `SELECT mt.*, m.email AS merchant_email, m.business_name,
-              fi.name AS inst_name, ba.account_number
-       FROM merchant_transfers mt
-       LEFT JOIN merchants m ON m.merchant_id = mt.merchant_id
-       LEFT JOIN bank_accounts ba ON ba.account_id = mt.bank_account_id
-       LEFT JOIN financial_institutions fi ON fi.institution_id = ba.institution_id
-       WHERE mt.transfer_id=$1 AND mt.status='pending_settlement'`,
-      [req.params.transferId]);
-
-    if (!t.rows[0])
-      return res.status(404).json({ error: 'Retrait introuvable ou deja traite' });
-    const tr = t.rows[0];
-
-    await query(
-      `UPDATE merchant_transfers
-       SET status='completed', settled_by=$1, settlement_ref=$2,
-           admin_note=$3, settled_at=NOW(), completed_at=NOW()
-       WHERE transfer_id=$4`,
-      [adminId, settlementRef || null, note || null, req.params.transferId]);
+    const { auditLog } = require('../middleware/pci.middleware');
+    await auditLog({ eventType: action, actorType: 'admin', actorId: req.user?.sub || null, entityType: 'merchant_transfer', entityId: t.transfer_id,
+      details: { reference: t.reference, merchantId: t.merchant_id, ...details }, ipAddress: req.ip, success: true });
+  } catch (e) { logger.warn('admin settlements: audit failed', { err: e.message }); }
+};
+const UUID_ADMIN_RE = /^[0-9a-f-]{36}$/i;
+router.post('/settlements/:transferId/complete', requireRole('super_admin', 'finance_admin'), async (req, res) => {
+  const { settlementRef, note } = req.body || {};
+  if (!settlementRef || !String(settlementRef).trim()) return res.status(422).json({ error: 'settlementRef (reference bancaire) requis', code: 'VALIDATION_ERROR' });
+  const adminId = req.admin?.adminId || req.user?.adminId || req.user?.sub;
+  try {
+    const cash = require('../services/cash/cash.service');
+    const tr = await cash.getTransfer(req.params.transferId);
+    if (!tr || !cash.MANUAL_QUEUE.includes(tr.status))
+      return res.status(404).json({ error: 'Retrait introuvable ou deja traite', code: 'TRANSFER_NOT_FOUND' });
+    const row = await cash.transitionTransfer({
+      transferId: tr.transfer_id, from: cash.MANUAL_QUEUE, to: 'completed',
+      patch: { bankReference: String(settlementRef).trim(), executedBy: UUID_ADMIN_RE.test(String(adminId || '')) ? adminId : null, adminNote: note || null },
+      event: cash.event('completed', { by: `admin:${req.user?.sub || ''}`, action: 'settlements_complete', bankReference: String(settlementRef).trim() }),
+    });
+    if (!row) return res.status(409).json({ error: `Retrait non executable (statut ${tr.status})`, code: 'INVALID_STATUS', status: tr.status });
+    await adminTransferAudit(req, 'CASH_TRANSFER_EXECUTED', tr, { net: Number(tr.net_amount || tr.amount), bankReference: String(settlementRef).trim(), note: note || null });
 
     // Notifier le marchand
     if (tr.merchant_email) {
@@ -926,36 +928,39 @@ router.post('/settlements/:transferId/complete', requireRole('super_admin', 'fin
         const email = require('../services/notifications/email.service');
         await email.send({
           to: tr.merchant_email,
-          subject: `Virement effectue — ${parseFloat(tr.net_amount)} XAF`,
+          subject: `Virement effectue — ${parseFloat(tr.net_amount)} ${tr.currency || 'XAF'}`,
           html: `<h2>Votre retrait a ete traite</h2>
             <p>Bonjour ${tr.business_name || ''},</p>
-            <p>Le virement de <b>${parseFloat(tr.net_amount)} XAF</b> vers
-            <b>${tr.inst_name}</b> (compte ${tr.account_number}) a ete effectue.</p>
-            ${settlementRef ? `<p>Reference bancaire : <code>${settlementRef}</code></p>` : ''}
+            <p>Le virement de <b>${parseFloat(tr.net_amount)} ${tr.currency || 'XAF'}</b> vers
+            <b>${tr.inst_name || 'votre banque'}</b> (compte ${cash.maskNumber(tr.account_number)}) a ete effectue.</p>
+            <p>Reference bancaire : <code>${String(settlementRef).trim().replace(/[<>&"]/g, '')}</code></p>
             <p>Le credit peut prendre 24 a 48h selon votre banque.</p>`,
         });
       } catch (e) { console.error('[settle-notify]', e.message); }
     }
 
-    res.json({ success: true, transferId: req.params.transferId, status: 'completed' });
+    res.json({ success: true, transferId: tr.transfer_id, status: 'completed', reference: tr.reference });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Rejeter un retrait (rembourse le solde marchand)
+// Rejeter un retrait (libere le solde marchand : statut `rejected`, hors des sorties comptees)
 router.post('/settlements/:transferId/reject', requireRole('super_admin', 'finance_admin'), async (req, res) => {
-  const { reason } = req.body;
+  const { reason } = req.body || {};
+  if (!reason || String(reason).trim().length < 3) return res.status(422).json({ error: 'reason requis', code: 'VALIDATION_ERROR' });
+  const adminId = req.admin?.adminId || req.user?.adminId || req.user?.sub;
   try {
-    const r = await query(
-      `UPDATE merchant_transfers
-       SET status='failed', error_message=$1, completed_at=NOW()
-       WHERE transfer_id=$2 AND status='pending_settlement'
-       RETURNING merchant_id, net_amount`,
-      [reason || 'Rejete par admin', req.params.transferId]);
-
-    if (!r.rows[0])
-      return res.status(404).json({ error: 'Retrait introuvable ou deja traite' });
-
-    res.json({ success: true, status: 'failed', refunded: parseFloat(r.rows[0].net_amount) });
+    const cash = require('../services/cash/cash.service');
+    const tr = await cash.getTransfer(req.params.transferId);
+    if (!tr || !cash.REJECTABLE.includes(tr.status))
+      return res.status(404).json({ error: 'Retrait introuvable ou deja traite', code: 'TRANSFER_NOT_FOUND' });
+    const row = await cash.transitionTransfer({
+      transferId: tr.transfer_id, from: cash.REJECTABLE, to: 'rejected',
+      patch: { errorMessage: String(reason).slice(0, 500), executedBy: UUID_ADMIN_RE.test(String(adminId || '')) ? adminId : null, adminNote: String(reason).slice(0, 500) },
+      event: cash.event('rejected', { by: `admin:${req.user?.sub || ''}`, action: 'settlements_reject', reason: String(reason).slice(0, 500) }),
+    });
+    if (!row) return res.status(409).json({ error: `Retrait non rejetable (statut ${tr.status})`, code: 'INVALID_STATUS', status: tr.status });
+    await adminTransferAudit(req, 'CASH_TRANSFER_REJECT', tr, { reason: String(reason).slice(0, 500) });
+    res.json({ success: true, status: 'rejected', transferId: tr.transfer_id, refunded: parseFloat(tr.amount), reference: tr.reference });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1386,11 +1391,14 @@ router.patch('/merchants/:id/kyb/documents/:docId', requireRole('super_admin', '
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
+// Lot 2 (audit 2026-11-02 P1-5) : l'ancien handler appelait runAutoSettlement() (désactivé, { disabled:true })
+// et annonçait un règlement qui n'avait pas lieu. Même moteur que POST /internal/settlement/run.
 router.post('/settlement/run', requireRole('super_admin', 'finance_admin'), async (req, res) => {
   try {
-    const { runAutoSettlement } = require('../services/settlement/auto-settlement');
-    await runAutoSettlement();
-    res.json({ success: true, message: 'Règlement J+1 exécuté manuellement' });
+    const { runSettlement } = require('../services/settlement/settlement.engine');
+    const result = await runSettlement(req.body?.cutoffDate);
+    const message = result?.skipped ? 'Règlement déjà en cours' : `Règlement J+1 exécuté : ${Number(result?.batches || 0)} lot(s) créé(s), ${Number(result?.settled || 0)} transaction(s)`;
+    res.json({ success: true, ...result, message });
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 

@@ -58,7 +58,7 @@ const CARDHOLDER_COLS = `ch.cardholder_id, ch.card_id, ch.first_name, ch.last_na
 const CARD_COLS = `vc.card_masked, vc.balance, vc.currency, vc.status as card_status, vc.expiry_month, vc.expiry_year,
               vc.cardholder_name, vc.network, vc.daily_limit, vc.monthly_limit`;
 
-const cardholderClaims  = (ch) => ({ type: 'cardholder', cardId: ch.card_id, email: ch.email });
+const cardholderClaims  = (ch) => ({ type: 'cardholder', cardId: ch.card_id, email: ch.email, ...(ch.temp_password ? { pwdTemp: true } : {}) }); // Lot 2
 const cardholderProfile = (ch) => ({
   cardholderId: ch.cardholder_id, firstName: ch.first_name, lastName: ch.last_name, email: ch.email, phone: ch.phone,
   kycLevel: ch.kyc_level, mfaEnabled: !!ch.mfa_enabled,
@@ -157,7 +157,7 @@ router.post('/auth/refresh', async (req, res) => {
       legacy: (decoded) => (decoded.type === 'cardholder_refresh' && decoded.sub ? { actorId: decoded.sub } : null),
       buildClaims: async ({ actorId }) => {
         const r = await query(
-          `SELECT ch.cardholder_id, ch.email, vc.card_id FROM cardholders ch JOIN virtual_cards vc ON vc.card_id = ch.card_id
+          `SELECT ch.cardholder_id, ch.email, ch.temp_password, vc.card_id FROM cardholders ch JOIN virtual_cards vc ON vc.card_id = ch.card_id
            WHERE ch.cardholder_id=$1 AND ch.is_active=TRUE`, [actorId]);
         if (!r.rows.length) throw new Error('Compte introuvable');
         return cardholderClaims(r.rows[0]);

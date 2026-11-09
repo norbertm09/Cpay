@@ -197,6 +197,9 @@ const normalize = (raw, operator, gateway = null) => {
     declineReason: raw.errorMessage || raw.reason || null,
     gatewayRef:    raw.notifToken   || raw.sessionId || raw.externalId || raw.transactionId || null,
     retryable:     raw.retryable    ?? false,
+    // Lot 2 (P1-1) : un provider peut qualifier lui-même le résultat (`unknown` = HTTP 5xx / réponse illisible)
+    ...(raw.outcome ? { outcome: raw.outcome } : {}),
+    ...(raw.httpStatus ? { httpStatus: raw.httpStatus } : {}),
     _operator:     operator,
     _gateway:      gateway || null,
   };

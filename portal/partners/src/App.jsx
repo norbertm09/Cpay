@@ -80,6 +80,9 @@ const P='#12b6c7',BLUE='#1d4f92',G='#00c896',R='#ff3b30',O='#ff9500';
 const BG='#f0f4f8',CARD='#fff',BORDER='#dce3ed',TEXT='#1e2d3d',MUTED='#5a6677';
 const fmtNum = n => parseFloat(n||0).toLocaleString('fr-FR');
 const fmtDate = d => d ? new Date(d).toLocaleString('fr-FR') : '—';
+// Lot 2 (audit 2026-11-02 portails P1-5) : toute valeur saisie par un autre tenant (référence, nom d'agent,
+// nom d'agence, statut…) est échappée avant d'entrer dans le HTML des rapports imprimés (window.open same-origin).
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const AuthCtx   = createContext(null);
 const TenantCtx = createContext(null);
@@ -1194,7 +1197,7 @@ const Transactions = () => {
     const rows = txns.map(t=>[
       fmtDate(t.initiated_at), t.reference||'—', t.agent_name,
       t.type, fmtNum(t.amount)+' XAF', fmtNum(t.fee_amount)+' XAF', t.status
-    ]);
+    ].map(escHtml));
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <style>body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;padding:20px}h1{color:#1d4f92}
     table{width:100%;border-collapse:collapse;font-size:11px}
@@ -1832,7 +1835,7 @@ const Rapport = () => {
     </style></head>
     <body>
     <h1>📊 Rapport Consolidé</h1>
-    <div class="subtitle">Période: ${filters.dateFrom} → ${filters.dateTo} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>
+    <div class="subtitle">Période: ${escHtml(filters.dateFrom)} → ${escHtml(filters.dateTo)} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>
     <div class="kpis">
       <div class="kpi"><div class="kpi-val">${parseInt(t.total_txns||0).toLocaleString('fr-FR')}</div><div class="kpi-label">Transactions</div></div>
       <div class="kpi"><div class="kpi-val">${parseFloat(t.total_volume||0).toLocaleString('fr-FR')} XAF</div><div class="kpi-label">Volume total</div></div>
@@ -1843,7 +1846,7 @@ const Rapport = () => {
     </div>
     <h3>Top Agents</h3>
     <table><thead><tr><th>Agent</th><th>Agence</th><th>Transactions</th><th>Volume</th></tr></thead>
-    <tbody>${(data.topAgents||[]).map(a=>`<tr><td>${a.agent_name}</td><td>${a.agency_name}</td><td>${a.count}</td><td>${parseFloat(a.volume||0).toLocaleString('fr-FR')} XAF</td></tr>`).join('')}</tbody></table>
+    <tbody>${(data.topAgents||[]).map(a=>`<tr><td>${escHtml(a.agent_name)}</td><td>${escHtml(a.agency_name)}</td><td>${escHtml(a.count)}</td><td>${parseFloat(a.volume||0).toLocaleString('fr-FR')} XAF</td></tr>`).join('')}</tbody></table>
     <h3>Volume par période</h3>
     <table><thead><tr><th>Période</th><th>Transactions</th><th>Volume</th><th>Frais</th></tr></thead>
     <tbody>${(data.byPeriod||[]).map(p=>`<tr><td>${new Date(p.period).toLocaleDateString('fr-FR')}</td><td>${p.count}</td><td>${parseFloat(p.volume||0).toLocaleString('fr-FR')} XAF</td><td>${parseFloat(p.fees||0).toLocaleString('fr-FR')} XAF</td></tr>`).join('')}</tbody></table>

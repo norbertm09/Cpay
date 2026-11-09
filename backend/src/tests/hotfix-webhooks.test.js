@@ -311,22 +311,31 @@ describe('Airtel webhook — signature obligatoire', () => {
     expect(calls(/UPDATE/i)).toHaveLength(0);
   });
 
-  test('transaction marchand (orchestrateur) TS → authorized gardé par status=pending + transaction_events', async () => {
+  test('transaction marchand (orchestrateur) TS → authorized via finalize.service (claim status=pending, frais, règlement, événement)', async () => {
+    // Lot 2 (audit 2026-11-02 P1-2) : plus d'UPDATE direct ; enquiry Airtel indisponible (pays inconnu) → le
+    // callback signé fait foi, appliqué par finalizeTransaction dans UNE transaction SQL.
     process.env.AIRTEL_WEBHOOK_SECRET = 's3cret';
     routeQueries([
       [/SELECT \* FROM card_transactions/i, { rows: [], rowCount: 0 }],
-      [/FROM transactions WHERE gateway_payment_id/i, { rows: [{ transaction_id: 'T-1', merchant_id: 'M-1', amount: '5000', currency: 'XAF', status: 'pending', type: 'collect' }], rowCount: 1 }],
-      [/UPDATE transactions/i, { rows: [{ transaction_id: 'T-1', merchant_id: 'M-1' }], rowCount: 1 }],
+      [/FROM transactions WHERE gateway_payment_id/i, { rows: [{ transaction_id: 'T-1', merchant_id: 'M-1', amount: '5000', currency: 'XAF', status: 'pending', type: 'collect', detected_operator: 'AIRTEL_MONEY', gateway_payment_id: 'REF-A' }], rowCount: 1 }],
+      [/UPDATE transactions/i, { rows: [{ transaction_id: 'T-1' }], rowCount: 1 }],
       [/INSERT INTO transaction_events/i, { rows: [], rowCount: 1 }],
+      [/INSERT INTO settlement_queue/i, { rows: [{ transaction_id: 'T-1' }], rowCount: 1 }],
     ]);
+    db.withTransaction.mockReset();
+    db.withTransaction.mockImplementation(async (fn) => fn({ query: db.query }));
     const res = mkRes();
     await wh.handleAirtelWebhook(mkReq({ body, headers: { 'x-airtel-signature': sign('s3cret', body) } }), res);
     expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ applied: true, newStatus: 'authorized', source: 'callback' });
+    expect(db.withTransaction).toHaveBeenCalledTimes(1);
     const upd = calls(/UPDATE transactions/i);
     expect(upd).toHaveLength(1);
-    expect(upd[0][0]).toMatch(/AND status='pending'/);
+    expect(upd[0][0]).toMatch(/AND status = 'pending'/);
+    expect(upd[0][0]).toMatch(/cpay_calculate_fee/);
     expect(upd[0][1][0]).toBe('authorized');
     expect(calls(/INSERT INTO transaction_events/i)).toHaveLength(1);
+    expect(calls(/INSERT INTO settlement_queue/i)).toHaveLength(1);
   });
 });
 

@@ -125,8 +125,19 @@ const requireSub = (req, res, next) => {
   next();
 };
 
+// Lot 2 (audit 2026-11-02 portails P1-1) : un acteur connecté avec un mot de passe TEMPORAIRE (claim `pwdTemp`
+// posé au login / refresh tant que temp_password = TRUE) ne peut que lire son profil, changer son mot de passe
+// ou se déconnecter. Défense en profondeur : le portail impose l'écran de changement, l'API le garantit.
+const PASSWORD_CHANGE_ALLOWED_RE = /\/(auth\/(me|change-password|logout|refresh)|account\/change-password|profile\/change-password)(\?|$)/;
+const requirePasswordChanged = (req, res, next) => {
+  if (req.user?.pwdTemp === true && !PASSWORD_CHANGE_ALLOWED_RE.test(String(req.originalUrl || req.url || ''))) {
+    return res.status(403).json({ error: 'Changement de mot de passe requis avant toute opération', code: 'PASSWORD_CHANGE_REQUIRED' });
+  }
+  next();
+};
+
 const merchantAuth = (req, res, next) =>
-  requireType('merchant', { message: 'Accès refusé', code: 'NOT_MERCHANT' })(req, res, () => requireSub(req, res, next));
+  requireType('merchant', { message: 'Accès refusé', code: 'NOT_MERCHANT' })(req, res, () => requireSub(req, res, () => requirePasswordChanged(req, res, next)));
 
 const adminAuth = (req, res, next) =>
   requireType('admin', { message: 'Accès admin requis', code: 'NOT_ADMIN' })(req, res, () => requireSub(req, res, next));
@@ -135,11 +146,11 @@ const adminAuth = (req, res, next) =>
 // routes historiques (cardholder/gtp/claims lisent req.cardholder.sub).
 const cardholderAuth = (req, res, next) =>
   requireType('cardholder', { message: 'Accès refusé', code: 'NOT_CARDHOLDER' })(req, res, () =>
-    requireSub(req, res, () => {
+    requireSub(req, res, () => requirePasswordChanged(req, res, () => {
       req.chId = req.user.sub;
       req.cardholder = req.user;
       next();
-    }));
+    })));
 
 // Partenaires (portail banques/agences/agents) : type bank_user | agent ET
 // role dans la liste des roles partenaires. Un JWT distribution/admin/
@@ -425,6 +436,7 @@ const buildTotpEnrollment = async ({ label, issuer = 'C-Pay' }) => {
 const generateTempPassword = (prefix = 'Tmp') => `${prefix}-${crypto.randomBytes(12).toString('base64url')}`;
 
 module.exports = {
+  requirePasswordChanged, PASSWORD_CHANGE_ALLOWED_RE, // Lot 2
   // constantes
   JWT_ISSUER, JWT_AUDIENCE, ACCESS_TTL_SECONDS, MFA_TTL_SECONDS, PARTNER_ROLES, PARTNER_TYPES,
   // middlewares

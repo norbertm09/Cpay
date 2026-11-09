@@ -56,8 +56,13 @@ export const initials = (first, last, fallback = '?') => {
 };
 export const maskPhone = (p) => (p ? String(p).replace(/(\d{3})\d+(\d{2})$/, '$1•••$2') : '—');
 
-export const COUNTRIES = { CM: 'Cameroun', CG: 'Congo', CD: 'RD Congo', SN: 'Sénégal', CI: 'Côte d’Ivoire', GA: 'Gabon', TD: 'Tchad', BF: 'Burkina Faso', ML: 'Mali', TG: 'Togo', BJ: 'Bénin', FR: 'France' };
-export const countryName = (c) => (c ? COUNTRIES[String(c).toUpperCase()] || c : '—');
+// Lot 2 (audit 2026-11-02 portails P1-4) : périmètre du registre de capacités — CEMAC (CM, CF, CG, GA, GQ, TD),
+// RDC, et les marchands historiques SN / CI. Les pays hors périmètre (BF, ML, TG, BJ, FR) ne sont plus proposés.
+export const COUNTRIES = { CM: 'Cameroun', CF: 'Centrafrique', CG: 'Congo', GA: 'Gabon', GQ: 'Guinée équatoriale', TD: 'Tchad', CD: 'RD Congo', SN: 'Sénégal', CI: 'Côte d’Ivoire' };
+const COUNTRY_NAMES_EXTRA = { BF: 'Burkina Faso', ML: 'Mali', TG: 'Togo', BJ: 'Bénin', FR: 'France', NE: 'Niger', GN: 'Guinée' };
+export const countryName = (c) => (c ? COUNTRIES[String(c).toUpperCase()] || COUNTRY_NAMES_EXTRA[String(c).toUpperCase()] || c : '—');
+// Devise de référence par pays (repli si /country-defaults est indisponible)
+export const COUNTRY_CURRENCY = { CM: 'XAF', CF: 'XAF', CG: 'XAF', GA: 'XAF', GQ: 'XAF', TD: 'XAF', CD: 'CDF', SN: 'XOF', CI: 'XOF' };
 
 export const METHODS = { mobile_money: 'Mobile Money', card_nfc: 'Carte NFC', card: 'Carte', card_online: 'Carte en ligne', bank_transfer: 'Virement', qr: 'QR code', pay_link: 'Lien de paiement' };
 export const methodLabel = (m) => (m ? METHODS[m] || m : '—');

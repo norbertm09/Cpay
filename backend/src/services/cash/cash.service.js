@@ -131,6 +131,12 @@ function classifyRailResult(res) {
   if (res.pending === true) return 'accepted';
   const code = res.responseCode === undefined || res.responseCode === null ? null : String(res.responseCode);
   if (code && UNKNOWN_RESPONSE_CODES.has(code)) return 'unknown';
+  // Lot 2 (audit 2026-11-02 P1-1) : une erreur HTTP 5xx, un délai ou une réponse illisible de l'opérateur ne
+  // prouvent jamais un refus — l'ordre a pu être exécuté. Jamais `declined` (= fonds libérés) dans ce cas.
+  const http = Number(res.httpStatus);
+  if (Number.isFinite(http) && http >= 500) return 'unknown';
+  if (code && /^5\d\d$/.test(code)) return 'unknown';
+  if (code && /^(TIMEOUT|HTTP_5XX|UNPARSABLE|NETWORK)$/i.test(code)) return 'unknown';
   if (res.retryable === true && (!code || code === '96')) return 'unknown';
   if (!code && !res.declineReason && !res.message && !res.errorMessage) return 'unknown'; // réponse vide / illisible
   return 'declined';

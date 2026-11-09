@@ -27,10 +27,23 @@ const encryptPin = (pin, pubKeyB64) => {
 
 const genRef = () => 'CPAY' + Date.now() + Math.floor(Math.random() * 1000);
 
+// Lot 2 (audit 2026-11-02 P1-1) : une réponse HTTP 5xx ou un corps non JSON (page d'erreur d'un reverse
+// proxy) après l'envoi de l'ordre ne prouve pas un refus. On rend `outcome:'unknown'` : la caisse conserve la
+// réservation (statut `unknown`), l'encaissement reste `pending` ; le statut réel est relu (webhook, enquiry).
+const uncertainHttp = (r) => !Number.isFinite(Number(r?.statusCode)) || Number(r.statusCode) >= 500 || r?.unparsable === true;
+const uncertainResult = (r, ref, { pending }) => ({
+  success: false, pending, outcome: 'unknown', httpStatus: Number(r?.statusCode) || null,
+  transactionId: ref, airtelMoneyId: null, rawStatus: null,
+  rawResponse: JSON.stringify(r?.body || {}),
+  responseCode: Number.isFinite(Number(r?.statusCode)) ? String(r.statusCode) : 'UNPARSABLE',
+  errorMessage: `Airtel indisponible (HTTP ${Number.isFinite(Number(r?.statusCode)) ? r.statusCode : '?'}) — résultat à vérifier`,
+  retryable: true,
+});
+
 const getToken = async (config) => {
   const r = await httpRequest('POST', config.baseUrl || 'https://openapi.airtel.africa',
     '/auth/oauth2/token',
-    `client_id=${config.apiKey}&client_secret=${config.apiSecret}&grant_type=client_credentials`,
+    `client_id=${encodeURIComponent(config.apiKey || '')}&client_secret=${encodeURIComponent(config.apiSecret || '')}&grant_type=client_credentials`,
     { 'Content-Type': 'application/x-www-form-urlencoded' }
   );
   return r.body?.access_token;
@@ -51,6 +64,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, config }) => {
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Country': cc, 'X-Currency': currency }
   );
   logger.info('AIRTEL RAW collectPayment', { txnId, rawBody: JSON.stringify(r.body || {}) });
+  if (uncertainHttp(r)) return uncertainResult(r, ref, { pending: true });
   const txStatus = String(r.body?.data?.transaction?.status || '').toUpperCase();
   const apiOk = r.body?.status?.success === true || String(r.body?.status?.code) === '200';
   // Acceptation de la requete (push envoye, statut TIP ou absent) != paiement confirme.
@@ -86,6 +100,7 @@ const sendPayout = async ({ txnId, amount, currency, phone, config, txType }) =>
     { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Country': cc, 'X-Currency': currency }
   );
   logger.info('AIRTEL RAW sendPayout', { txnId, rawBody: JSON.stringify(r.body || {}) });
+  if (uncertainHttp(r)) return uncertainResult(r, ref, { pending: false });
   const txStatus = String(r.body?.data?.transaction?.status || '').toUpperCase();
   const apiOk = r.body?.status?.success === true || String(r.body?.status?.code) === '200'
              || String(r.body?.status?.response_code || '').toUpperCase() === 'DP00900001001';
@@ -115,7 +130,7 @@ const httpRequest = (method, baseUrl, path, body, headers) => new Promise((resol
   }, res => {
     let data = '';
     res.on('data', c => { data += c; });
-    res.on('end', () => { try { resolve({ statusCode: res.statusCode, body: JSON.parse(data) }); } catch { resolve({ statusCode: res.statusCode, body: {} }); } });
+    res.on('end', () => { try { resolve({ statusCode: res.statusCode, body: JSON.parse(data) }); } catch { resolve({ statusCode: res.statusCode, body: {}, unparsable: data.trim() !== '' }); } });
   });
   req.on('error', reject);
   req.on('timeout', () => { req.destroy(); reject(new Error('Airtel timeout')); });

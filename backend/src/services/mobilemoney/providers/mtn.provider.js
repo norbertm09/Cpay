@@ -76,7 +76,7 @@ const collectPayment = async ({ txnId, amount, currency, phone, description, con
     return pollStatus(config, ref, token);
   }
 
-  return { success: false, responseCode: String(result.statusCode), errorMessage: 'Erreur MTN' };
+  return rejectedByHttp(result, 'collection');
 };
 
 const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
@@ -102,7 +102,23 @@ const sendPayout = async ({ txnId, amount, currency, phone, config }) => {
   );
 
   if (result.statusCode === 202) return pollDisbursementStatus(config, ref, token);
-  return { success: false, responseCode: String(result.statusCode) };
+  return rejectedByHttp(result, 'disbursement');
+};
+
+// Lot 2 (audit 2026-11-02 P1-1) : seul un 4xx est un refus synchrone prouvé. Un 5xx, une absence de
+// statut ou un corps illisible laissent l'issue incertaine (`outcome:'unknown'`) : la caisse garde la
+// réservation, l'orchestrateur laisse la transaction `pending`, le statut réel est relu ensuite.
+const rejectedByHttp = (result, product) => {
+  const status = Number(result?.statusCode);
+  const uncertain = !Number.isFinite(status) || status >= 500 || result?.unparsable === true;
+  if (uncertain) {
+    return {
+      success: false, pending: product === 'collection', outcome: 'unknown', httpStatus: status || null,
+      responseCode: Number.isFinite(status) ? String(status) : 'UNPARSABLE', reason: 'HTTP_5XX',
+      errorMessage: `MTN indisponible (HTTP ${Number.isFinite(status) ? status : '?'}) — résultat à vérifier`, retryable: true,
+    };
+  }
+  return { success: false, responseCode: String(status), httpStatus: status, errorMessage: 'Erreur MTN', retryable: false };
 };
 
 // Timeout de polling ≠ echec : le client peut encore valider son PIN. On rend
@@ -194,7 +210,7 @@ const httpRequest = (method, baseUrl, path, body, headers) => new Promise((resol
     res.on('data', c => { data += c; });
     res.on('end', () => {
       try { resolve({ statusCode: res.statusCode, body: JSON.parse(data) }); }
-      catch { resolve({ statusCode: res.statusCode, body: {} }); }
+      catch { resolve({ statusCode: res.statusCode, body: {}, unparsable: data.trim() !== '' }); } // Lot 2 : page d'erreur HTML d'un proxy ≠ refus
     });
   });
   req.on('error', reject);
