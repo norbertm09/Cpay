@@ -1,6 +1,8 @@
 # Changelog - ameliorations integrees
 
 ## 2.7.2-deps (2026-11-09) — tri de la premiere vague Dependabot
+* Deuxieme vague : majeures exclues pour Express, `@anthropic-ai/sdk` (backend), React Router (portails), `@babel/*` (Expo) ;
+  montees fusionnees : actions GitHub, nodemailer/pg/pglite, dotenv 18, helmet 8, bcryptjs 3, axios, supertest 7.
 * `dependabot.yml` : majeures ignorees pour Node (images), React / Vitest / Vite (portails), uuid (backend, ESM-only),
   babel-preset-expo et modules React Native lies au SDK Expo ; nginx suivi sur la branche stable (mineures impaires =
   mainline ignorees) ; AndroidX et Kotlin/KSP groupes. `dotenv.config({ quiet: true })` avant le passage a dotenv 18.
