@@ -52,8 +52,8 @@ jobs:
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
-      - name: Dependances
-        run: npm install --no-audit --no-fund
+      - name: Dependances (lockfile, builds reproductibles — lot 5)
+        run: npm ci --no-audit --no-fund
       - name: Version et identifiants
         run: |
           node -e "const a=require('./app.json').expo; console.log('version', a.version, 'android', a.android.package, 'versionCode', a.android.versionCode, 'ios', a.ios.bundleIdentifier)"

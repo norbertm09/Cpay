@@ -96,10 +96,20 @@ TestFlight automatiquement. Le run affiche l'URL du build EAS ; durée 10 à 20 
    teste réellement ; prévoir un numéro Mobile Money de test ou une vidéo). Délai habituel 24 à 72 h.
 5. Chaque version : `bump-version.sh` (met à jour `app.json`), build `production`, `submit`.
 
-### 2.4 À faire côté code avant la soumission iOS (PR à venir)
-- Aligner l'app Expo sur la caisse actuelle (numéro local sans indicatif, référence automatique, états de capacité).
-- Retirer le mode administrateur mobile (surface d'attaque inutile pour une app marchande publique).
-- Écran « Confidentialité / Supprimer mon compte » exigé par Apple et Google.
+### 2.4 État du code Expo (lot 5, 2026-11-09)
+
+Fait : Expo SDK 54 / React Native 0.81 / React 19 (API 36, iOS 26 SDK, Nouvelle Architecture), `package-lock.json` et
+`npm ci` dans les workflows, mode administrateur retiré (application marchande uniquement), détection du numéro avec le
+pays du marchand (numéro local accepté), champ référence d'encaissement, onglet Carte masqué quand `cardAcceptance`
+est `unavailable`, statut de retrait `unknown` affiché comme une vérification en cours, écran **Compte** (profil,
+politique de confidentialité, demande et annulation de suppression de compte), `app.json` : `ios.buildNumber`,
+`ITSAppUsesNonExemptEncryption=false`, `supportsTablet=false`, `privacyManifests`, `newArchEnabled`,
+`allowBackup=false` ; `eas.json` : `appVersionSource=local` (versions tenues par `scripts/bump-version.sh`),
+`EXPO_PUBLIC_API_BASE_URL` par profil (`preview` → serveur de dev, `production` → production).
+
+Reste à faire avant la soumission : renseigner `submit.production.ios.appleTeamId` (Team ID Apple) dans `eas.json`,
+produire les captures iPhone 6,7" et 6,5" depuis un build `preview`, et remplir la fiche « Confidentialité de l'app »
+(mêmes réponses que la fiche Sécurité des données Google Play).
 
 ## 3. Comptes et dépenses à prévoir
 

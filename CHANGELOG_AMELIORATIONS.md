@@ -1,5 +1,20 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-lot5 (2026-11-09) — application Expo (audit du 2 novembre, P0-3, P1-6, P1-7, P2-5)
+* Expo SDK 54 / React Native 0.81.5 / React 19.1 (API 36, iOS 26 SDK, Nouvelle Architecture), lockfile et `npm ci`
+  (CI et EAS), `expo-doctor`/`check` dans les scripts npm.
+* Mode administrateur retire (ecrans Admin*, Rails, segment de mode, preference de mode) : application marchande
+  uniquement ; une ancienne session admin stockee est ignoree.
+* Alignement caisse : detection du numero avec le pays du marchand (numero local), champ reference d'encaissement,
+  onglet Carte masque si `cardAcceptance` indisponible, `isFeatureUnavailable` limite au 410, messages IDEMPOTENCY_*,
+  statut de retrait `unknown` affiche comme verification en cours (fonds reserves, suivi Journal).
+* Ecran Compte : profil, politique de confidentialite, demande / annulation de suppression de compte (step-up),
+  lien vers la procedure web ; lien confidentialite sur l'ecran de connexion.
+* Configuration stores : `ios.buildNumber`, `ITSAppUsesNonExemptEncryption=false`, `supportsTablet=false`,
+  `privacyManifests`, `allowBackup=false`, `blockedPermissions` ; `eas.json` `appVersionSource=local`,
+  `EXPO_PUBLIC_API_BASE_URL` par profil ; `bump-version.sh` tient aussi `ios.buildNumber`.
+* `scripts/add-spa-security-headers.sh` ignore les blocs `listen 80` (redirections).
+
 ## 2.7.2-lot4 (2026-11-09) — application mobile : publication (audit du 2 novembre)
 * Suppression de compte (Google Play / Apple) : migration 014, service `account/deletion.service`, routes
   `GET/POST/DELETE /merchant/account/deletion-request` (proprietaire, step-up, retractation 30 j, une demande en

@@ -186,8 +186,8 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: mobile/cpay-mobile/package.json
-      - run: npm install --no-audit --no-fund
+          cache-dependency-path: mobile/cpay-mobile/package-lock.json
+      - run: npm ci --no-audit --no-fund
       - name: Babel (babel-preset-expo) sur App.js
         run: |
           node -e "

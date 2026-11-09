@@ -76,6 +76,7 @@ for p in admin merchant cardholder partners bank agency agent; do npm_version "p
 npm_version mobile/cpay-mobile
 replace mobile/cpay-mobile/app.json '^(\s*"version": ")[0-9.]+(",)' "\g<1>$NEW\g<2>"
 replace mobile/cpay-mobile/app.json '^(\s*"versionCode": )[0-9]+(,)' "\g<1>$EXPO_CODE\g<2>"
+replace mobile/cpay-mobile/app.json '^(\s*"buildNumber": ")[0-9]+(",)' "\g<1>$EXPO_CODE\g<2>"   # iOS (lot 5) : meme compteur que versionCode
 
 # --- Android natif : versionName + versionCode +1 -------------------------
 APP_CODE="$(sed -n -E 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' android/app/build.gradle | head -1)"
