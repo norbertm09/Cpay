@@ -481,9 +481,14 @@ const handleAirtelWebhook = async (req, res) => {
     }
 
     // ── transactions marchands (orchestrateur : gateway_payment_id = référence Airtel) ──
+    // Lot 2 (audit 2026-11-02 P1-2) : plus d'UPDATE direct. Le statut réel est relu chez Airtel (enquiry) via
+    // reconcileOne, qui finalise par finalize.service (claim atomique, frais cpay_calculate_fee, règlement J+1,
+    // pay_link, événement). Si l'enquiry est indisponible, le callback — signé HMAC — fait foi, toujours via
+    // finalizeTransaction ; un statut intermédiaire (TIP/TA) laisse `pending`.
     const mainRes = await query(
-      `SELECT transaction_id, merchant_id, amount, currency, status, type
-         FROM transactions WHERE gateway_payment_id=$1 ORDER BY initiated_at DESC LIMIT 1`,
+      `SELECT transaction_id, merchant_id, amount, currency, status, type, gateway_name, gateway_payment_id,
+              detected_operator, detected_country, pay_link_id
+         FROM transactions WHERE gateway_payment_id=$1 ORDER BY (status='pending') DESC, initiated_at DESC LIMIT 1`,
       [referenceId]
     );
     const main = mainRes.rows[0];
@@ -505,26 +510,40 @@ const handleAirtelWebhook = async (req, res) => {
       await recordWebhookEvent({ provider: 'airtel', referenceId, status, outcome: 'mismatch', payload: body, ip: req.ip });
       return res.status(409).json({ error: 'Montant ou devise incohérent', code: 'AMOUNT_MISMATCH' });
     }
-    const newStatus = isSuccess ? 'authorized' : 'failed';
-    const upd = await query(
-      `UPDATE transactions SET
-         status=$1,
-         auth_code=CASE WHEN $1='authorized' THEN COALESCE($2, auth_code) ELSE auth_code END,
-         response_code=CASE WHEN $1='authorized' THEN '00' ELSE response_code END,
-         response_message=$3,
-         completed_at=CASE WHEN $1='authorized' THEN NOW() ELSE completed_at END
-       WHERE transaction_id=$4 AND status='pending'
-       RETURNING transaction_id, merchant_id`,
-      [newStatus, airtelRef || null, String(message || `Airtel ${status}`).slice(0, 255), main.transaction_id]
-    );
-    if (upd.rowCount) {
-      await recordTransactionEvent({
-        transactionId: upd.rows[0].transaction_id, merchantId: upd.rows[0].merchant_id,
-        eventType: 'AIRTEL_CALLBACK', payload: { status, airtelRef, message, newStatus },
-      });
+
+    // 1) statut réel Airtel (enquiry) — source de vérité quand elle répond
+    let requery = null;
+    try { requery = await require('../services/reconcile.service').reconcileOne(main); }
+    catch (e) { requery = { error: e.message }; }
+    if (requery && requery.updated) {
+      await recordWebhookEvent({ provider: 'airtel', referenceId, status, outcome: requery.updated, payload: body, ip: req.ip });
+      return res.status(200).json({ success: true, referenceId, status, applied: true, newStatus: requery.updated, source: 'enquiry' });
     }
-    await recordWebhookEvent({ provider: 'airtel', referenceId, status, outcome: upd.rowCount ? newStatus : 'already_processed', payload: body, ip: req.ip });
-    return res.status(200).json({ success: true, referenceId, status, applied: !!upd.rowCount, newStatus: upd.rowCount ? newStatus : main.status });
+    if (requery && requery.mismatch) {
+      await recordWebhookEvent({ provider: 'airtel', referenceId, status, outcome: 'mismatch', payload: body, ip: req.ip });
+      return res.status(409).json({ error: 'Montant ou devise incohérent', code: 'AMOUNT_MISMATCH' });
+    }
+    if (requery && requery.skipped === 'already_final') {
+      await recordWebhookEvent({ provider: 'airtel', referenceId, status, outcome: 'replay_ignored', payload: body, ip: req.ip });
+      return res.status(200).json({ received: true, referenceId, outcome: 'already_processed' });
+    }
+    if (requery && requery.still === 'pending' && requery.providerStatus) {
+      // Airtel répond encore TIP/TA : le callback final arrivera (ou la réconciliation tranchera)
+      logger.warn('Airtel webhook: callback final but enquiry still pending — provider wins', { referenceId, callback: status, providerStatus: requery.providerStatus });
+      await recordWebhookEvent({ provider: 'airtel', referenceId, status, outcome: 'still_pending', payload: body, ip: req.ip });
+      return res.status(202).json({ received: true, referenceId, status: 'pending', providerStatus: requery.providerStatus });
+    }
+
+    // 2) enquiry indisponible (config absente, réseau…) : le callback signé fait foi, même machine d'état
+    const { finalizeTransaction } = require('../services/mobilemoney/finalize.service');
+    const outcome = isSuccess ? 'authorized' : 'failed';
+    const fin = await finalizeTransaction({
+      txn: main, provider: 'airtel', outcome, authCode: airtelRef || null, gatewayRef: airtelRef || null,
+      reason: isFailed ? String(message || `Airtel ${status}`).slice(0, 255) : null, source: 'webhook',
+      eventPayload: { callbackStatus: status, airtelRef: airtelRef || null, message: message || null, enquiry: requery?.error || requery?.skipped || 'unavailable' },
+    });
+    await recordWebhookEvent({ provider: 'airtel', referenceId, status, outcome: fin.applied ? outcome : 'already_processed', payload: body, ip: req.ip });
+    return res.status(200).json({ success: true, referenceId, status, applied: !!fin.applied, newStatus: fin.applied ? outcome : main.status, source: 'callback' });
   } catch (err) {
     logger.error('[AIRTEL-WEBHOOK-ERROR]', { referenceId, err: err.message });
     return res.status(202).json({ received: true, status: 'pending' });

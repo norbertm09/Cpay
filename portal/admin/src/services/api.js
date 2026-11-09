@@ -4,17 +4,20 @@ import toast from '../utils/toast';
 export const apiBaseUrl = import.meta.env.REACT_APP_API_BASE_URL || '';
 
 // ─── Jeton d'accès ────────────────────────────────────────────────
-// L'access token (15 min) reste dans localStorage sous admin_token ; le
-// refresh opaque vit dans le cookie HttpOnly cp_rt_admin (path
-// /api/v1/admin/auth) posé par le backend. withCredentials est donc
-// indispensable sur /auth/refresh et /auth/logout.
-const TOKEN_KEY = 'admin_token';
+// Lot 2 (audit 2026-11-02 portails P1-2) : l'access token (15 min) vit EN MÉMOIRE, comme sur les portails
+// marchand et porteur — plus jamais dans localStorage, où une XSS ou une extension l'exfiltrait. Le refresh
+// opaque reste dans le cookie HttpOnly cp_rt_admin (path /api/v1/admin/auth) posé par le backend ;
+// useAuth refait un refresh silencieux au démarrage. withCredentials est donc indispensable sur
+// /auth/refresh et /auth/logout.
+let accessToken = null;
 const tokenListeners = new Set();
+// Purge unique du jeton hérité de l'ancien stockage.
+try { localStorage.removeItem('admin_token'); } catch (e) { /* navigation privée */ }
 
-export const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } };
+export const getToken = () => accessToken;
 export const setToken = (t) => {
-  try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* navigation privée */ }
-  tokenListeners.forEach((fn) => fn(t || null));
+  accessToken = t || null;
+  tokenListeners.forEach((fn) => fn(accessToken));
 };
 export const clearToken = () => setToken(null);
 export const onTokenChange = (fn) => { tokenListeners.add(fn); return () => tokenListeners.delete(fn); };

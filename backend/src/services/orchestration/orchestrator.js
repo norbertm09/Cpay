@@ -266,7 +266,9 @@ const processTransaction = async (params) => {
       };
     }
   }
-  const isPending   = gatewayResult.pending === true;
+  // Lot 2 (P1-1) : un résultat incertain (HTTP 5xx, réponse illisible) laisse la transaction `pending` ; la
+  // réconciliation applique le statut réel de l'opérateur. Jamais `failed` sans refus prouvé.
+  const isPending   = gatewayResult.pending === true || gatewayResult.outcome === 'unknown';
   const finalStatus = isPending ? 'pending' : (gatewayResult.approved === true ? 'authorized' : 'failed');
   await updateTransactionStatus(txnId, finalStatus, gatewayResult);
   await addTransactionEvent({

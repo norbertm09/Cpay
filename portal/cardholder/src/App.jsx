@@ -17,6 +17,7 @@ import OperationsPage from './pages/operations/OperationsPage';
 import { TopupPage, UnloadPage } from './pages/operations/TransferPages';
 import HelpPage from './pages/help/HelpPage';
 import ProfilePage from './pages/profile/ProfilePage';
+import ForcePasswordPage from './pages/auth/ForcePasswordPage';
 
 const Splash = () => (
   <div className="splash" role="status" aria-live="polite">
@@ -26,10 +27,13 @@ const Splash = () => (
 );
 
 const RequireAuth = ({ children }) => {
-  const { isAuth, loading } = useAuth();
+  const { isAuth, loading, user } = useAuth();
   const location = useLocation();
   if (loading) return <Splash />;
-  return isAuth ? children : <Navigate to="/connexion" replace state={{ from: location.pathname + location.search }} />;
+  if (!isAuth) return <Navigate to="/connexion" replace state={{ from: location.pathname + location.search }} />;
+  // Lot 2 (audit 2026-11-02 portails P1-1) : mot de passe temporaire → seul l'écran de changement est rendu
+  if (user?.mustChangePassword) return <AuthLayout><ForcePasswordPage /></AuthLayout>;
+  return children;
 };
 
 const PublicOnly = ({ children }) => {

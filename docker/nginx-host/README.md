@@ -31,3 +31,17 @@ Let's Encrypt sont gérés par `certbot` sur l'hôte (`certbot.timer`), les cont
   `snippets/cpay-security-*.conf` dans le `location` concerné.
 - Après un renouvellement Let's Encrypt, nginx doit être rechargé : hook
   `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh` (posé par `init-vps.sh`).
+
+## En-têtes de sécurité des portails (lot 2, 2026-11-09)
+
+`snippets/cpay-security-spa.conf` : HSTS, nosniff, `X-Frame-Options DENY`, `Referrer-Policy`, `Permissions-Policy` et une
+**Content-Security-Policy** (`script-src 'self'`, `connect-src 'self' https://api.c-pay.global`, styles inline tolérés,
+`frame-ancestors 'none'`). À inclure dans chaque bloc `server` des portails (`admin.`, `merchant.`, `app.`, `card.`,
+`partners.`, `bank.`, `agency.`, `agent.`) :
+
+```nginx
+include snippets/cpay-security-spa.conf;
+```
+
+Les conteneurs portails posent déjà la même CSP (`docker/nginx-spa.conf`, origine de l'API injectée au build par
+`Dockerfile.portal`). Sur le serveur de développement, remplacer `https://api.c-pay.global` par `https://api.dev.c-pay.global`.

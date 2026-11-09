@@ -7,6 +7,7 @@
 // POST /api/v1/momo/webhooks/mtn    — Callback MTN    (délégué à webhook-handlers)
 // POST /api/v1/momo/webhooks/airtel — Callback Airtel (délégué à webhook-handlers)
 // GET  /api/v1/momo/balance     — Soldes comptes (admin / marchand)
+// Lot 2 (2026-11-09) : /payout, /accountbalance, /requesttopay → 410 (voir audit 2026-11-02 P1-3)
 // GET  /api/v1/momo/validate/:phone — Valider numéro MTN
 // ================================================================
 //
@@ -45,9 +46,10 @@ const ownsCard = (card, actor) => {
 // ─── TOP-UP : Collections (MTN → Carte virtuelle) ─────────────────
 // POST /api/v1/momo/topup
 router.post('/topup', cardAuth, async (req, res) => {
-  const { amount, phone, cardId } = req.body;
-
-  if (!amount || amount < 500) return res.status(422).json({ error: 'Montant minimum 500 XAF' });
+  const { phone, cardId } = req.body;
+  // Lot 2 (audit 2026-11-02 P1-3) : montant typé (un "1000" en chaîne faussait les additions)
+  const amount = Number(req.body.amount);
+  if (!Number.isInteger(amount) || amount < 500) return res.status(422).json({ error: 'Montant entier minimum 500 XAF' });
   if (!phone) return res.status(422).json({ error: 'Numéro MTN requis' });
 
   const resolvedCardId = cardId || req.actor.cardId;
@@ -125,105 +127,13 @@ router.post('/topup', cardAuth, async (req, res) => {
 });
 
 // ─── PAYOUT : Disbursements (Carte → MTN) ─────────────────────────
-// POST /api/v1/momo/payout
-router.post('/payout', cardAuth, async (req, res) => {
-  const { amount, phone, cardId, pin } = req.body;
-
-  if (!amount || amount < 500) return res.status(422).json({ error: 'Montant minimum 500 XAF' });
-  if (!phone)  return res.status(422).json({ error: 'Numéro MTN requis' });
-  if (!pin)    return res.status(422).json({ error: 'PIN requis' });
-
-  const resolvedCardId = cardId || req.actor.cardId;
-  if (!resolvedCardId) return res.status(422).json({ error: 'cardId requis' });
-
-  try {
-    await withTransaction(async client => {
-      const cardRes = await client.query(
-        `SELECT * FROM virtual_cards WHERE card_id=$1 FOR UPDATE`,
-        [resolvedCardId]
-      );
-      const card = cardRes.rows[0];
-      if (!card) throw Object.assign(new Error('Carte introuvable'), { statusCode: 404 });
-      if (!ownsCard(card, req.actor)) {
-        throw Object.assign(new Error('Cette carte ne vous appartient pas'), { statusCode: 403, code: 'CARD_NOT_OWNED' });
-      }
-      if (card.status !== 'active') throw Object.assign(new Error('Carte non active'), { statusCode: 422 });
-
-      // Vérifier PIN
-      const bcrypt = require('bcryptjs');
-      if (card.pin_hash) {
-        const ok = await bcrypt.compare(pin, card.pin_hash);
-        if (!ok) throw Object.assign(new Error('PIN incorrect'), { statusCode: 422 });
-      }
-
-      // Frais 1.5%
-      const fee   = Math.round(amount * 0.015);
-      const total = amount + fee;
-
-      if (parseFloat(card.balance) < total) {
-        throw Object.assign(new Error(`Solde insuffisant. Requis: ${total} XAF, Disponible: ${card.balance} XAF`), { statusCode: 422 });
-      }
-
-      const externalId  = uuidv4();
-      const balBefore   = parseFloat(card.balance);
-      const balAfter    = balBefore - total;
-
-      // Débiter la carte immédiatement
-      await client.query(
-        `UPDATE virtual_cards SET balance=$1, updated_at=NOW() WHERE card_id=$2`,
-        [balAfter, card.card_id]
-      );
-
-      // Enregistrer en pending
-      await client.query(
-        `INSERT INTO card_transactions
-           (txn_id, card_id, cardholder_id, type, amount, fee, net_amount,
-            balance_before, balance_after, currency, status, description,
-            mobile_money_op, mobile_money_phone, mm_reference, initiated_at, metadata)
-         VALUES ($1,$2,$3,'unload',$4,$5,$6,$7,$8,$9,'pending',$10,'mtn',$11,$12,NOW(),$13)`,
-        [
-          externalId, resolvedCardId, req.actor.sub || req.actor.cardId,
-          amount, fee, amount - fee,
-          balBefore, balAfter, card.currency,
-          `Déchargement MTN MoMo vers ${phone}`,
-          phone, externalId,
-          JSON.stringify({ mtnReferenceId: externalId, product: 'disbursements' }),
-        ]
-      );
-
-      // Envoyer via MTN
-      const mtnResult = await mtn.transfer({
-        amount,
-        phone,
-        description: `C-Pay Payout ${amount} XAF`,
-        externalId,
-      });
-
-      await client.query(
-        `UPDATE card_transactions SET mm_reference=$1, metadata = COALESCE(metadata,'{}'::jsonb) || $2::jsonb
-         WHERE txn_id=$3 AND status='pending'`,
-        [mtnResult.referenceId, JSON.stringify({ mtnReferenceId: mtnResult.referenceId }), externalId]
-      );
-
-      res.json({
-        success:     true,
-        referenceId: mtnResult.referenceId,
-        txnId:       externalId,
-        amount,
-        fee,
-        sent:        amount - fee,
-        newBalance:  balAfter,
-        currency:    'XAF',
-        status:      'PENDING',
-        message:     `Virement en cours vers ${phone}`,
-        pollUrl:     `/api/v1/momo/status/${mtnResult.referenceId}?product=disbursements`,
-      });
-    });
-  } catch (err) {
-    console.error('[MTN-PAYOUT]', err.message);
-    res.status(err.statusCode || 500).json({ error: err.message, code: err.code || 'MTN_ERROR' });
-  }
+// Lot 2 (audit 2026-11-02 P1-3) : retiré. L'ancien handler appelait MTN DANS la transaction SQL (un échec réseau
+// après acceptation MTN annulait le débit carte et la ligne pending : argent parti sans trace), avec un montant non
+// typé. Aucun client ne l'utilise ; le déchargement carte passe par POST /api/v1/cardholder/unload.
+const GONE = (res, replacement) => res.status(410).json({
+  error: 'Endpoint retiré (audit 2026-11-02, lot 2)', code: 'FEATURE_DISABLED', ...(replacement ? { replacement } : {}),
 });
+router.post('/payout', cardAuth, (req, res) => GONE(res, 'POST /api/v1/cardholder/unload'));
 
 // ─── STATUT transaction ───────────────────────────────────────────
 // GET /api/v1/momo/status/:referenceId?product=collections|disbursements
@@ -234,11 +144,17 @@ router.get('/status/:referenceId', cardAuth, async (req, res) => {
   const product = req.query.product || 'collections';
 
   try {
+    // Lot 2 (P1-3) : la référence doit désigner une transaction du porteur authentifié — jamais de relais brut
+    // du statut MTN pour une référence inconnue ou appartenant à un autre porteur.
+    const txn = await webhooks.findCardTxnByReference(referenceId);
+    const ownerId = String(req.actor?.sub || req.actor?.cardholderId || '');
+    if (!txn || req.actor?.type !== 'cardholder' || !ownerId || String(txn.cardholder_id || '') !== ownerId) {
+      return res.status(404).json({ error: 'Transaction introuvable', code: 'NOT_FOUND' });
+    }
     const status = product === 'collections'
       ? await mtn.getCollectionStatus(referenceId)
       : await mtn.getDisbursementStatus(referenceId);
 
-    const txn = await webhooks.findCardTxnByReference(referenceId);
     let applied = null;
     if (txn && txn.status === 'pending' && (status.status === 'SUCCESSFUL' || status.status === 'FAILED')) {
       applied = await webhooks.applyCardTxnProviderStatus(txn, {
@@ -306,36 +222,11 @@ router.get('/validate/:phone', cardAuth, async (req, res) => {
   }
 });
 
-// ─── BALANCE numéro MTN (AccountBalance) ─────────────────────────
-// GET /api/v1/momo/accountbalance?phone=242XXXXXXX
-router.get('/accountbalance', cardAuth, async (req, res) => {
-  try {
-    const { phone } = req.query;
-    if (!phone) return res.status(422).json({ error: 'phone requis' });
-    // En sandbox — retourne le solde du compte Collections
-    const balance = await mtn.getCollectionBalance();
-    res.json({
-      phone,
-      availableBalance: balance.balance,
-      currency: balance.currency || 'XAF',
-      note: 'Sandbox: solde simulé',
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── REQUEST TO PAY direct ───────────────────────────────────────
-// POST /api/v1/momo/requesttopay
-router.post('/requesttopay', cardAuth, async (req, res) => {
-  const { amount, phone, description, externalId } = req.body;
-  if (!amount || !phone) return res.status(422).json({ error: 'amount et phone requis' });
-  try {
-    const result = await mtn.requestToPay({ amount, phone, description, externalId });
-    res.json(result);
-  } catch (err) {
-    res.status(err.statusCode || 500).json({ error: err.message });
-  }
-});
+// ─── BALANCE numéro MTN / REQUEST TO PAY direct ──────────────────
+// Lot 2 (audit 2026-11-02 P1-3) : retirés. /accountbalance renvoyait le solde du compte Collections de la
+// plateforme à tout porteur ; /requesttopay permettait un push USSD MTN vers n'importe quel numéro sans ligne
+// en base ni idempotence. Les encaissements passent par la caisse (POST /api/v1/merchant/cash/collect).
+router.get('/accountbalance', cardAuth, (req, res) => GONE(res, 'GET /api/v1/momo/balance (admin)'));
+router.post('/requesttopay', cardAuth, (req, res) => GONE(res, 'POST /api/v1/merchant/cash/collect'));
 
 module.exports = router;

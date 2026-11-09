@@ -1,5 +1,33 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-lot2 (2026-11-09) — P1 integrite et securite de l'audit du 2 novembre
+* Resultats operateur (P1-1) : une reponse HTTP 5xx, un corps illisible (page d'erreur d'un proxy) ou un delai ne
+  sont plus classes « refus » : `classifyRailResult` rend `unknown` (code 5xx, `httpStatus`, TIMEOUT/UNPARSABLE),
+  les providers MTN et Airtel qualifient eux-memes ces cas (`outcome:'unknown'`, propage par `normalize`), la caisse
+  conserve la reservation, l'orchestrateur laisse `pending`. Secret Airtel encode dans la requete de jeton.
+* Webhook Airtel marchand (P1-2) : plus d'UPDATE direct ; enquiry Airtel via `reconcileOne` puis
+  `finalize.service` (frais `cpay_calculate_fee`, reglement J+1, lien de paiement, evenement) ; si l'enquiry est
+  indisponible, le callback signe HMAC fait foi par la meme machine d'etat ; TIP/TA → `pending`.
+* `/api/v1/momo/*` (P1-3) : `/payout` (appel MTN dans la transaction SQL), `/requesttopay` et `/accountbalance`
+  retires (410 FEATURE_DISABLED, aucun client) ; `/status/:ref` reserve aux transactions du porteur authentifie ;
+  montant de `/topup` type et entier.
+* Routes historiques `/merchant/collect` et `/merchant/collect/:id/status` (P1-4) : delegation a l'orchestrateur
+  (plafonds KYB, antifraude, routage par pays, frais uniques) et a `reconcileOne` ; bareme local, `computeFees`,
+  `getFeeRate` et pollings `setTimeout` supprimes. Reponse compatible avec l'application Android.
+* Reglements admin (P1-5) : `/admin/settlements/:id/complete|reject` passent par `cash.transitionTransfer`
+  (claim de statut, evenement JSONB, audit_logs, reference bancaire obligatoire, `rejected` libere les fonds) ;
+  `/admin/settlement/run` execute reellement `settlement.engine.runSettlement`.
+* Portails : mot de passe temporaire bloquant (marchand `ForcePassword`, porteur `ForcePasswordPage`, rendus a la
+  place de tout l'espace, plus de banniere contournable) + defense en profondeur API : claim `pwdTemp` au login et au
+  refresh, `merchantAuth`/`cardholderAuth` refusent toute operation hors profil / changement / deconnexion
+  (403 PASSWORD_CHANGE_REQUIRED). Jeton admin en memoire (plus de `localStorage`, purge de `admin_token`).
+  CSP + Permissions-Policy + X-Frame-Options DENY sur les SPA (`nginx-spa.conf`, origine API injectee au build,
+  blocs admin/merchant/app du `nginx.conf`, snippet `cpay-security-spa.conf` pour l'hote). Creation marchand admin :
+  pays deduit du telephone (`/detect/phone`), devise a choix ferme (`/country-defaults`), liste de pays CEMAC + RDC +
+  SN/CI (CF et GQ ajoutes). Rapports imprimes du portail partenaires echappes (`escHtml`).
+* Tests : `lot2-p1-integrity.test.js` (27 cas : classification, providers 5xx via HTTPS simule, webhook Airtel
+  PGlite, garde pwdTemp, routes momo, reglements admin) ; test webhook Airtel historique adapte. 872 tests backend.
+
 ## 2.7.2-lot1 (2026-11-09) — P0 backend de l'audit du 2 novembre
 * `POST /merchant/disburse` (application Android) delegue a `cash.createPayout` : reservation atomique des fonds, frais
   « en sus » (le beneficiaire recoit le montant saisi, le solde est debite de montant + frais), limite journaliere KYB,
