@@ -36,6 +36,12 @@ updates:
       # uuid >= 13 est ESM uniquement : incompatible avec le backend CommonJS (remplacement prevu par crypto.randomUUID)
       - dependency-name: uuid
         update-types: ["version-update:semver-major"]
+      # Express 5 : migration dediee (routeurs, erreurs async, path-to-regexp) — la CI echoue sur la montee brute
+      - dependency-name: express
+        update-types: ["version-update:semver-major"]
+      # SDK Anthropic 1.x : montee avec le guide de migration 0.x -> 1.x et test de l'assistant, en PR dediee
+      - dependency-name: "@anthropic-ai/sdk"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directories: ["/portal/admin", "/portal/merchant", "/portal/cardholder", "/portal/partners", "/portal/bank", "/portal/agency", "/portal/agent"]
@@ -56,6 +62,9 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: vite
         update-types: ["version-update:semver-major"]
+      # React Router 7 : avec la migration React 19, en une fois sur les 7 portails
+      - dependency-name: react-router-dom
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /mobile/cpay-mobile
@@ -67,6 +76,7 @@ updates:
       - dependency-name: "expo*"
       - dependency-name: "@expo/*"
       - dependency-name: "babel-preset-expo"
+      - dependency-name: "@babel/*"
       - dependency-name: "react-native*"
       - dependency-name: "@react-native-async-storage/*"
       - dependency-name: "@react-native-community/*"
