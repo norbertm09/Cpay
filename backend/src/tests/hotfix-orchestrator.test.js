@@ -336,15 +336,21 @@ describe('Reconciliation', () => {
       getDisbursementStatus: jest.fn(),
     }));
     jest.doMock('../services/mobilemoney/mobilemoney.router', () => ({ getConfig: jest.fn().mockResolvedValue({}) }));
-    jest.doMock('../services/settlement.service', () => ({ settleTransaction: jest.fn().mockResolvedValue(undefined) }));
+    // Lot 1 (audit 2026-11-02) : la réconciliation passe par finalize.service — claim atomique dans UNE transaction
     const db2 = require('../config/database');
     db2.query.mockReset();
-    db2.query.mockResolvedValue({ rows: [], rowCount: 1 });
+    db2.query.mockResolvedValue({ rows: [{ transaction_id: 'T-1' }], rowCount: 1 });
+    db2.withTransaction.mockReset();
+    db2.withTransaction.mockImplementation(async (fn) => fn({ query: db2.query }));
     const { reconcileOne } = require('../services/reconcile.service');
-    const r = await reconcileOne({ transaction_id: 'T-1', type: 'collect', amount: '5000', currency: 'XAF', detected_operator: 'mtn', detected_country: 'CG', gateway_payment_id: 'REF-1' });
+    const r = await reconcileOne({ transaction_id: 'T-1', merchant_id: 'M-1', type: 'collect', amount: '5000', currency: 'XAF', detected_operator: 'mtn', detected_country: 'CG', gateway_payment_id: 'REF-1' });
     expect(r.updated).toBe('authorized');
-    const upd = db2.query.mock.calls.find(([s]) => /UPDATE transactions SET status='authorized'/.test(s));
-    expect(upd[0]).toMatch(/AND status='pending'/);
+    expect(db2.withTransaction).toHaveBeenCalledTimes(1);
+    const upd = db2.query.mock.calls.find(([s]) => /UPDATE transactions\s+SET status = \$1/.test(s));
+    expect(upd[0]).toMatch(/AND status = 'pending'/);
+    expect(upd[0]).toMatch(/cpay_calculate_fee/);
+    expect(upd[1][0]).toBe('authorized');
+    expect(db2.query.mock.calls.some(([s]) => /INSERT INTO transaction_events/.test(s))).toBe(true);
   });
 
   test('MTN SUCCESSFUL mais montant différent → laissé pending', async () => {

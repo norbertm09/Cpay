@@ -64,53 +64,9 @@ async function getFeeRate(merchantId, txnType, operator) {
   return def[txnType] || 0.04;
 }
 
-// Polling automatique echelonne du statut Airtel (30s, 1min, 3min) apres une collecte
-function scheduleAirtelDisbPolling(transactionId, airtelTxId) {
-  const delays = [5000, 10000, 15000, 20000, 25000];
-  const cfg = {
-    baseUrl:   process.env.AIRTEL_CG_BASE_URL,
-    apiKey:    process.env.AIRTEL_CG_DISB_CLIENT_ID,
-    apiSecret: process.env.AIRTEL_CG_DISB_CLIENT_SECRET,
-    env:       process.env.AIRTEL_CG_ENV,
-  };
-  delays.forEach(d => setTimeout(async () => {
-    try {
-      const row = await query(`SELECT status FROM transactions WHERE transaction_id=$1`, [transactionId]);
-      if (!row.rows.length || row.rows[0].status !== 'pending') return;
-      const airtel = require('../services/mobilemoney/providers/airtel.provider');
-      const s = await airtel.queryDisbursement({ txId: airtelTxId, currency: 'XAF', config: cfg });
-      if (s.success) {
-        const auth = 'DSB' + Math.random().toString(36).slice(2, 8).toUpperCase();
-        await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Transfert Airtel effectue', gateway_order_id=COALESCE($3, gateway_order_id), provider_raw_response=$4, fee_amount=calc_fee(merchant_id,'payout',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'payout',detected_operator,amount), completed_at=NOW() WHERE transaction_id=$2`, [auth, transactionId, s.airtelMoneyId || null, s.rawResponse || null]);
-      } else if (s.failed) {
-        const msg = s.rawStatus === 'TE' ? 'Delai de transfert Airtel depasse.' : (s.message || 'Transfert Airtel echoue.');
-        await query(`UPDATE transactions SET status='failed', response_message=$1, provider_raw_response=$3, completed_at=NOW() WHERE transaction_id=$2`, [msg, transactionId, s.rawResponse || null]);
-      }
-    } catch (e) { console.error('[airtel disb polling]', e.message); }
-  }, d));
-  // Regle: timeout 30s - dernier check operateur avant echec
-  setTimeout(async () => {
-    try {
-      const row = await query(`SELECT status FROM transactions WHERE transaction_id=$1`, [transactionId]);
-      if (!row.rows.length || row.rows[0].status !== 'pending') return;
-      const airtel = require('../services/mobilemoney/providers/airtel.provider');
-      const s = await airtel.queryDisbursement({ txId: airtelTxId, currency: 'XAF', config: cfg });
-      if (s.success) {
-        const auth = 'DSB' + Math.random().toString(36).slice(2, 8).toUpperCase();
-        await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Transfert Airtel effectue', gateway_order_id=COALESCE($3, gateway_order_id), provider_raw_response=$4, fee_amount=calc_fee(merchant_id,'payout',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'payout',detected_operator,amount), completed_at=NOW() WHERE transaction_id=$2 AND status='pending'`, [auth, transactionId, s.airtelMoneyId || null, s.rawResponse || null]);
-      } else {
-        const msg = s.failed ? (s.message || 'Transfert echoue') : 'Timeout: aucune confirmation Airtel/MTN sous 30s';
-        await query(`UPDATE transactions SET status='failed', response_message=$1, provider_raw_response=$3, gateway_order_id=COALESCE($4, gateway_order_id), fee_amount=0, net_amount=0, completed_at=NOW() WHERE transaction_id=$2 AND status='pending'`, [msg, transactionId, s.rawResponse || null, s.airtelMoneyId || null]);
-      }
-    } catch (e) {
-      console.error('[airtel disb timeout]', e.message);
-      try {
-        await query(`UPDATE transactions SET status='failed', response_message='Timeout: confirmation non recue sous 30s (check operateur indisponible)', fee_amount=0, net_amount=0, completed_at=NOW() WHERE transaction_id=$1 AND status='pending'`, [transactionId]);
-      } catch (e2) { console.error('[airtel disb timeout fallback]', e2.message); }
-    }
-  }, 30000);
-}
-
+// Lot 1 (audit 2026-11-02 P0 #2) : le polling Airtel des décaissements a été retiré — POST /disburse
+// délègue à cash.createPayout (résultat incertain → statut `unknown`, fonds réservés, rapprochement
+// par sweepUncertainPayouts) ; plus aucune écriture `failed` sur un simple délai.
 function scheduleAirtelPolling(transactionId, airtelTxId) {
   const delays = [5000, 10000, 15000, 20000, 25000];
   const cfg = {
@@ -127,7 +83,7 @@ function scheduleAirtelPolling(transactionId, airtelTxId) {
       const s = await airtel.queryTransaction({ txId: airtelTxId, currency: 'XAF', config: cfg });
       if (s.success) {
         const auth = 'AUTH' + Math.random().toString(36).slice(2, 8).toUpperCase();
-        await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Paiement Airtel confirme', gateway_order_id=COALESCE($3, gateway_order_id), provider_raw_response=$4, fee_amount=calc_fee(merchant_id,'collect',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'collect',detected_operator,amount), completed_at=NOW() WHERE transaction_id=$2`, [auth, transactionId, s.airtelMoneyId || null, s.rawResponse || null]);
+        await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Paiement Airtel confirme', gateway_order_id=COALESCE($3, gateway_order_id), provider_raw_response=$4, fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW() WHERE transaction_id=$2`, [auth, transactionId, s.airtelMoneyId || null, s.rawResponse || null]);
         try { const { settleTransaction } = require('../services/settlement.service'); settleTransaction(transactionId).catch(e => console.error('[settlement]', e.message)); } catch(e){}
       } else if (s.failed) {
         const msg = s.rawStatus === 'TE' ? 'Delai de confirmation Airtel depasse.' : (s.message || 'Paiement Airtel echoue.');
@@ -144,17 +100,17 @@ function scheduleAirtelPolling(transactionId, airtelTxId) {
       const s = await airtel.queryTransaction({ txId: airtelTxId, currency: 'XAF', config: cfg });
       if (s.success) {
         const auth = 'AUTH' + Math.random().toString(36).slice(2, 8).toUpperCase();
-        await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Paiement Airtel confirme', gateway_order_id=COALESCE($3, gateway_order_id), provider_raw_response=$4, fee_amount=calc_fee(merchant_id,'collect',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'collect',detected_operator,amount), completed_at=NOW() WHERE transaction_id=$2 AND status='pending'`, [auth, transactionId, s.airtelMoneyId || null, s.rawResponse || null]);
+        await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Paiement Airtel confirme', gateway_order_id=COALESCE($3, gateway_order_id), provider_raw_response=$4, fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW() WHERE transaction_id=$2 AND status='pending'`, [auth, transactionId, s.airtelMoneyId || null, s.rawResponse || null]);
+      } else if (s.failed) {
+        await query(`UPDATE transactions SET status='failed', response_message=$1, provider_raw_response=$3, gateway_order_id=COALESCE($4, gateway_order_id), fee_amount=0, net_amount=0, completed_at=NOW() WHERE transaction_id=$2 AND status='pending'`, [s.message || 'Transaction echouee', transactionId, s.rawResponse || null, s.airtelMoneyId || null]);
       } else {
-        const msg = s.failed ? (s.message || 'Transaction echouee') : 'Timeout: aucune confirmation Airtel/MTN sous 30s';
-        await query(`UPDATE transactions SET status='failed', response_message=$1, provider_raw_response=$3, gateway_order_id=COALESCE($4, gateway_order_id), fee_amount=0, net_amount=0, completed_at=NOW() WHERE transaction_id=$2 AND status='pending'`, [msg, transactionId, s.rawResponse || null, s.airtelMoneyId || null]);
+        // Lot 1 (P0 #2) : un délai n'est pas un refus — la transaction reste `pending`, la réconciliation
+        // (reconcileOne / reconcilePending) applique le statut réel de l'opérateur.
+        await query(`UPDATE transactions SET response_message='En attente de confirmation operateur (delai 30s depasse, verification en cours)', provider_raw_response=COALESCE($2, provider_raw_response) WHERE transaction_id=$1 AND status='pending'`, [transactionId, s.rawResponse || null]);
       }
     } catch (e) {
       console.error('[airtel timeout]', e.message);
-      // Fallback: si le check operateur echoue, on ne laisse pas pending indefiniment
-      try {
-        await query(`UPDATE transactions SET status='failed', response_message='Timeout: confirmation non recue sous 30s (check operateur indisponible)', fee_amount=0, net_amount=0, completed_at=NOW() WHERE transaction_id=$1 AND status='pending'`, [transactionId]);
-      } catch (e2) { console.error('[airtel timeout fallback]', e2.message); }
+      // Lot 1 : opérateur injoignable → on laisse `pending` (jamais `failed` sans refus explicite)
     }
   }, 30000);
 }
@@ -1637,7 +1593,7 @@ router.get('/collect/:txnId/status', merchantAuth, async (req, res) => {
           await query(
             `UPDATE transactions SET status='authorized', auth_code=$1,
              response_message='Paiement confirme',
-             fee_amount=calc_fee(merchant_id,'collect',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'collect',detected_operator,amount), completed_at=NOW()
+             fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW()
              WHERE transaction_id=$2`, [auth, t.transaction_id]);
           t.status = 'authorized';
           t.auth_code = auth;
@@ -1687,7 +1643,7 @@ router.get('/collect/:txnId/status', merchantAuth, async (req, res) => {
             `UPDATE transactions SET status='authorized', auth_code=$1,
              response_message='Paiement Airtel confirme',
              gateway_order_id=COALESCE($3, gateway_order_id),
-             fee_amount=calc_fee(merchant_id,'collect',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'collect',detected_operator,amount), completed_at=NOW()
+             fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW()
              WHERE transaction_id=$2`, [auth, t.transaction_id, s.airtelMoneyId || null]);
           t.status = 'authorized';
           t.auth_code = auth;
@@ -1735,118 +1691,84 @@ router.get('/collect/:txnId/status', merchantAuth, async (req, res) => {
 });
 
 // ─── MOBILE APP DISBURSE (JWT Auth) ──────────────────────────────
+// Lot 1 (audit 2026-11-02 P0 #2) : délégué à cash.createPayout — même réservation atomique des fonds,
+// même classification des résultats rail que POST /merchant/cash/withdraw. Un délai ou une erreur réseau
+// donne un statut `unknown` (fonds réservés, rapprochement automatique), jamais `failed` ; seul un refus
+// explicite de l'opérateur libère les fonds. Frais « en sus » : le bénéficiaire reçoit `amount`, le solde
+// du marchand est débité de `amount + fee`. Réponse compatible avec l'application Android (amount,
+// reference, status, fee) ; `txnId` = identifiant merchant_transfers, lisible via GET /disburse/:txnId/status.
+const LEGACY_PAYOUT_STATUS = { completed: 'authorized', failed: 'failed', rejected: 'failed', cancelled: 'failed' };
+const legacyPayoutStatus = (status) => LEGACY_PAYOUT_STATUS[status] || 'pending';
+const LEGACY_PAYOUT_LABELS = {
+  pending: 'Transfert en cours', processing: 'Transfert en cours', unknown: 'Transfert en cours de verification (fonds reserves)',
+  pending_manual: 'Transfert en attente de traitement', pending_settlement: 'Transfert en attente de traitement',
+  completed: 'Transfert effectue', failed: 'Transfert echoue', rejected: 'Transfert refuse', cancelled: 'Transfert annule',
+};
+
 router.post('/disburse', merchantAuth, idempotency, async (req, res) => {
-  const { amount, recipientPhone, method, description } = req.body;
+  const { amount, recipientPhone, method, description } = req.body || {};
   if (!amount || parseFloat(amount) < 1)
     return res.status(422).json({ error: 'Montant minimum 1 XAF' });
   if (!recipientPhone) return res.status(422).json({ error: 'recipientPhone requis' });
   if (!method) return res.status(422).json({ error: 'method requis (airtel_money, mtn_momo)' });
+  const operatorHint = method === 'mtn_momo' ? 'mtn_momo' : method === 'airtel_money' ? 'airtel_money' : null;
+  if (!operatorHint) return res.status(422).json({ error: 'Methode non supportee: ' + method });
 
+  const cash = require('../services/cash/cash.service');
+  const { attachResource } = require('../middleware/idempotency');
   const merchantId = req.merchant?.merchantId || req.user?.merchantId;
-  const amt   = parseFloat(amount);
-  const fee   = 0;
-  const total = amt;
-  const ref   = 'DSB-' + Date.now().toString(36).toUpperCase();
-  const phone = String(recipientPhone).replace(/[^0-9]/g, '');
-
-  const operator = method === 'mtn_momo' ? 'mtn'
-                 : method === 'airtel_money' ? 'airtel' : null;
-  if (operator && OPERATOR_LIMITS[operator] && amt > OPERATOR_LIMITS[operator])
-    return res.status(422).json({ error: 'Montant superieur a la limite operateur (max ' + OPERATOR_LIMITS[operator] + ' XAF)' });
-  const velErrD = await checkVelocity(merchantId, amt, 'payout');
-  if (velErrD) return res.status(422).json({ error: velErrD });
-
-  let txnId = null;
+  const amt = parseFloat(amount);
+  if (!Number.isInteger(amt)) return res.status(422).json({ error: 'Montant entier attendu en XAF' });
 
   try {
-    // Réservation atomique des fonds (même verrou et même formule que /transfer/payout) :
-    // la ligne 'pending' est insérée dans la transaction SQL, donc comptée par tout appel concurrent.
-    const reservation = await withTransaction(async (client) => {
-      const exec = (text, params) => client.query(text, params);
-      await exec('SELECT pg_advisory_xact_lock(hashtext($1))', [String(merchantId)]);
-      const bal = await computeAvailableBalance(exec, merchantId);
-      if (bal.available < total) {
-        return { status: 422, body: { error: 'Solde insuffisant', code: 'INSUFFICIENT_BALANCE', available: bal.available, requested: total } };
-      }
-      const txn = await exec(
-        `INSERT INTO transactions (
-          merchant_id, type, amount, currency, fee_amount, net_amount,
-          payment_method, status, detected_operator, gateway_name,
-          description, initiated_at
-        ) VALUES ($1,'payout',$2,'XAF',$3,$4,'mobile_money','pending',$5,$6,$7,NOW())
-        RETURNING transaction_id`,
-        [merchantId, amt, fee, total, operator, operator || 'unknown',
-         description || 'Decaissement mobile']);
-      return { txnId: txn.rows[0].transaction_id };
+    const merchant = await cash.getMerchant(merchantId);
+    if (!merchant) return res.status(404).json({ error: 'Marchand introuvable', code: 'MERCHANT_NOT_FOUND' });
+    if (merchant.merchant_status && merchant.merchant_status !== 'active')
+      return res.status(403).json({ error: 'Compte marchand inactif', code: 'MERCHANT_INACTIVE' });
+    const currency = String(merchant.currency || 'XAF').toUpperCase();
+
+    const d = cash.detectWallet(recipientPhone, { country: merchant.country, operator: operatorHint });
+    if (!d.success) return res.status(422).json({ error: d.error || 'Numero beneficiaire invalide', code: d.code || 'PHONE_INVALID' });
+    const operatorCode = cash.normalizeOperatorCode(d.operator);
+    if (String(d.currency).toUpperCase() !== currency)
+      return res.status(422).json({ error: `Numero ${d.countryName || d.country} en ${d.currency} : devise differente de celle du marchand (${currency})`, code: 'CURRENCY_MISMATCH' });
+
+    const limitKey = operatorCode === 'mtn_momo' ? 'mtn' : operatorCode === 'airtel_money' ? 'airtel' : null;
+    if (limitKey && OPERATOR_LIMITS[limitKey] && amt > OPERATOR_LIMITS[limitKey])
+      return res.status(422).json({ error: 'Montant superieur a la limite operateur (max ' + OPERATOR_LIMITS[limitKey] + ' XAF)' });
+    const velErrD = await checkVelocity(merchantId, amt, 'payout');
+    if (velErrD) return res.status(422).json({ error: velErrD });
+
+    const rail = await cash.payoutRail({ operator: operatorCode, gateway: d.gateway, country: d.country });
+    if (!rail.available) return res.status(410).json({ ...FEATURE_DISABLED_BODY, operator: operatorCode, operatorLabel: rail.operatorLabel, reason: 'Aucun rail de paiement sortant configure pour cet operateur' });
+
+    const r = await cash.createPayout({
+      merchantId, destType: 'wallet',
+      wallet: { operator: operatorCode, phone: d.phone, gateway: rail.gateway, country: d.country },
+      rail, amount: amt, description: description || 'Decaissement mobile', refPrefix: 'DSB', feeMode: 'on_top',
+      dailyLimit: cash.withdrawDailyLimit(merchant.kyb_level), actor: `merchant:${req.user?.sub || ''}`,
+      onReserved: ({ transferId }) => attachResource(req, { type: 'merchant_transfer', id: transferId }),
     });
-    if (reservation.status) return res.status(reservation.status).json(reservation.body);
-    txnId = reservation.txnId;
-
-    if (operator === 'mtn') {
-      const mtn = require('../services/rails/mtn-momo.client');
-
-      const d = await mtn.transfer({
-        amount: amt,
-        phone,
-        description: description || 'Paiement C-Pay',
-        externalId: ref,
-      });
-
-      await query(
-        `UPDATE transactions
-         SET gateway_payment_id=$1, gateway_order_id=$2, response_message=$3
-         WHERE transaction_id=$4`,
-        [d.referenceId, ref, 'Transfert initie', txnId]);
-
-      return res.json({
-        success: true,
-        txnId,
-        reference: ref,
-        gatewayReference: d.referenceId,
-        amount: amt,
-        fee,
-        total,
-        status: 'pending',
-        message: 'Transfert en cours vers ' + phone,
-      });
-    }
-
-    if (operator === 'airtel') {
-      const airtel = require('../services/mobilemoney/providers/airtel.provider');
-      const airtelConfig = {
-        baseUrl:   process.env.AIRTEL_CG_BASE_URL,
-        apiKey:    process.env.AIRTEL_CG_DISB_CLIENT_ID,
-        apiSecret: process.env.AIRTEL_CG_DISB_CLIENT_SECRET,
-        env:       process.env.AIRTEL_CG_ENV,
-        pin:       process.env.AIRTEL_CG_DISB_PIN,
-        rsaPubKey: process.env.AIRTEL_CG_DISB_RSA_PUBKEY,
-      };
-      const ar = await airtel.sendPayout({ txnId, amount: amt, currency: 'XAF', phone, config: airtelConfig });
-      const ok = ar?.success === true;
-      await query(
-        `UPDATE transactions SET status=$1, gateway_payment_id=$2, response_message=$3, gateway_order_id=COALESCE($5, gateway_order_id), provider_raw_response=$6 WHERE transaction_id=$4`,
-        [ok ? 'pending' : 'failed', ar?.transactionId || txnId, ok ? 'Versement Airtel en cours' : 'Echec versement Airtel', txnId, ar?.airtelMoneyId || null, ar?.rawResponse || null]);
-      if (ok) scheduleAirtelDisbPolling(txnId, ar?.transactionId || txnId);
-      return res.status(ok ? 200 : 502).json({
-        success: !!ok, txnId, amount: amt,
-        status: ok ? 'pending' : 'failed',
-        message: ok ? 'Versement Airtel en cours' : 'Echec versement Airtel',
-      });
-    }
-
-    await query(
-      `UPDATE transactions SET status='failed',
-       response_message='Methode non supportee' WHERE transaction_id=$1`, [txnId]);
-    return res.status(422).json({ error: 'Methode non supportee: ' + method, txnId });
-
+    if (r.error) return res.status(r.error.status).json(r.error.body);
+    const t = r.transfer;
+    const status = legacyPayoutStatus(t.status);
+    return res.status(t.status === 'failed' ? 502 : 200).json({
+      success: t.status !== 'failed',
+      txnId: t.transferId, transferId: t.transferId,
+      reference: t.reference, gatewayReference: t.gatewayReference || null,
+      amount: t.net,            // montant reçu par le bénéficiaire
+      fee: t.fee,
+      total: t.amount,          // montant débité du solde (amount + fee)
+      currency: t.currency,
+      status, transferStatus: t.status,
+      ...(t.status === 'unknown' ? { outcome: 'unknown' } : {}),
+      operator: operatorCode, operatorLabel: rail.operatorLabel,
+      message: t.message || LEGACY_PAYOUT_LABELS[t.status] || 'Transfert en cours vers ' + cash.maskNumber(d.phone, 3),
+      statusUrl: `/api/v1/merchant/disburse/${t.transferId}/status`,
+    });
   } catch (err) {
     console.error('[disburse]', err.message);
-    if (txnId) {
-      await query(
-        `UPDATE transactions SET status='failed', response_message=$1
-         WHERE transaction_id=$2`, [err.message.slice(0, 200), txnId]).catch(() => {});
-    }
-    res.status(502).json({ error: err.message, txnId, code: 'GATEWAY_ERROR' });
+    return res.status(500).json({ error: 'Decaissement impossible pour le moment', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -1854,6 +1776,28 @@ router.post('/disburse', merchantAuth, idempotency, async (req, res) => {
 router.get('/disburse/:txnId/status', merchantAuth, async (req, res) => {
   const merchantId = req.merchant?.merchantId || req.user?.merchantId;
   try {
+    // Lot 1 : décaissements créés par cash.createPayout (merchant_transfers)
+    if (/^[0-9a-f-]{36}$/i.test(String(req.params.txnId))) {
+      const cash = require('../services/cash/cash.service');
+      let mt = await cash.getTransfer(req.params.txnId, { merchantId });
+      if (mt && mt.direction === 'payout') {
+        if (cash.UNCERTAIN.includes(mt.status)) {
+          try { mt = await cash.refreshPayoutStatus(mt, { source: 'status_poll' }); }
+          catch (e) { console.error('[disburse status]', e.message); }
+        }
+        const status = legacyPayoutStatus(mt.status);
+        return res.json({
+          txnId: mt.transfer_id, transferId: mt.transfer_id,
+          amount: parseFloat(mt.net_amount ?? mt.amount), fee: parseFloat(mt.fee || 0), total: parseFloat(mt.amount),
+          currency: mt.currency,
+          status, transferStatus: mt.status, ...(mt.status === 'unknown' ? { outcome: 'unknown' } : {}),
+          label: LEGACY_PAYOUT_LABELS[mt.status] || mt.status,
+          operator: mt.wallet_operator, authCode: mt.gateway_reference || null,
+          message: mt.error_message || LEGACY_PAYOUT_LABELS[mt.status] || null,
+          reference: mt.reference, completedAt: mt.completed_at || null,
+        });
+      }
+    }
     const r = await query(
       `SELECT transaction_id, amount, fee_amount, net_amount, status,
               detected_operator, gateway_payment_id, gateway_order_id,
@@ -1875,7 +1819,7 @@ router.get('/disburse/:txnId/status', merchantAuth, async (req, res) => {
           await query(
             `UPDATE transactions SET status='authorized', auth_code=$1,
              response_message='Transfert effectue',
-             fee_amount=calc_fee(merchant_id,'payout',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'payout',detected_operator,amount), completed_at=NOW()
+             fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW()
              WHERE transaction_id=$2`, [auth, t.transaction_id]);
           t.status = 'authorized';
           t.auth_code = auth;
@@ -1899,7 +1843,7 @@ router.get('/disburse/:txnId/status', merchantAuth, async (req, res) => {
         const s = await airtel.queryDisbursement({ txId: t.gateway_payment_id, currency: 'XAF', config: cfg });
         if (s.success) {
           const auth = 'DSB' + Math.random().toString(36).slice(2, 8).toUpperCase();
-          await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Transfert Airtel effectue', fee_amount=calc_fee(merchant_id,'payout',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'payout',detected_operator,amount), completed_at=NOW() WHERE transaction_id=$2`, [auth, t.transaction_id]);
+          await query(`UPDATE transactions SET status='authorized', auth_code=$1, response_message='Transfert Airtel effectue', fee_amount=cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), net_amount=amount-cpay_calculate_fee(merchant_id,type::text,detected_operator,amount,payment_method::text), completed_at=NOW() WHERE transaction_id=$2`, [auth, t.transaction_id]);
           t.status = 'authorized'; t.auth_code = auth; t.response_message = 'Transfert Airtel effectue'; t.completed_at = new Date();
         } else if (s.failed) {
           const msg = s.rawStatus === 'TE' ? 'Delai de transfert Airtel depasse.' : (s.message || 'Transfert Airtel echoue.');

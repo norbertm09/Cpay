@@ -328,6 +328,7 @@ app.use('/api/v1', wrapRouterAsync(card2momoRoutes));
 // Webhooks Mobile Money
 const { handleMtnWebhook, handleAirtelWebhook, handleCyberSourceWebhook, handleMigsWebhook } = require('./routes/webhook-handlers');
 app.post('/api/v1/webhooks/mtn',         handleMtnWebhook);
+app.put('/api/v1/webhooks/mtn',          handleMtnWebhook); // MTN notifie en PUT sur X-Callback-Url
 app.post('/api/v1/webhooks/airtel',      handleAirtelWebhook);
 app.post('/api/v1/webhooks/cybersource', handleCyberSourceWebhook);
 app.post('/api/v1/webhooks/migs',        handleMigsWebhook);

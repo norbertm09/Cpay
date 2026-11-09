@@ -1,5 +1,26 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-lot1 (2026-11-09) — P0 backend de l'audit du 2 novembre
+* `POST /merchant/disburse` (application Android) delegue a `cash.createPayout` : reservation atomique des fonds, frais
+  « en sus » (le beneficiaire recoit le montant saisi, le solde est debite de montant + frais), limite journaliere KYB,
+  resultat operateur incertain (delai, erreur reseau) → statut `unknown` avec fonds reserves et rapprochement automatique ;
+  plus aucune ecriture `failed` sans refus explicite de l'operateur. `GET /merchant/disburse/:id/status` lit les transferts
+  `merchant_transfers` (statuts mappes pending/authorized/failed pour l'application) et les anciennes lignes `transactions`.
+  Polling Airtel des decaissements retire ; le polling des encaissements historiques laisse `pending` au lieu de `failed`
+  apres 30 s (la reconciliation tranche).
+* `calc_fee` : plus aucune reference dans le code (`cpay_calculate_fee` partout) ; migration `013_calc_fee_compat.sql`
+  cree un wrapper uniquement si la fonction manque (une definition manuelle existante est conservee). La reconciliation
+  MTN/Airtel historique (`markCollectOk`, `markPayoutOk`, `markFailed`) passe par `finalize.service` : claim atomique,
+  frais, reglement J+1, lien de paiement et evenement dans une seule transaction ; une transaction refusee porte des frais
+  a 0 ; les frais a 0 d'une ligne historique sont recalcules a l'autorisation.
+* Callback MTN (`/api/v1/webhooks/mtn`, `/api/v1/momo/webhooks/mtn`, POST ou PUT) : traite aussi les encaissements et
+  versements marchands (`transactions`) retrouves par `referenceId` ou `externalId` (caisse : identifiant de transaction ;
+  client historique : prefixe de reference), re-interroge MTN puis finalise via `reconcileOne` ; jeton `MTN_WEBHOOK_TOKEN`
+  obligatoire en production (503 fail-closed sinon) et accepte dans l'URL de rappel (`?token=`), MTN n'envoyant pas
+  d'en-tete personnalise. Les ordres du client rails historique (`gateway_name='mtn'`) sont rapproches comme Congo.
+* Tests : `lot1-p0-backend.test.js` (PGlite, 21 cas : migration 013, frais en sus, delai → `unknown`, reconciliation via
+  finalize, callback MTN marchand, jeton). 845 tests.
+
 ## 2.7.1 (2026-11-04) — premiere version signee de l'application Android
 Application Android marchande : API cible 36 (exigence Google Play, audit 2026-11-02 P0), AGP 8.11 / Gradle 8.13 /
 Kotlin 2.1, security-crypto 1.1.0 stable, affichage bord a bord desactive explicitement sur Android 15+ en attendant

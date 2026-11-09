@@ -58,6 +58,7 @@ const CANCELLABLE    = ['awaiting_funds', 'pending_manual'];
 const REJECTABLE     = ['awaiting_funds', 'pending_manual', 'pending_settlement'];
 const FINAL          = ['completed', 'failed', 'cancelled', 'rejected'];
 const BANK_QUEUE_STATUSES = new Set(['pending_manual', 'pending_settlement']);
+const FEE_MODES = new Set(['deduct', 'on_top']);      // retrait (frais déduits) / décaissement vers un tiers (frais en sus)
 
 // ─── Opérateurs : codes caisse (minuscules) ↔ detection.engine ────
 const OPERATOR_LABELS = {
@@ -462,11 +463,17 @@ async function createPayout(p) {
   const {
     merchantId, destType, accountId, wallet, rail, amount, description,
     refPrefix = 'PAY', bankQueueStatus = 'pending_manual', dailyLimit = null, actor = 'merchant', onReserved = null,
+    feeMode = 'deduct',
   } = p;
   if (!BANK_QUEUE_STATUSES.has(bankQueueStatus)) throw new Error(`bankQueueStatus invalide: ${bankQueueStatus}`);
+  if (!FEE_MODES.has(feeMode)) throw new Error(`feeMode invalide: ${feeMode}`);
   const amt = Number(amount);
   const rate = await feeRate(merchantId, 'payout', wallet ? normalizeOperatorCode(wallet.operator) : null);
-  const { fee, net } = computeFee(amt, rate);
+  const { fee } = computeFee(amt, rate);
+  // Lot 1 (audit 2026-11-02 P0 #2) : `deduct` = retrait (le marchand reçoit amount − fee) ;
+  // `on_top` = décaissement vers un tiers (le bénéficiaire reçoit amount, le solde est débité de amount + fee).
+  const net = feeMode === 'on_top' ? amt : amt - fee;      // montant envoyé au bénéficiaire
+  const gross = feeMode === 'on_top' ? amt + fee : amt;    // montant débité du solde (réservé)
   const ref = newReference(refPrefix);
   const walletOperator = wallet ? normalizeOperatorCode(wallet.operator) : null;
   const walletPhone = wallet ? wallet.phone : null;
@@ -484,8 +491,8 @@ async function createPayout(p) {
       return { status: 403, body: { error: 'Compte marchand inactif', code: 'MERCHANT_INACTIVE' } };
 
     const bal = await computeAvailableBalance(exec, merchantId);
-    if (bal.available < amt) {
-      return { status: 422, body: { error: 'Solde insuffisant', code: 'INSUFFICIENT_BALANCE', available: bal.available, requested: amt } };
+    if (bal.available < gross) {
+      return { status: 422, body: { error: 'Solde insuffisant', code: 'INSUFFICIENT_BALANCE', available: bal.available, requested: gross } };
     }
 
     if (destType === 'bank') {
@@ -500,10 +507,10 @@ async function createPayout(p) {
 
     if (dailyLimit !== null && dailyLimit !== undefined) {
       const today = await withdrawnToday(exec, merchantId);
-      if (today + amt > dailyLimit) {
+      if (today + gross > dailyLimit) {
         return { status: 422, body: {
           error: 'Limite journalière de retrait dépassée', code: 'DAILY_LIMIT_EXCEEDED',
-          limit: dailyLimit, withdrawnToday: today, remaining: Math.max(0, dailyLimit - today), requested: amt,
+          limit: dailyLimit, withdrawnToday: today, remaining: Math.max(0, dailyLimit - today), requested: gross,
         } };
       }
     }
@@ -519,7 +526,7 @@ async function createPayout(p) {
        VALUES ($1,'payout',$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$12::jsonb,$13::jsonb)
        RETURNING transfer_id, created_at`,
       [merchantId, destType, destType === 'bank' ? accountId : null,
-       walletOperator, walletPhone, amt, fee, net, currency, ref,
+       walletOperator, walletPhone, gross, fee, net, currency, ref,
        description || (destType === 'bank' ? 'Transfert vers banque' : 'Retrait'),
        JSON.stringify([event('created', { by: actor, status: 'pending', destType })]), JSON.stringify(requestPayload)]);
     return { transferId: t.rows[0].transfer_id, createdAt: t.rows[0].created_at, currency };
@@ -528,7 +535,7 @@ async function createPayout(p) {
   if (reservation.status) return { error: reservation };
   const transferId = reservation.transferId;
   const base = {
-    transferId, reference: ref, amount: amt, fee, net, currency: reservation.currency,
+    transferId, reference: ref, amount: gross, fee, net, feeMode, currency: reservation.currency,
     createdAt: reservation.createdAt, destType, merchant, bankAcc,
     wallet: wallet ? { operator: walletOperator, phone: walletPhone } : null,
   };

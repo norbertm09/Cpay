@@ -32,6 +32,8 @@ const recommendedProviders = {
   interswitchDrc: ['INTERSWITCH_AUTH_BASE_URL', 'INTERSWITCH_WALLET_BASE_URL'],
   assistant: ['ANTHROPIC_API_KEY'],
   wave: ['WAVE_WEBHOOK_SECRET'],
+  // Lot 1 (audit 2026-11-02 P0 #4) : sans ce jeton, POST /webhooks/mtn est refusé en production (fail-closed)
+  mtnWebhook: ['MTN_WEBHOOK_TOKEN'],
   // Vague 6 lot 2 : TLS PostgreSQL vérifié (docs/WAVE-6-LOT2.md §4) — DB_SSL=true + CA (ou magasin système)
   postgresTls: ['DB_SSL'],
 };
