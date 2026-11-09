@@ -26,7 +26,9 @@ const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://api.c-pay.glob
 const API = `${API_BASE}/api/v1`;
 const APP_NAME = 'C-Pay';
 const APP_EDITOR = 'Calculus Plus SAS';
-const APP_VERSION = '2.7.0';
+const APP_VERSION = require('./app.json').expo.version;
+const POLICY_URL = 'https://c-pay.global/legal/confidentialite.html';
+const DELETION_URL = 'https://c-pay.global/legal/suppression-compte.html';
 
 // Message affiche pour toute fonction desactivee cote serveur (410 FEATURE_DISABLED)
 // ou pour une route qui n'existe plus (404 sans corps JSON).
@@ -80,22 +82,22 @@ class AuthError extends Error {
   }
 }
 
-// 410 FEATURE_DISABLED, ou route supprimee (404 sans corps JSON d'erreur) :
-// la fonction est affichee comme « en cours d'intégration », jamais comme une panne.
-const isFeatureUnavailable = (err) =>
-  !!err && (err.code === 'FEATURE_DISABLED' || err.status === 410 || (err.status === 404 && !err.data?.error));
+// 410 FEATURE_DISABLED uniquement (lot 5, audit 2026-11-02 mobile P1-7) : un 404 est une vraie erreur
+// (route mal configuree) et ne doit plus etre maquille en « en cours d'intégration ».
+const isFeatureUnavailable = (err) => !!err && (err.code === 'FEATURE_DISABLED' || err.status === 410);
 
 const userMessage = (err) => (isFeatureUnavailable(err) ? FEATURE_PENDING : err?.message || 'Erreur inattendue');
 
 // ─── Session (expo-secure-store) ─────────────────────────────────
-// Forme : { mode: 'merchant' | 'admin', accessToken, refreshToken, expiresAt, user, mustChangePassword }
+// Forme : { mode: 'merchant', accessToken, refreshToken, expiresAt, user, mustChangePassword }
 // Les jetons sont stockes dans le Keychain / Keystore (expo-secure-store), jamais
 // dans AsyncStorage. Le profil utilisateur (non secret) est stocke a part pour
 // rester sous la limite de 2 Ko par entree de SecureStore. AsyncStorage ne garde
 // que des preferences non sensibles (dernier mode de connexion).
 const SECURE_SESSION_KEY = 'cpay.session';
 const SECURE_USER_KEY = 'cpay.user';
-const PREF_MODE_KEY = 'cpay.pref.mode';
+// Lot 5 : application MARCHANDE uniquement (le mode administrateur a ete retire, audit 2026-11-02 mobile P1-6)
+const MODE = 'merchant';
 
 const secureGet = async (key) => {
   try { return await SecureStore.getItemAsync(key); } catch { return null; }
@@ -112,7 +114,7 @@ async function loadStoredSession() {
   if (!raw) return null;
   try {
     const base = JSON.parse(raw);
-    if (!base?.accessToken || !base?.refreshToken || !base?.mode) return null;
+    if (!base?.accessToken || !base?.refreshToken || base?.mode !== MODE) return null; // une ancienne session admin est ignoree
     let user = null;
     try { user = rawUser ? JSON.parse(rawUser) : null; } catch { user = null; }
     return { ...base, user };
@@ -156,7 +158,7 @@ const sessionFromResponse = (mode, data, previous = null) => ({
   accessToken: data.access_token,
   refreshToken: data.refresh_token,
   expiresAt: Date.now() + (Number(data.expires_in) || DEFAULT_EXPIRES_IN) * 1000,
-  user: data.user || data.admin || previous?.user || null,
+  user: data.user || previous?.user || null,
   mustChangePassword: data.mustChangePassword !== undefined ? !!data.mustChangePassword : !!previous?.mustChangePassword,
 });
 
@@ -266,7 +268,7 @@ function useSession() {
         try {
           const me = await apiFetch(`/${stored.mode}/auth/me`);
           const live = authStore.get();
-          if (live) await authStore.set({ ...live, user: me.user || me.admin || live.user, mustChangePassword: !!me.mustChangePassword });
+          if (live) await authStore.set({ ...live, user: me.user || live.user, mustChangePassword: !!me.mustChangePassword });
         } catch (e) {
           // AuthError : la session a deja ete videe par apiFetch ; erreur reseau ou
           // autre : on garde la session stockee.
@@ -287,16 +289,13 @@ export default function App() {
   const { width } = useWindowDimensions();
   const profile = width >= 900 ? 'tablet' : width >= 520 ? 'tpe' : 'phone';
 
-  useEffect(() => { setTab('home'); }, [session?.mode, session?.user?.userId, session?.user?.adminId]);
+  useEffect(() => { setTab('home'); }, [session?.user?.userId]);
 
   if (!ready) return <Splash />;
   if (!session) return <AuthScreen />;
   if (session.mustChangePassword) return <ChangePasswordScreen session={session} />;
 
-  const isAdmin = session.mode === 'admin';
-  const tabs = isAdmin
-    ? [['home', 'Accueil'], ['apis', 'APIs'], ['merchants', 'Marchands'], ['monitoring', 'Monitoring'], ['rails', 'Rails'], ['pilot', 'Pilot']]
-    : [['home', 'Caisse'], ['collect', 'Encaisser'], ['withdraw', 'Retirer'], ['transfers', 'Transférer'], ['journal', 'Journal'], ['links', 'QR/Lien'], ['history', 'Historique'], ['tokens', 'Tokens'], ['integrations', 'CRM/Compta'], ['pilot', 'Pilot'], ['support', 'Support']];
+  const tabs = [['home', 'Caisse'], ['collect', 'Encaisser'], ['withdraw', 'Retirer'], ['transfers', 'Transférer'], ['journal', 'Journal'], ['links', 'QR/Lien'], ['history', 'Historique'], ['tokens', 'Tokens'], ['integrations', 'CRM/Compta'], ['pilot', 'Pilot'], ['support', 'Support'], ['account', 'Compte']];
 
   return (
     <SafeAreaView style={s.safe}>
@@ -304,7 +303,7 @@ export default function App() {
       <View style={s.top}>
         <View>
           <Text style={s.brand}>{APP_NAME}</Text>
-          <Text style={s.sub}>{isAdmin ? 'Administrateur' : session.user?.businessName || 'Marchand'}</Text>
+          <Text style={s.sub}>{session.user?.businessName || 'Marchand'}</Text>
         </View>
         <Pressable style={s.ghostBtn} onPress={logout}><Text style={s.ghostText}>Sortir</Text></Pressable>
       </View>
@@ -316,7 +315,7 @@ export default function App() {
           </Pressable>
         ))}
       </ScrollView>
-      {isAdmin ? <AdminApp tab={tab} session={session} /> : <MerchantApp tab={tab} session={session} onNavigate={setTab} />}
+      <MerchantApp tab={tab} session={session} onNavigate={setTab} />
       <StepUpHost />
     </SafeAreaView>
   );
@@ -334,35 +333,26 @@ function Splash() {
 
 // ─── Connexion / inscription / 2FA ───────────────────────────────
 function AuthScreen() {
-  const [mode, setMode] = useState('merchant');
+  const mode = MODE;
   const [register, setRegister] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mfa, setMfa] = useState(null); // { mfaToken }
   const [code, setCode] = useState('');
   const [form, setForm] = useState({ emailOrPhone: '', email: '', phone: '', password: '', businessName: '' });
 
-  useEffect(() => {
-    AsyncStorage.getItem(PREF_MODE_KEY).then((v) => { if (v === 'admin' || v === 'merchant') setMode(v); }).catch(() => {});
-  }, []);
+  useEffect(() => { AsyncStorage.removeItem('cpay.pref.mode').catch(() => {}); }, []); // purge de l'ancienne preference de mode
 
   const patch = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const finish = async (data) => {
-    AsyncStorage.setItem(PREF_MODE_KEY, mode).catch(() => {});
-    await authStore.set(sessionFromResponse(mode, data));
-  };
+  const finish = async (data) => { await authStore.set(sessionFromResponse(mode, data)); };
 
   const submit = async () => {
     setLoading(true);
     try {
-      const path = mode === 'admin'
-        ? '/admin/auth/login'
-        : register ? '/merchant/auth/register' : '/merchant/auth/login';
-      const body = mode === 'admin'
-        ? { email: (form.email || form.emailOrPhone).trim(), password: form.password }
-        : register
-          ? { businessName: form.businessName, email: form.email.trim(), phone: form.phone.trim(), password: form.password }
-          : { emailOrPhone: form.emailOrPhone.trim(), password: form.password };
+      const path = register ? '/merchant/auth/register' : '/merchant/auth/login';
+      const body = register
+        ? { businessName: form.businessName, email: form.email.trim(), phone: form.phone.trim(), password: form.password }
+        : { emailOrPhone: form.emailOrPhone.trim(), password: form.password };
       const data = await apiFetch(path, { auth: false, method: 'POST', body });
       if (data.mfaRequired && data.mfaToken) {
         setMfa({ mfaToken: data.mfaToken });
@@ -419,15 +409,15 @@ function AuthScreen() {
       <ScrollView contentContainerStyle={s.auth} keyboardShouldPersistTaps="handled">
         <Text style={s.logo}>{APP_NAME}</Text>
         <Text style={s.muted}>par {APP_EDITOR} · Android & iOS</Text>
-        <Segment value={mode} onChange={(v) => { setMode(v); setRegister(false); }} items={[['merchant', 'Marchand'], ['admin', 'Admin']]} />
-        {mode === 'merchant' && <Segment value={register ? 'register' : 'login'} onChange={(v) => setRegister(v === 'register')} items={[['login', 'Connexion'], ['register', 'Créer compte']]} />}
-        {mode === 'merchant' && register && <Field label="Nom commercial" value={form.businessName} onChange={(v) => patch('businessName', v)} />}
-        {mode === 'merchant' && register && <Field label="Téléphone" value={form.phone} onChange={(v) => patch('phone', v)} keyboardType="phone-pad" placeholder="+242..." />}
-        {(register || mode === 'admin') && <Field label="Email" value={form.email} onChange={(v) => patch('email', v)} keyboardType="email-address" autoCapitalize="none" placeholder={mode === 'admin' ? 'admin@c-pay.global' : 'marchand@exemple.com'} />}
-        {mode === 'merchant' && !register && <Field label="Email ou téléphone" value={form.emailOrPhone} onChange={(v) => patch('emailOrPhone', v)} autoCapitalize="none" />}
+        <Segment value={register ? 'register' : 'login'} onChange={(v) => setRegister(v === 'register')} items={[['login', 'Connexion'], ['register', 'Créer compte']]} />
+        {register && <Field label="Nom commercial" value={form.businessName} onChange={(v) => patch('businessName', v)} />}
+        {register && <Field label="Téléphone" value={form.phone} onChange={(v) => patch('phone', v)} keyboardType="phone-pad" placeholder="+242 06 000 00 00" />}
+        {register && <Field label="Email" value={form.email} onChange={(v) => patch('email', v)} keyboardType="email-address" autoCapitalize="none" placeholder="marchand@exemple.com" />}
+        {!register && <Field label="Email ou téléphone" value={form.emailOrPhone} onChange={(v) => patch('emailOrPhone', v)} autoCapitalize="none" />}
         <Field label="Mot de passe" value={form.password} onChange={(v) => patch('password', v)} secureTextEntry />
         {register && <Text style={s.muted}>10 caractères minimum.</Text>}
         <Button label={loading ? 'Traitement...' : register ? 'Créer le compte' : 'Se connecter'} onPress={submit} disabled={loading} />
+        <Pressable onPress={() => Linking.openURL(POLICY_URL)}><Text style={s.link}>Politique de confidentialité</Text></Pressable>
         <Text style={s.footer}>{APP_NAME} {APP_VERSION} · {APP_EDITOR}</Text>
       </ScrollView>
     </SafeAreaView>
@@ -487,6 +477,7 @@ function MerchantApp({ tab, session, onNavigate }) {
   if (tab === 'integrations') return <IntegrationsScreen session={session} />;
   if (tab === 'pilot') return <PilotScreen session={session} />;
   if (tab === 'support') return <SupportScreen session={session} />;
+  if (tab === 'account') return <AccountScreen session={session} />;
   return <CaisseHome session={session} onNavigate={onNavigate} />;
 }
 
@@ -513,6 +504,7 @@ const operatorCodeFor = (d) => {
 const transferStatusLabel = (st) => ({
   pending: 'En attente', processing: 'En cours', pending_manual: 'Traitement J+1', awaiting_funds: 'Virement attendu',
   completed: 'Effectué', failed: 'Échoué', cancelled: 'Annulé', rejected: 'Rejeté', authorized: 'Autorisé', expired: 'Expiré',
+  unknown: 'Résultat incertain', // lot 5 (P1-2) : operateur muet, fonds reserves — jamais un succes
 }[st] || st || '—');
 const fmtDate = (iso) => (iso ? String(iso).slice(0, 16).replace('T', ' ') : '');
 const parseAmount = (v) => Number(String(v || '').replace(/\s/g, '').replace(',', '.'));
@@ -529,6 +521,10 @@ const cashMessage = (err, currency = 'XAF') => {
     case 'CURRENCY_MISMATCH': return 'La devise du numéro client ne correspond pas à celle de votre compte';
     case 'FUNDING_UNAVAILABLE': return 'Aucun compte de collecte C-Pay pour votre devise — contactez le support';
     case 'MERCHANT_INACTIVE': return 'Compte marchand inactif — contactez le support';
+    case 'IDEMPOTENCY_IN_PROGRESS': return 'Opération déjà en cours — patientez puis consultez le Journal';
+    case 'IDEMPOTENCY_RETRY_AFTER_ERROR': return 'La tentative précédente a échoué côté serveur — vérifiez le Journal avant de réessayer';
+    case 'IDEMPOTENCY_CONFLICT': return 'Une autre opération utilise cette référence — recommencez une nouvelle saisie';
+    case 'INSUFFICIENT_ROLE': return 'Action réservée au propriétaire du compte';
     default:
       if (err.status === 429) return 'Trop de tentatives — réessayez dans quelques minutes';
       return err.message || 'Erreur';
@@ -611,7 +607,8 @@ function useCashSummary() {
 }
 
 // Détection live de l'opérateur : POST /detect/phone (public), debounce 450 ms.
-function usePhoneDetection(phone) {
+// Lot 5 (P1-7) : `country` (pays du marchand) accepte un numéro LOCAL sans indicatif (CAISSE-API.md §3 bis).
+function usePhoneDetection(phone, country) {
   const [detection, setDetection] = useState(null);
   const [detecting, setDetecting] = useState(false);
   useEffect(() => {
@@ -621,7 +618,7 @@ function usePhoneDetection(phone) {
     setDetecting(true);
     const timer = setTimeout(async () => {
       try {
-        const d = await apiFetch('/detect/phone', { auth: false, method: 'POST', body: { phone: clean } });
+        const d = await apiFetch('/detect/phone', { auth: false, method: 'POST', body: { phone: clean, ...(country ? { country } : {}) } });
         if (!cancelled) setDetection(d);
       } catch (e) {
         if (!cancelled) setDetection(e.data?.code ? e.data : { success: false, error: 'Détection indisponible (réseau)', code: 'NETWORK' });
@@ -630,7 +627,7 @@ function usePhoneDetection(phone) {
       }
     }, 450);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [phone]);
+  }, [phone, country]);
   return { detection, detecting };
 }
 
@@ -738,17 +735,22 @@ function CollectScreen({ session }) {
   const [amount, setAmount] = useState('');
   const [phone, setPhone] = useState('');
   const [description, setDescription] = useState('');
+  const [reference, setReference] = useState('');   // lot 5 (P1-7) : facture / ticket, sinon ENC-… genere par le serveur
   const [operator, setOperator] = useState(null); // service forcé (Wave, Express Union…)
   const [result, setResult] = useState(null);
   const [card, setCard] = useState(null);         // { shortUrl, expiresAt } | { unavailable: true }
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const idemKey = useRef(newIdempotencyKey());
-  const { detection, detecting } = usePhoneDetection(mode === 'mobile_money' ? phone : '');
+  const country = session.user?.country || null;
+  const { summary } = useCashSummary();
+  const cardAcceptance = summary?.profile?.cardAcceptance;
+  const { detection, detecting } = usePhoneDetection(mode === 'mobile_money' ? phone : '', country);
   const { polling, timedOut } = useCashCollectPolling(result, setResult);
   const cur = session.user?.currency || 'XAF';
 
-  useEffect(() => { idemKey.current = newIdempotencyKey(); }, [amount, phone, description, operator, mode]);
+  useEffect(() => { idemKey.current = newIdempotencyKey(); }, [amount, phone, description, reference, operator, mode]);
+  useEffect(() => { if (mode === 'card' && cardAcceptance === 'unavailable') setMode('mobile_money'); }, [cardAcceptance]);
   useEffect(() => { setOperator(null); }, [detection?.phone, detection?.operator]);
 
   const alternatives = (detection?.alternatives || []).filter((a) => a.operator && a.operator !== detection?.operator);
@@ -766,9 +768,10 @@ function CollectScreen({ session }) {
     setResult(null);
     setCard(null);
     try {
+      const ref = reference.trim() || undefined;
       const body = mode === 'card'
-        ? { amount: amt, method: 'card', description: description || undefined }
-        : { amount: amt, method: 'mobile_money', customerPhone: detection?.phone || phone.trim(), operator: operator || undefined, description: description || undefined };
+        ? { amount: amt, method: 'card', description: description || undefined, reference: ref }
+        : { amount: amt, method: 'mobile_money', customerPhone: detection?.phone || phone.trim(), operator: operator || undefined, description: description || undefined, reference: ref };
       const data = await apiFetch('/merchant/cash/collect', { method: 'POST', idempotencyKey: idemKey.current, body });
       idemKey.current = newIdempotencyKey();
       if (mode === 'card') setCard(data.payLink || { unavailable: true }); else setResult({ ...data, customerPhone: body.customerPhone });
@@ -780,12 +783,13 @@ function CollectScreen({ session }) {
     }
   };
 
-  const reset = () => { setResult(null); setCard(null); setAmount(''); setPhone(''); setDescription(''); setOperator(null); };
+  const reset = () => { setResult(null); setCard(null); setAmount(''); setPhone(''); setDescription(''); setReference(''); setOperator(null); };
 
   return (
     <Screen>
       <Text style={s.h1}>Encaisser</Text>
-      <Segment value={mode} onChange={(v) => { setMode(v); setResult(null); setCard(null); }} items={[['mobile_money', 'Mobile Money'], ['card', 'Carte'], ['nfc', 'NFC']]} />
+      <Segment value={mode} onChange={(v) => { setMode(v); setResult(null); setCard(null); }} items={[['mobile_money', 'Mobile Money'], ...(cardAcceptance === 'unavailable' ? [] : [['card', 'Carte']]), ['nfc', 'NFC']]} />
+      {cardAcceptance === 'unavailable' ? <Text style={s.muted}>ℹ️ L’acceptation carte n’est pas encore disponible dans votre pays.</Text> : null}
       {mode === 'nfc' ? <Notice title="Sans contact (Tap-to-Phone)" text={FEATURE_PENDING} /> : null}
       {mode === 'mobile_money' && unavailable ? <Notice title="Encaissement" text={FEATURE_PENDING} /> : null}
       {mode !== 'nfc' && !(mode === 'mobile_money' && unavailable) && !result && (
@@ -794,7 +798,7 @@ function CollectScreen({ session }) {
           <Chips value={null} onChange={(v) => setAmount(String(v))} items={QUICK_AMOUNTS.map((a) => [a, money(a)])} />
           {mode === 'mobile_money' && (
             <>
-              <Field label="Numéro du client" value={phone} onChange={setPhone} keyboardType="phone-pad" placeholder="+237 6 70 00 00 00" />
+              <Field label="Numéro du client" value={phone} onChange={setPhone} keyboardType="phone-pad" placeholder={country ? '06 000 00 00 (ou avec indicatif)' : '+242 06 000 00 00'} />
               {(detecting || detection) ? (
                 <View style={s.detect}>
                   {detecting && !detection ? <Text style={s.muted}>Détection de l’opérateur…</Text> : null}
@@ -815,6 +819,7 @@ function CollectScreen({ session }) {
             </>
           )}
           {mode === 'card' ? <Text style={s.muted}>Le client paie par carte sur la page sécurisée pay.c-pay.global (lien + QR).</Text> : null}
+          <Field label="Référence (facture, ticket — optionnel)" value={reference} onChange={(v) => setReference(v.toUpperCase().slice(0, 40))} autoCapitalize="characters" placeholder="Générée automatiquement si vide (ENC-…)" />
           <Field label="Description (optionnel)" value={description} onChange={setDescription} />
           <Button label={loading ? 'Traitement...' : mode === 'card' ? 'Créer le lien de paiement carte' : 'Encaisser maintenant'} onPress={submit} disabled={loading || polling} />
         </>
@@ -880,7 +885,7 @@ function WithdrawScreen({ session }) {
   const [editing, setEditing] = useState(false);
   const [op, setOp] = useState('mtn_momo');
   const [wphone, setWphone] = useState('');
-  const { detection } = usePhoneDetection(editing ? wphone : '');
+  const { detection } = usePhoneDetection(editing ? wphone : '', session.user?.country || null);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
@@ -960,7 +965,7 @@ function WithdrawScreen({ session }) {
             <>
               <Text style={s.label}>Opérateur</Text>
               <Chips value={op} onChange={setOp} items={OPERATORS} />
-              <Field label="Numéro du wallet" value={wphone} onChange={setWphone} keyboardType="phone-pad" placeholder="+237 6 70 00 00 00" />
+              <Field label="Numéro du wallet" value={wphone} onChange={setWphone} keyboardType="phone-pad" placeholder="06 000 00 00 (ou avec indicatif)" />
               {detection ? <Text style={s.muted}>{detection.success ? `📱 ${detection.brand || operatorLabel(detection.operator)} · ${detection.countryName || detection.country || ''}` : `⚠️ ${detection.error || 'Opérateur non reconnu'} — choisissez-le manuellement`}</Text> : null}
               <View style={s.row}><MiniButton label="Annuler" onPress={() => setEditing(false)} /><MiniButton label="Enregistrer" onPress={saveWallet} /></View>
             </>
@@ -973,8 +978,12 @@ function WithdrawScreen({ session }) {
       <Button label={loading ? 'Traitement...' : 'Retirer'} onPress={submit} disabled={loading || unavailable} />
       {last ? (
         <View style={s.card}>
-          <Text style={s.cardTitle}>Retrait demandé</Text>
+          <Text style={s.cardTitle}>{last.status === 'unknown' || last.outcome === 'unknown' ? '⏳ Retrait en cours de vérification' : last.status === 'completed' ? '✅ Retrait effectué' : 'Retrait en cours'}</Text>
           <Text style={s.amount}>{money(last.net ?? last.amount, cur)}</Text>
+          {last.status === 'unknown' || last.outcome === 'unknown'
+            ? <Text style={s.muted}>L’opérateur n’a pas encore confirmé : les fonds restent réservés. Ne relancez pas le retrait, suivez son état dans le Journal.</Text>
+            : null}
+          {last.replayed ? <Text style={s.muted}>Cette demande avait déjà été enregistrée : voici son état actuel.</Text> : null}
           <Text style={s.muted}>Réf : {last.reference || last.transferId || '-'}{last.fee ? ` · frais ${money(last.fee, cur)}` : ''}</Text>
           {last.wallet ? <Text style={s.muted}>Vers {operatorLabel(last.wallet.operator)} {last.wallet.phone}</Text> : null}
           <Badge label={transferStatusLabel(last.status)} />
@@ -1227,7 +1236,7 @@ function LinkScreen() {
   const sms = () => link && Linking.openURL(`sms:?body=${encodeURIComponent(shareText)}`);
   const serverSend = async (channel) => {
     if (!linkId) return Alert.alert('Envoi', 'Identifiant Pay Link manquant');
-    if (!phone) return Alert.alert('Envoi', 'Téléphone destinataire requis (format +242...)');
+    if (!phone) return Alert.alert('Envoi', 'Téléphone destinataire requis (avec indicatif, ex. +242 06 000 00 00)');
     try {
       await apiFetch(`/merchant/pay-links/${encodeURIComponent(linkId)}/send`, { method: 'POST', body: { channel, phone: phone.trim() } });
       Alert.alert('Envoi', channel === 'whatsapp' ? 'Lien envoyé par WhatsApp' : 'Lien envoyé par SMS');
@@ -1311,64 +1320,6 @@ function HistoryScreen() {
 
 // Rails Visa : reserves aux administrateurs super_admin / ops_admin ; aucune
 // donnee carte brute (PAN) n'est acceptee par le serveur (RAW_PAN_NOT_ALLOWED).
-function RailsScreen() {
-  const [amount, setAmount] = useState('');
-  const [currency, setCurrency] = useState('USD');
-  const [wallet, setWallet] = useState('');
-  const [reference, setReference] = useState('');
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [unavailable, setUnavailable] = useState(false);
-
-  const run = async (fn, title) => {
-    setLoading(true);
-    setResult(null);
-    try {
-      setResult(await fn());
-    } catch (e) {
-      if (e instanceof AuthError) return;
-      if (isFeatureUnavailable(e)) setUnavailable(true);
-      else Alert.alert(title, userMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const submit = () => run(() => apiFetch('/rails/visa-payouts/v3/payouts', {
-    method: 'POST',
-    body: {
-      txnId: reference || `${Date.now()}`,
-      amount: Number(amount),
-      currency,
-      payoutMethod: 'W',
-      recipientDetail: {
-        firstName: 'Client',
-        lastName: APP_NAME,
-        type: 'I',
-        wallet: { countryCode: 'COD', accountIdentifier: wallet, accountIdentifierType: 'PHONE', currencyCode: currency },
-      },
-    },
-  }), 'Rails');
-
-  const query = () => run(() => apiFetch(`/rails/visa-payouts/v3/payouts?id=${encodeURIComponent(reference)}&idType=CLIENT_REFERENCE_ID`), 'Query');
-
-  if (unavailable) return <Screen><Text style={s.h1}>Rails Visa</Text><Notice title="Rails Visa" text={FEATURE_PENDING} /></Screen>;
-
-  return (
-    <Screen>
-      <Text style={s.h1}>Rails Visa</Text>
-      <Text style={s.muted}>Visa Account & Wallet payout (rôles super_admin / ops_admin). Les données carte brutes sont refusées par la plateforme.</Text>
-      <Field label="Référence" value={reference} onChange={setReference} placeholder="optionnel" />
-      <Field label="Montant" value={amount} onChange={setAmount} keyboardType="decimal-pad" />
-      <Field label="Devise" value={currency} onChange={setCurrency} autoCapitalize="characters" />
-      <Field label="Wallet / téléphone" value={wallet} onChange={setWallet} keyboardType="phone-pad" />
-      <Button label={loading ? 'Traitement...' : 'Exécuter le payout'} onPress={submit} disabled={loading} />
-      <MiniButton label="Query payout par référence" onPress={query} full />
-      {result && <JsonBox data={result} />}
-    </Screen>
-  );
-}
-
 function TokensScreen() {
   const [tokens, setTokens] = useState([]);
   const [form, setForm] = useState({ provider: 'network_token', tokenRef: '', customerRef: '', network: '', last4: '' });
@@ -1465,36 +1416,25 @@ function SupportScreen() {
   );
 }
 
-// ─── Administration ──────────────────────────────────────────────
-function AdminApp({ tab, session }) {
-  if (tab === 'apis') return <AdminApis />;
-  if (tab === 'merchants') return <AdminMerchants />;
-  if (tab === 'monitoring') return <AdminMonitoring />;
-  if (tab === 'rails') return <RailsScreen />;
-  if (tab === 'pilot') return <PilotScreen session={session} />;
-  return <AdminHome session={session} />;
-}
-
+// ─── Pilot (marchand) ───────────────────────────────────────────
 function PilotScreen({ session }) {
   const [state, setState] = useState(null);
   const [unavailable, setUnavailable] = useState(false);
-  const isAdmin = session.mode === 'admin';
 
   useEffect(() => {
-    const path = isAdmin ? '/admin/pilot/features' : '/merchant/pilot/state';
-    apiFetch(path)
+    apiFetch('/merchant/pilot/state')
       .then(setState)
       .catch((e) => {
         if (e instanceof AuthError) return;
         if (isFeatureUnavailable(e)) setUnavailable(true);
         else Alert.alert('Pilot', userMessage(e));
       });
-  }, [isAdmin]);
+  }, []);
 
   if (unavailable) return <Screen><Text style={s.h1}>Pilot Control</Text><Notice title="Pilot" text={FEATURE_PENDING} /></Screen>;
   if (!state) return <Screen><ActivityIndicator color={C.cyan} /></Screen>;
 
-  const flags = isAdmin ? (state.data || []) : (state.flags || []);
+  const flags = state.flags || [];
   const enrollments = state.enrollments || [];
 
   return (
@@ -1503,10 +1443,10 @@ function PilotScreen({ session }) {
       <InfoGrid items={[
         ['Mode', state.mode || 'audit'],
         ['Fonctions', flags.length],
-        ['Pilote', enrollments[0]?.pilot_key || (isAdmin ? 'Admin' : 'Non enrôlé')],
+        ['Pilote', enrollments[0]?.pilot_key || 'Non enrôlé'],
         ['Statut', enrollments[0]?.enrollment_status || '-'],
       ]} />
-      {!isAdmin && enrollments.map((e) => <Tile key={e.pilot_key} title={e.name} text={`${e.pilot_key} | version ${e.target_version} | rollout ${e.rollout_percent}%`} />)}
+      {enrollments.map((e) => <Tile key={e.pilot_key} title={e.name} text={`${e.pilot_key} | version ${e.target_version} | rollout ${e.rollout_percent}%`} />)}
       <Text style={s.section}>Feature flags</Text>
       {flags.map((f) => (
         <View style={s.card} key={f.flag_key}>
@@ -1519,154 +1459,67 @@ function PilotScreen({ session }) {
   );
 }
 
-function AdminHome({ session }) {
-  const [stats, setStats] = useState(null);
-  useEffect(() => {
-    apiFetch('/admin/stats/global').then(setStats).catch(() => {});
-  }, []);
-  return (
-    <Screen>
-      <Text style={s.h1}>Administration mobile</Text>
-      <InfoGrid items={[
-        ['Admin', session.user?.email],
-        ['Rôle', session.user?.role],
-        ['Marchands', stats?.merchants?.total || stats?.total_merchants || '-'],
-        ['Transactions', stats?.today?.total || '-'],
-      ]} />
-      <Tile title="APIs" text="Consulter, tester et suivre les providers actifs." />
-      <Tile title="Marchands" text="Créer, rechercher et contrôler les comptes." />
-      <Tile title="Monitoring" text="Activité temps réel et statistiques globales." />
-      <Tile title="Rails" text="Visa Account & Wallet payout (super_admin / ops_admin)." />
-    </Screen>
-  );
-}
-
-function AdminApis() {
-  const [items, setItems] = useState([]);
-  const [defaults, setDefaults] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [configs, countries] = await Promise.all([
-        apiFetch('/admin/api-configs'),
-        apiFetch('/admin/country-defaults'),
-      ]);
-      setItems(configs.data || []);
-      setDefaults(countries.data || []);
-    } catch (e) {
-      if (!(e instanceof AuthError)) Alert.alert('APIs', userMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  };
+// ─── Compte : profil, confidentialite, suppression (lot 5, audit 2026-11-02 mobile P0-2) ───
+function AccountScreen({ session }) {
+  const [state, setState] = useState(null);     // { request|null, retractDays, policyUrl, deletionUrl }
+  const [busy, setBusy] = useState(false);
+  const u = session.user || {};
+  const isOwner = !u.role || u.role === 'owner';
+  const load = () => apiFetch('/merchant/account/deletion-request').then(setState).catch((e) => { if (!(e instanceof AuthError)) setState({ request: null }); });
   useEffect(() => { load(); }, []);
+  const policy = state?.policyUrl || POLICY_URL;
+  const deletionUrl = state?.deletionUrl || DELETION_URL;
+  const pending = state?.request?.status === 'pending' ? state.request : null;
 
-  const test = async (key) => {
-    try {
-      const data = await apiFetch(`/admin/api-configs/${encodeURIComponent(key)}/test`, { method: 'POST' });
-      Alert.alert(key, data.ok ? 'Connexion OK' : data.reason || 'Test échoué');
-    } catch (e) {
-      if (!(e instanceof AuthError)) Alert.alert(key, userMessage(e));
-    }
+  const requestDeletion = () => {
+    Alert.alert('Supprimer votre compte C-Pay ?',
+      'Vos accès seront désactivés et vos données personnelles supprimées à l’issue d’un délai de rétractation de 30 jours. Les données que la loi nous impose de conserver (transactions, pièces KYB) sont archivées. Retirez d’abord votre solde disponible.',
+      [{ text: 'Annuler', style: 'cancel' }, { text: 'Demander la suppression', style: 'destructive', onPress: async () => {
+        setBusy(true);
+        try {
+          const data = await withStepUp(session, 'Confirmer la suppression du compte', (confirm) => apiFetch('/merchant/account/deletion-request', { method: 'POST', body: { confirm } }));
+          if (data) { setState((st) => ({ ...(st || {}), request: data })); Alert.alert('Suppression de compte', data.message || 'Demande enregistrée'); }
+        } catch (e) { if (!(e instanceof AuthError)) Alert.alert('Suppression de compte', cashMessage(e)); }
+        finally { setBusy(false); }
+      } }]);
+  };
+  const cancelDeletion = async () => {
+    setBusy(true);
+    try { await apiFetch('/merchant/account/deletion-request', { method: 'DELETE' }); setState((st) => ({ ...(st || {}), request: null })); Alert.alert('Suppression de compte', 'Demande annulée'); }
+    catch (e) { if (!(e instanceof AuthError)) Alert.alert('Suppression de compte', userMessage(e)); }
+    finally { setBusy(false); }
   };
 
   return (
     <Screen>
-      <Text style={s.h1}>Gestion des APIs</Text>
-      {loading && <ActivityIndicator color={C.cyan} />}
-      <Text style={s.section}>Defaults pays</Text>
-      {defaults.map((d) => <Tile key={d.country} title={`${d.country} - ${d.currency}`} text={`${(d.mobile_money_providers || []).join(', ')} | Carte: ${d.default_card_gateway}`} />)}
-      <Text style={s.section}>Providers</Text>
-      {items.map((p) => (
-        <View style={s.card} key={p.provider_key}>
-          <Text style={s.cardTitle}>{p.display_name}</Text>
-          <Text style={s.muted}>{p.provider_key} | {p.provider_type} | {p.country || 'global'}</Text>
-          <Badge label={p.status} />
-          <MiniButton label="Tester" onPress={() => test(p.provider_key)} full />
-        </View>
-      ))}
-    </Screen>
-  );
-}
-
-function AdminMerchants() {
-  const [items, setItems] = useState([]);
-  const [country, setCountry] = useState('CG');
-  const [form, setForm] = useState({ businessName: '', email: '', phone: '' });
-  const [loading, setLoading] = useState(false);
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const data = await apiFetch('/admin/merchants?limit=30');
-      setItems(data.data || []);
-    } catch (e) {
-      if (!(e instanceof AuthError)) Alert.alert('Marchands', userMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-  useEffect(() => { load(); }, []);
-
-  const create = async () => {
-    try {
-      const data = await apiFetch('/admin/merchants', { method: 'POST', body: { ...form, country } });
-      Alert.alert('Marchand créé', data.temporaryPassword ? `Mot de passe temporaire : ${data.temporaryPassword}\nLe marchand devra le changer à sa première connexion.` : 'Compte créé');
-      setForm({ businessName: '', email: '', phone: '' });
-      load();
-    } catch (e) {
-      if (!(e instanceof AuthError)) Alert.alert('Création', userMessage(e));
-    }
-  };
-
-  return (
-    <Screen>
-      <Text style={s.h1}>Marchands</Text>
-      <Text style={s.section}>Créer un marchand</Text>
-      <Field label="Business" value={form.businessName} onChange={(v) => setForm({ ...form, businessName: v })} />
-      <Field label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} keyboardType="email-address" autoCapitalize="none" />
-      <Field label="Téléphone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} keyboardType="phone-pad" />
-      <Field label="Pays" value={country} onChange={setCountry} autoCapitalize="characters" />
-      <Button label="Créer et affecter APIs pays" onPress={create} />
-      <Text style={s.section}>Liste</Text>
-      {loading && <ActivityIndicator color={C.cyan} />}
-      {items.map((m) => <Tile key={m.merchant_id} title={m.business_name} text={`${m.country} | ${m.currency} | ${m.merchant_status}`} />)}
-    </Screen>
-  );
-}
-
-function AdminMonitoring() {
-  const [activity, setActivity] = useState([]);
-  const [stats, setStats] = useState(null);
-
-  const load = async () => {
-    try {
-      const [a, sdata] = await Promise.all([
-        apiFetch('/admin/activity/live'),
-        apiFetch('/admin/stats/global'),
-      ]);
-      setActivity(a.data || []);
-      setStats(sdata);
-    } catch (e) {
-      if (!(e instanceof AuthError)) Alert.alert('Monitoring', userMessage(e));
-    }
-  };
-  useEffect(() => { load(); }, []);
-
-  return (
-    <Screen>
-      <Text style={s.h1}>Monitoring</Text>
-      {stats && <JsonBox data={stats} />}
-      <Text style={s.section}>Activité récente</Text>
-      {activity.map((t) => (
-        <View style={s.card} key={t.transaction_id}>
-          <Text style={s.cardTitle}>{t.business_name || 'Transaction'}</Text>
-          <Text style={s.amount}>{money(t.amount, t.currency)}</Text>
-          <Text style={s.muted}>{t.payment_method} | {t.status} | {t.detected_country}</Text>
-        </View>
-      ))}
+      <Text style={s.h1}>Compte</Text>
+      <View style={s.card}>
+        <Text style={s.cardTitle}>{u.businessName || 'Marchand'}</Text>
+        <InfoGrid items={[['Email', u.email || '—'], ['Rôle', u.role || 'owner'], ['Pays · devise', [u.country, u.currency].filter(Boolean).join(' · ') || '—'], ['2FA', u.mfaEnabled ? 'Active' : 'Inactive']]} />
+        <MiniButton label="Se déconnecter" onPress={logout} full />
+      </View>
+      <Text style={s.section}>Confidentialité et données</Text>
+      <View style={s.card}>
+        <Pressable onPress={() => Linking.openURL(policy)}><Text style={s.link}>Politique de confidentialité</Text></Pressable>
+        <Text style={s.muted}>Données collectées, durées de conservation, vos droits (accès, rectification, effacement).</Text>
+        <Pressable onPress={() => Linking.openURL(deletionUrl)}><Text style={s.link}>Procédure de suppression de compte</Text></Pressable>
+      </View>
+      <View style={s.card}>
+        <Text style={s.cardTitle}>Supprimer mon compte</Text>
+        {pending ? (
+          <>
+            <Text style={s.muted}>Suppression demandée le {fmtDate(pending.requestedAt)} — annulable jusqu’au {fmtDate(pending.retractUntil)}. Vos accès seront ensuite désactivés.</Text>
+            <Badge label="Demande en attente" />
+            <MiniButton label={busy ? 'Traitement...' : 'Annuler la demande de suppression'} onPress={busy ? undefined : cancelDeletion} full />
+          </>
+        ) : (
+          <>
+            <Text style={s.muted}>Demande traitée sous 30 jours (délai de rétractation), confirmation par code 2FA ou mot de passe. {isOwner ? '' : 'Réservé au propriétaire du compte.'}</Text>
+            <MiniButton label={busy ? 'Traitement...' : 'Demander la suppression de mon compte'} onPress={busy || !isOwner ? undefined : requestDeletion} full />
+          </>
+        )}
+      </View>
+      <Text style={s.footer}>{APP_NAME} {APP_VERSION} · {APP_EDITOR}</Text>
     </Screen>
   );
 }
@@ -1763,11 +1616,6 @@ function InfoGrid({ items }) {
   );
 }
 
-function JsonBox({ data }) {
-  const text = useMemo(() => JSON.stringify(data, null, 2), [data]);
-  return <ScrollView horizontal style={s.json}><Text style={s.jsonText}>{text}</Text></ScrollView>;
-}
-
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg, paddingTop: Platform.OS === 'android' ? 28 : 0 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg, gap: 12 },
@@ -1816,7 +1664,6 @@ const s = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   info: { width: '48%', backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 12 },
   infoVal: { color: C.text, fontSize: 16, fontWeight: '900', marginTop: 4 },
-  json: { backgroundColor: '#111827', borderRadius: 8, padding: 12, maxHeight: 260 },
   // Caisse (vague 4)
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   balanceCard: { backgroundColor: C.darkBlue, borderRadius: 12, padding: 18, gap: 4 },
@@ -1839,5 +1686,4 @@ const s = StyleSheet.create({
   copyBtn: { borderWidth: 1, borderColor: C.cyan, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 },
   modalBg: { flex: 1, backgroundColor: '#00000066', alignItems: 'center', justifyContent: 'center', padding: 24 },
   modalCard: { width: '100%', maxWidth: 420, backgroundColor: C.card, borderRadius: 12, padding: 18, gap: 10 },
-  jsonText: { color: '#e5e7eb', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12 },
 });

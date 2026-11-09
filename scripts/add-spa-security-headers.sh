@@ -68,7 +68,11 @@ while True:
         j += 1
     block = src[m.start():j]
     sn = re.search(r'^([ \t]*)server_name\s+([^;]+);[ \t]*$', block, re.M)
-    if sn and HOSTS.search(sn.group(2)) and include not in block:
+    # un bloc « listen 80 » sans TLS ne sert que la redirection 301 et le challenge ACME : inutile d'y poser la CSP
+    plain_http = re.search(r'^[ \t]*listen\s+(\[::\]:)?80\b', block, re.M) and not re.search(r'^[ \t]*listen\s+[^;]*\b443\b', block, re.M)
+    if sn and HOSTS.search(sn.group(2)) and plain_http:
+        sys.stderr.write(f"  - ignore (listen 80, redirection) : {sn.group(2).strip()}\n")
+    elif sn and HOSTS.search(sn.group(2)) and include not in block:
         indent = sn.group(1)
         block = block[:sn.end()] + f"\n{indent}{include}  # lot 2 : CSP + en-tetes de securite des SPA" + block[sn.end():]
         changed += 1
