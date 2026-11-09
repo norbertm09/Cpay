@@ -263,6 +263,7 @@ router.get('/status/:referenceId', cardAuth, async (req, res) => {
 // ─── WEBHOOK MTN callback ─────────────────────────────────────────
 // POST /api/v1/momo/webhooks/mtn — même implémentation que /api/v1/webhooks/mtn
 router.post('/webhooks/mtn', webhooks.handleMtnWebhook);
+router.put('/webhooks/mtn', webhooks.handleMtnWebhook); // MTN notifie en PUT sur X-Callback-Url
 
 // ─── WEBHOOK AIRTEL MONEY callback ────────────────────────────────
 // POST /api/v1/momo/webhooks/airtel — même implémentation que /api/v1/webhooks/airtel

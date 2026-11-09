@@ -9,8 +9,9 @@
  * Règles :
  *   - claim atomique `WHERE status='pending'` : un rejeu / une course ne change rien ;
  *   - `authorized` : response_code '00', règlement enfilé pour les encaissements,
- *     lien de paiement marqué `paid` ;
- *   - `failed` : response_code conservé ou '05', message = raison opérateur ;
+ *     lien de paiement marqué `paid` ; frais/net calculés par cpay_calculate_fee s'ils sont
+ *     absents OU à 0 (lot 1 : les routes historiques insèrent fee_amount = net_amount = 0) ;
+ *   - `failed` : response_code conservé ou '05', message = raison opérateur, frais et net à 0 (lot 1) ;
  *   - un événement `transaction_events` est journalisé à chaque application.
  *
  * WAVE-6 (audit 17/10/2026 §2) : les trois écritures (statut, settlement_queue, pay_link) et
@@ -67,10 +68,10 @@ const finalizeTransaction = async ({ txn, provider, outcome, authCode, gatewayRe
               response_code = CASE WHEN $1 = 'authorized' THEN '00' ELSE COALESCE(response_code, '05') END,
               response_message = $4,
               completed_at = NOW(),
-              fee_amount = CASE WHEN $1 = 'authorized' THEN COALESCE(fee_amount,
-                cpay_calculate_fee(merchant_id, type::text, detected_operator, amount, payment_method::text)) ELSE fee_amount END,
-              net_amount = CASE WHEN $1 = 'authorized' THEN COALESCE(net_amount,
-                amount - COALESCE(fee_amount, cpay_calculate_fee(merchant_id, type::text, detected_operator, amount, payment_method::text))) ELSE net_amount END
+              fee_amount = CASE WHEN $1 = 'authorized' THEN COALESCE(NULLIF(fee_amount, 0),
+                cpay_calculate_fee(merchant_id, type::text, detected_operator, amount, payment_method::text)) ELSE 0 END,
+              net_amount = CASE WHEN $1 = 'authorized' THEN COALESCE(NULLIF(net_amount, 0),
+                amount - COALESCE(NULLIF(fee_amount, 0), cpay_calculate_fee(merchant_id, type::text, detected_operator, amount, payment_method::text))) ELSE 0 END
         WHERE transaction_id = $5 AND status = 'pending'
         RETURNING transaction_id`,
       [outcome, authCode ? String(authCode).slice(0, 64) : null, gatewayRef ? String(gatewayRef).slice(0, 128) : null,

@@ -133,7 +133,11 @@ const reconcileWave2 = async (t, provider) => {
 // autre pays ne doit jamais être transformée en refus via ce deuxième compte.
 const mtnStatus = async (t, product) => {
   const ref = t.gateway_payment_id;
-  const country = String(/^mtn_([a-z]{2})$/i.exec(t.gateway_name || '')?.[1] || t.detected_country || '').toLowerCase();
+  const gw = String(t.gateway_name || '').toLowerCase();
+  // Lot 1 : les ordres du client rails historique (POST /merchant/collect, gateway_name exactement 'mtn',
+  // pas de pays) sont Congo. Sans gateway ni pays, on ne suppose rien (la transaction reste réservée).
+  const legacyCountry = gw === 'mtn' ? 'cg' : '';
+  const country = String(/^mtn_([a-z]{2})$/i.exec(gw)?.[1] || t.detected_country || legacyCountry).toLowerCase();
   if (!country) throw new Error('MTN status unavailable: original country unknown');
   const router = require('./mobilemoney/mobilemoney.router');
   const config = await router.getConfig(`mtn_${country}`);
@@ -230,39 +234,28 @@ async function reconcileOne(t) {
   }
 }
 
-async function markCollectOk(t, operatorId) {
-  const auth = 'AUTH' + Math.random().toString(36).slice(2, 8).toUpperCase();
-  const r = await query(`UPDATE transactions SET status='authorized', auth_code=$1,
-               response_message='Paiement confirme (reconcile)',
-               gateway_order_id=COALESCE($3, gateway_order_id),
-               fee_amount=calc_fee(merchant_id,'collect',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'collect',detected_operator,amount), completed_at=NOW()
-               WHERE transaction_id=$2 AND status='pending'`, [auth, t.transaction_id, operatorId || null]);
-  if (r && r.rowCount === 0) return { txn: t.transaction_id, skipped: 'already_final' };
-  // declencher le reglement automatique
-  try {
-    const { settleTransaction } = require('./settlement.service');
-    settleTransaction(t.transaction_id).catch(e => logger.error('reconcile settlement', { err: e.message }));
-  } catch (e) {}
-  return { txn: t.transaction_id, updated: 'authorized' };
-}
-async function markPayoutOk(t, operatorId) {
-  const auth = 'DSB' + Math.random().toString(36).slice(2, 8).toUpperCase();
-  const r = await query(`UPDATE transactions SET status='authorized', auth_code=$1,
-               response_message='Transfert effectue (reconcile)',
-               gateway_order_id=COALESCE($3, gateway_order_id),
-               fee_amount=calc_fee(merchant_id,'payout',detected_operator,amount), net_amount=amount-calc_fee(merchant_id,'payout',detected_operator,amount), completed_at=NOW()
-               WHERE transaction_id=$2 AND status='pending'`, [auth, t.transaction_id, operatorId || null]);
-  if (r && r.rowCount === 0) return { txn: t.transaction_id, skipped: 'already_final' };
-  return { txn: t.transaction_id, updated: 'authorized' };
-}
+// Lot 1 (audit 2026-11-02 P0 #3) : les trois issues passent par la machine d'état partagée
+// (services/mobilemoney/finalize.service) — claim atomique `status='pending'`, frais via
+// cpay_calculate_fee, règlement J+1 enfilé, lien de paiement clôturé, transaction_events —
+// dans UNE transaction PostgreSQL, comme les webhooks et les providers de la vague 2.
+const finalizeLegacy = async (t, outcome, { operatorId = null, reason = null, prefix = 'AUTH' } = {}) => {
+  const { finalizeTransaction } = require('./mobilemoney/finalize.service');
+  const authCode = operatorId ? String(operatorId) : prefix + Math.random().toString(36).slice(2, 8).toUpperCase();
+  const fin = await finalizeTransaction({
+    txn: t, provider: opKind(t.detected_operator) || 'momo', outcome,
+    authCode: outcome === 'authorized' ? authCode : null, gatewayRef: operatorId || null,
+    reason: reason ? String(reason).slice(0, 120) : null, source: 'reconcile',
+    eventPayload: { legacyRail: true },
+  });
+  if (!fin.applied) return { txn: t.transaction_id, skipped: 'already_final' };
+  return outcome === 'authorized'
+    ? { txn: t.transaction_id, updated: 'authorized' }
+    : { txn: t.transaction_id, updated: 'failed', reason };
+};
+async function markCollectOk(t, operatorId) { return finalizeLegacy(t, 'authorized', { operatorId, prefix: 'AUTH' }); }
+async function markPayoutOk(t, operatorId)  { return finalizeLegacy(t, 'authorized', { operatorId, prefix: 'DSB' }); }
 // Uniquement sur un statut FAILED explicite du provider (jamais sur erreur reseau)
-async function markFailed(t, reason) {
-  const r = await query(`UPDATE transactions SET status='failed', response_message=$1,
-               fee_amount=0, net_amount=0, completed_at=NOW()
-               WHERE transaction_id=$2 AND status='pending'`, [String(reason).slice(0, 120), t.transaction_id]);
-  if (r && r.rowCount === 0) return { txn: t.transaction_id, skipped: 'already_final' };
-  return { txn: t.transaction_id, updated: 'failed', reason };
-}
+async function markFailed(t, reason) { return finalizeLegacy(t, 'failed', { reason }); }
 
 // Balaye les transactions pending recentes (fenetre configurable, defaut 24h).
 // WAVE-3 : couvre aussi les providers de la vague 2 (par gateway_name ou detected_operator) ;

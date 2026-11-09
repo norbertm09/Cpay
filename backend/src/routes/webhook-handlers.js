@@ -223,20 +223,93 @@ const findCardTxnByReference = async (referenceId) => {
 
 const getMtnClient = () => require('../services/rails/mtn-momo.client');
 
+/**
+ * Lot 1 (audit 2026-11-02 P0 #4) : encaissements / versements marchands (`transactions`) notifiés par MTN.
+ * MTN notifie en PUT/POST sur X-Callback-Url avec la ressource requesttopay/transfer : `externalId`,
+ * `financialTransactionId`, `status`, `amount`, `currency` — le `referenceId` (X-Reference-Id) n'y figure
+ * pas toujours. Recherche :
+ *   - referenceId  → gateway_payment_id (X-Reference-Id stocké à l'initiation)
+ *   - externalId   → gateway_payment_id / transaction_id (caisse : externalId = transaction_id)
+ *                    ou gateway_order_id (client historique : externalId = `<ref>-<timestamp>-<aléa>`)
+ */
+const findMerchantTxnByReference = async ({ referenceId, externalId }) => {
+  const legacyRef = externalId ? String(externalId).replace(/-\d{13}-[a-z0-9]{1,8}$/i, '') : null;
+  const r = await query(
+    `SELECT transaction_id, merchant_id, type, amount, currency, status, gateway_name, gateway_payment_id,
+            gateway_order_id, detected_operator, detected_country, pay_link_id
+       FROM transactions
+      WHERE LOWER(COALESCE(detected_operator, '')) LIKE 'mtn%'
+        AND (($1::text IS NOT NULL AND gateway_payment_id = $1)
+          OR ($2::text IS NOT NULL AND (gateway_payment_id = $2 OR transaction_id::text = $2))
+          OR ($3::text IS NOT NULL AND gateway_order_id = $3))
+      ORDER BY (status = 'pending') DESC, initiated_at DESC
+      LIMIT 1`,
+    [referenceId ? String(referenceId) : null, externalId ? String(externalId) : null, legacyRef || null]
+  );
+  return r.rows[0] || null;
+};
+
+/** Callback MTN pour une transaction marchande : statut réel re-interrogé puis finalisé (finalize.service via reconcileOne). */
+const handleMerchantMtnCallback = async (req, res, txn, { body, referenceId, callbackStatus, cbAmount, cbCurrency }) => {
+  const ref = referenceId || txn.gateway_payment_id;
+  if (txn.status !== 'pending') {
+    await recordWebhookEvent({ provider: 'mtn', referenceId: ref, status: callbackStatus, outcome: 'replay_ignored', payload: body, ip: req.ip });
+    return res.status(200).json({ received: true, referenceId: ref, outcome: 'already_processed', status: txn.status });
+  }
+  const cbMismatch = checkAmountCurrency({ expectedAmount: txn.amount, expectedCurrency: txn.currency, amount: cbAmount, currency: cbCurrency });
+  if (cbMismatch) {
+    logger.error('MTN webhook: callback amount/currency mismatch (merchant txn) — ignored', { referenceId: ref, ...cbMismatch });
+    await recordWebhookEvent({ provider: 'mtn', referenceId: ref, status: callbackStatus, outcome: 'mismatch', payload: body, ip: req.ip });
+    return res.status(409).json({ error: 'Montant ou devise incohérent', code: 'AMOUNT_MISMATCH' });
+  }
+  if (!txn.gateway_payment_id) {
+    await recordWebhookEvent({ provider: 'mtn', referenceId: ref, status: callbackStatus, outcome: 'no_provider_reference', payload: body, ip: req.ip });
+    return res.status(202).json({ received: true, referenceId: ref, status: 'pending', code: 'NO_PROVIDER_REFERENCE' });
+  }
+  // Seul le statut renvoyé par MTN (GET requesttopay/{ref} ou transfer/{ref}) est appliqué — même machine
+  // d'état que la réconciliation : claim `status='pending'`, frais, règlement J+1, lien de paiement, événement.
+  const { reconcileOne } = require('../services/reconcile.service');
+  const out = await reconcileOne(txn);
+  if (out.updated) {
+    await recordWebhookEvent({ provider: 'mtn', referenceId: ref, status: callbackStatus, outcome: out.updated, payload: body, ip: req.ip });
+    return res.status(200).json({ success: true, referenceId: ref, applied: true, newStatus: out.updated, txnId: txn.transaction_id });
+  }
+  if (out.mismatch) {
+    await recordWebhookEvent({ provider: 'mtn', referenceId: ref, status: callbackStatus, outcome: 'mismatch', payload: body, ip: req.ip });
+    return res.status(409).json({ error: 'Montant ou devise incohérent', code: 'AMOUNT_MISMATCH' });
+  }
+  if (out.error) {
+    logger.warn('MTN webhook: provider status unavailable (merchant txn) — leaving pending', { referenceId: ref, err: out.error });
+    await recordWebhookEvent({ provider: 'mtn', referenceId: ref, status: callbackStatus, outcome: 'provider_unavailable', payload: body, ip: req.ip });
+    return res.status(202).json({ received: true, referenceId: ref, status: 'pending', code: 'PROVIDER_UNAVAILABLE' });
+  }
+  const outcome = out.skipped === 'already_final' ? 'replay_ignored' : 'still_pending';
+  await recordWebhookEvent({ provider: 'mtn', referenceId: ref, status: callbackStatus, outcome, payload: body, ip: req.ip });
+  return res.status(outcome === 'replay_ignored' ? 200 : 202).json({ received: true, referenceId: ref, status: outcome === 'replay_ignored' ? 'already_processed' : 'pending', providerStatus: out.providerStatus || null });
+};
+
 const handleMtnWebhook = async (req, res) => {
-  // 0. Jeton partagé (si configuré) — comparaison en temps constant
+  // 0. Jeton partagé — comparaison en temps constant. MTN ne pose pas d'en-tête personnalisé sur ses
+  //    callbacks : le jeton peut aussi être porté par l'URL (X-Callback-Url ...?token=<MTN_WEBHOOK_TOKEN>).
+  //    Lot 1 (P0 #4) : en production, l'absence de jeton configuré refuse le callback (fail-closed) ; la
+  //    réconciliation périodique finalise alors les transactions.
   const token = process.env.MTN_WEBHOOK_TOKEN;
   if (token) {
-    const provided = req.headers['x-webhook-token'];
+    const provided = req.headers['x-webhook-token'] || (req.query && req.query.token) || '';
     if (!timingSafeEqualStr(String(provided || ''), token)) {
       await auditLog({ eventType: 'MTN_WEBHOOK_INVALID_TOKEN', actorType: 'system', ipAddress: req.ip, success: false });
       return res.status(401).json({ error: 'Jeton webhook invalide', code: 'INVALID_WEBHOOK_TOKEN' });
     }
+  } else if (process.env.NODE_ENV === 'production') {
+    logOnce('mtn_token', 'MTN_WEBHOOK_TOKEN non configuré — callback MTN refusé en production (fail-closed) ; la réconciliation finalise les transactions');
+    await auditLog({ eventType: 'MTN_WEBHOOK_NO_TOKEN', actorType: 'system', ipAddress: req.ip, success: false });
+    return res.status(503).json({ error: 'Webhook non configuré', code: 'WEBHOOK_NOT_CONFIGURED' });
   }
 
   const body = req.body || {};
-  const { referenceId, status: callbackStatus, amount: cbAmount, currency: cbCurrency } = body;
-  if (!referenceId) return res.status(400).json({ error: 'referenceId requis' });
+  const { status: callbackStatus, amount: cbAmount, currency: cbCurrency, externalId } = body;
+  const referenceId = body.referenceId || req.headers['x-reference-id'] || null;
+  if (!referenceId && !externalId) return res.status(400).json({ error: 'referenceId ou externalId requis' });
 
   try {
     await auditLog({
@@ -247,10 +320,13 @@ const handleMtnWebhook = async (req, res) => {
       success:   callbackStatus === 'SUCCESSFUL',
     });
 
-    const txn = await findCardTxnByReference(referenceId);
+    const txn = referenceId ? await findCardTxnByReference(referenceId) : null;
     if (!txn) {
-      await recordWebhookEvent({ provider: 'mtn', referenceId, status: callbackStatus, outcome: 'unknown_reference', payload: body, ip: req.ip });
-      return res.status(200).json({ received: true, referenceId, outcome: 'unknown_reference' });
+      // Lot 1 : encaissements / versements marchands (table transactions)
+      const merchantTxn = await findMerchantTxnByReference({ referenceId, externalId });
+      if (merchantTxn) return await handleMerchantMtnCallback(req, res, merchantTxn, { body, referenceId, callbackStatus, cbAmount, cbCurrency });
+      await recordWebhookEvent({ provider: 'mtn', referenceId: referenceId || externalId, status: callbackStatus, outcome: 'unknown_reference', payload: body, ip: req.ip });
+      return res.status(200).json({ received: true, referenceId: referenceId || externalId, outcome: 'unknown_reference' });
     }
     if (txn.status !== 'pending') {
       // Rejeu : rien à faire (idempotent), aucune régression possible
@@ -698,6 +774,7 @@ module.exports = {
   // Helpers partagés (routes momo / card2momo / tests)
   applyCardTxnProviderStatus,
   findCardTxnByReference,
+  findMerchantTxnByReference, // Lot 1 : transactions marchandes notifiées par MTN
   applyMerchantPspResult,
   checkAmountCurrency,
   timingSafeEqualStr,

@@ -105,7 +105,11 @@ MTN_CG_COLL_SUB_KEY_PRIMARY=…
 MTN_CG_DISB_API_USER=…             # disbursement (retrait vers le wallet marchand)
 MTN_CG_DISB_API_KEY=…
 MTN_CG_DISB_SUB_KEY_PRIMARY=…    # cle d'abonnement OBLIGATOIRE (verifie le 2026-10-24 : 401 « missing subscription key » sans elle)
-MTN_CG_CALLBACK_URL=https://api.c-pay.global/api/v1/momo/webhooks/mtn
+# Lot 1 (audit 2026-11-02 P0 #4) : jeton OBLIGATOIRE en production (sans lui le callback est refusé, 503, et seule
+# la réconciliation finalise). MTN n'envoie aucun en-tête personnalisé : le jeton voyage dans l'URL de rappel
+# (X-Callback-Url, même hôte que le providerCallbackHost déclaré). Générer : openssl rand -hex 24
+MTN_WEBHOOK_TOKEN=…
+MTN_CG_CALLBACK_URL=https://api.c-pay.global/api/v1/momo/webhooks/mtn?token=<MTN_WEBHOOK_TOKEN>
 MTN_TLS_INSECURE=false
 
 # Airtel Money Congo
@@ -251,7 +255,7 @@ Repli en cas de problème dans l'heure qui suit : rebasculer le DNS sur `51.91.9
 
 | Opérateur | URL de callback à déclarer | Authentification | À demander |
 |---|---|---|---|
-| MTN MoMo CG | `https://api.c-pay.global/api/v1/momo/webhooks/mtn` | re-interrogation systématique du statut (`requesttopay/{ref}`) ; jeton `MTN_WEBHOOK_TOKEN` optionnel | plages IP des callbacks, délai max de confirmation, politique de rejeu, fichier de rapprochement |
+| MTN MoMo CG | `https://api.c-pay.global/api/v1/momo/webhooks/mtn?token=<MTN_WEBHOOK_TOKEN>` (POST ou PUT) | re-interrogation systématique du statut (`requesttopay/{ref}` ou `transfer/{ref}`) puis finalisation partagée (finalize.service) pour les cartes **et** les encaissements/versements marchands ; corps MTN accepté avec `referenceId` ou seulement `externalId` ; jeton `MTN_WEBHOOK_TOKEN` **obligatoire** en production (lot 1) | plages IP des callbacks, délai max de confirmation, politique de rejeu, fichier de rapprochement |
 | Airtel Money CG | `https://api.c-pay.global/api/v1/webhooks/airtel` | `AIRTEL_WEBHOOK_SECRET` obligatoire | idem + confirmation que le préfixe **04** est bien Airtel Money (entrée `verified:false`) |
 
 Dès réception des plages, les inscrire dans `/etc/nginx/snippets/cpay-webhook-allowlist.conf`, passer `default 1`,
