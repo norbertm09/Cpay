@@ -12,7 +12,8 @@
 #   4. docker compose build (api + portails ; CPLUS_TAG=<version>-<sha12>, lot 3 : une image par commit)
 #   5. migrations (docker compose run --rm --no-deps -e RUN_MIGRATIONS=false api node src/config/migrate.js)
 #   6. docker compose up -d --remove-orphans
-#   7. health checks : API 127.0.0.1:3001/health, vitrine 127.0.0.1:3006/, portails (non bloquants)
+#   7. health checks : API 127.0.0.1:3001/health, vitrine 127.0.0.1:3006/, portails 3002-3005 (bloquants depuis le
+#      hotfix du 2026-11-10 : un conteneur en boucle de redemarrage faisait passer le deploiement pour reussi)
 # Lance par .github/workflows/deploy.yml via SSH, ou a la main depuis /opt/cplus.
 # Les anciens scripts (deploy-ovh.sh, deploy-wave-2.sh, init-ovh.sh, *-tls.sh) sont dans scripts/legacy/ (lecture seule) ;
 # deploy-prod.sh a ete supprime (lot 7).
@@ -175,10 +176,16 @@ fi
 log "Health check vitrine (127.0.0.1:3006/)…"
 wait_http http://127.0.0.1:3006/ 15 '<html' || die "Vitrine KO (127.0.0.1:3006)"
 log "  vitrine OK"
+PORTALS_KO=""
 for portal in "merchant 3002" "cardholder 3003" "admin 3004" "partners 3005"; do
   set -- $portal
-  if wait_http "http://127.0.0.1:$2/" 10 '<html'; then log "  portail $1 OK (:$2)"; else warn "  portail $1 injoignable (:$2)"; fi
+  if wait_http "http://127.0.0.1:$2/" 20 '<html'; then log "  portail $1 OK (:$2)"; else warn "  portail $1 injoignable (:$2)"; PORTALS_KO="$PORTALS_KO $1"; fi
 done
+if [ -n "$PORTALS_KO" ]; then
+  compose ps 2>/dev/null | tee -a "$LOG_FILE" >&2 || true
+  for p in $PORTALS_KO; do docker logs --tail 20 "cplus-$p-portal" 2>&1 | sed "s/^/  [$p] /" | tee -a "$LOG_FILE" >&2 || true; done
+  die "Portail(s) KO :$PORTALS_KO — conteneur(s) en echec (voir journaux ci-dessus). ./scripts/deploy.sh --rollback pour revenir a ${PREVIOUS_SHA:-<aucun>}"
+fi
 
 log "Nettoyage des images obsoletes (les 3 derniers deploiements sont conserves pour le rollback)…"
 KEEP_TAGS="$(tail -n 3 "$HISTORY_FILE" 2>/dev/null | awk '{print $2}' | while read -r sha; do [ -n "$sha" ] && echo "$VERSION-$(git rev-parse --short=12 "$sha" 2>/dev/null || echo "$sha")"; done | tr '\n' ' ')"

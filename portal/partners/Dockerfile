@@ -12,12 +12,12 @@ ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
 # garanti par vite.config.js (modulePreload.polyfill: false).
 RUN npm run build
 
-# Lot 7 (audit 2026-11-02 infra P2-8/P2-9) : nginx non privilegie, port 8080, healthcheck
+# Lot 7 (audit 2026-11-02 infra P2-8/P2-9) : nginx non privilegie, port 8080, healthcheck.
+# Hotfix 2026-11-10 : pas de `USER root` (un nginx -t en root au build rendait /tmp/*_temp inaccessibles a nginx
+# -> boucle de redemarrage) ; copies avec --chown, verification en tant que nginx.
 FROM nginxinc/nginx-unprivileged:1.28-alpine
-USER root
-COPY --from=builder /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-RUN chown -R nginx:nginx /usr/share/nginx/html && nginx -t
-USER nginx
+COPY --from=builder --chown=nginx:nginx /app/build /usr/share/nginx/html
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
+RUN nginx -t
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s CMD wget -qO- http://127.0.0.1:8080/health || exit 1
