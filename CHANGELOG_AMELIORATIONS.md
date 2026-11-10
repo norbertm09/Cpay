@@ -1,5 +1,21 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-api-bascule (2026-11-10) — bascule sans coupure de l'API (audit du 2 novembre, infra P1-6 seconde moitie)
+* Deux couleurs `api-blue` / `api-green` (definition commune, alias reseau `api` pour settlement-cron, Prometheus et le
+  nginx du profil standalone), une seule active en regime etabli. Le port 127.0.0.1:3001 attendu par le nginx de
+  l'hote est tenu par `api-router` (nginx non privilegie, `docker/api-router/`), qui relaie vers la couleur ecrite
+  dans `active/active.conf` (resolution a chaque requete, en-tetes client transmis tels quels : `trust proxy 1`
+  inchange).
+* `deploy.sh` : demarre la couleur inactive avec la nouvelle image, attend `/health` dans le conteneur, met a jour
+  routeur / portails / vitrine / cron, recharge le routeur gracieusement (`nginx -t` puis `reload`), draine 10 s
+  (`CPAY_DRAIN_SECONDS`) puis arrete l'ancienne couleur par SIGTERM (45 s de grace, requetes en cours terminees).
+  Un echec de sante de la nouvelle couleur laisse l'API active intacte. Le rollback suit le meme chemin. Aucun
+  droit sudo necessaire (tout passe par Docker). Premiere bascule : le conteneur historique `cplus-api` est arrete
+  une derniere fois pour liberer le port 3001 (quelques secondes), puis retire.
+* CI : `nginx -t` sur la configuration du routeur ; `docker compose config` verifie l'alias `api` des deux couleurs,
+  l'absence de port hote sur les couleurs, une seule couleur par defaut et le routeur sur 127.0.0.1:3001.
+* Docs : EXPLOITATION § 4, CI-CD § 5, runbook (journaux par couleur).
+
 ## 2.7.2-reliquat (2026-11-10) — reliquat technique en un patch (dette audit § 5, P1-6, majeures de dependances)
 * Backend : Express 5.3 (chemins RegExp pour les pages de lien de paiement, « // » n'est plus replie), SDK Anthropic
   1.7 (version d'API 2026-10-21, aucun changement de code requis pour l'assistant), uuid remplace par

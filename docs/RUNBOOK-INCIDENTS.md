@@ -101,7 +101,8 @@ preuve, administrateur). Les ordres en attente de décision : `GET /api/v1/admin
 
 - Sauvegardes : `scripts/backup-db.sh` (chiffrées `age`, copie distante) ; restauration de test :
   `scripts/restore-test.sh`. Ne jamais restaurer en production sans sauvegarde préalable du moment.
-- Journal API : `docker logs cplus-api --since 10m` ; les réponses 5xx ne contiennent plus le détail interne
+- Journal API : `docker logs cplus-api-blue --since 10m` (ou `cplus-api-green` : la couleur active est dans
+  `docker/api-router/active/active.conf`) ; les réponses 5xx ne contiennent plus le détail interne
   (reliquat 2026-11) — chercher le `requestId` renvoyé au client dans le journal.
 - Supervision : Grafana / Prometheus (`docs/EXPLOITATION.md` § 3) ; alertes `APIDown`, `PostgreSQLDown`,
   `HostRebootRequired`, `BackupFailed` / `BackupStale`, certificats.

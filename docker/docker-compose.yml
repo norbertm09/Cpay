@@ -1,37 +1,71 @@
 # Variables d'environnement de composition (fichier docker/.env, voir docker/env.example) :
 #   CPAY_API_BASE_URL  URL de l'API compilee dans les portails (prod : https://api.c-pay.global,
 #                      dev : https://api.dev.c-pay.global). Sans fichier, la valeur de production s'applique.
+# Bascule sans coupure de l'API (2026-11, P1-6) : deux couleurs api-blue / api-green partagent la definition
+# x-api ; une seule tourne en regime etabli (CPAY_API_BLUE / CPAY_API_GREEN = 1 ou 0, poses par scripts/deploy.sh).
+# Le port 127.0.0.1:3001 attendu par le nginx de l'hote est tenu par api-router, qui relaie vers la couleur active
+# (docker/api-router/). Les deux couleurs portent l'alias reseau « api » : settlement-cron, Prometheus
+# (monitoring) et le nginx du profil standalone continuent de joindre api:3000.
+x-api: &api
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.api
+  image: cplus-api:${CPLUS_TAG:-2.7.1}
+  restart: unless-stopped
+  dns:
+    - 8.8.8.8
+    - 1.1.1.1
+  env_file:
+    - ../backend/.env
+  environment:
+    NODE_ENV: production
+    RUN_MIGRATIONS: "true"
+  expose:
+    - "3000"
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health | grep -q ok || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 5
+    start_period: 60s
+  # SIGTERM -> server.close() (les requetes en cours se terminent) puis fermeture du pool : 45 s de grace
+  stop_grace_period: 45s
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  mem_limit: 1536m
+  cpus: 2
+
 services:
 
-  api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.api
-    image: cplus-api:${CPLUS_TAG:-2.7.1}
-    container_name: cplus-api
+  api-blue:
+    <<: *api
+    container_name: cplus-api-blue
+    scale: ${CPAY_API_BLUE:-1}
+    networks:
+      cplus-internal:
+        aliases: [api]
+
+  api-green:
+    <<: *api
+    container_name: cplus-api-green
+    scale: ${CPAY_API_GREEN:-0}
+    networks:
+      cplus-internal:
+        aliases: [api]
+
+  api-router:
+    image: nginxinc/nginx-unprivileged:1.28-alpine
+    container_name: cplus-api-router
     restart: unless-stopped
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    env_file:
-      - ../backend/.env
-    environment:
-      NODE_ENV: production
-      RUN_MIGRATIONS: "true"
-    expose:
-      - "3000"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health | grep -q ok || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
     ports:
-      - "127.0.0.1:3001:3000"
+      - "127.0.0.1:3001:8080"
+    volumes:
+      - ./api-router/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./api-router/active:/etc/nginx/cpay:ro   # active.conf ecrit par deploy.sh (ignore par git)
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    mem_limit: 1536m
-    cpus: 2
+    mem_limit: 64m
+    cpus: 0.25
     networks:
       - cplus-internal
 
@@ -83,7 +117,7 @@ services:
     restart: "no"
     profiles: ["standalone-nginx"]
     depends_on:
-      api:
+      api-blue:
         condition: service_healthy
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
@@ -178,7 +212,7 @@ services:
     image: alpine:3.21
     container_name: cplus-settlement-cron
     restart: unless-stopped
-    depends_on: [api]
+    # pas de depends_on : « api » est un alias reseau porte par la couleur active (bleu ou vert)
     # Reliquat 2026-11 : seul INTERNAL_TOKEN est necessaire — docker/.cron.env (INTERNAL_TOKEN=…) est genere par
     # scripts/deploy.sh a partir de backend/.env ; le conteneur ne voit plus les secrets DB / JWT / operateurs.
     env_file:

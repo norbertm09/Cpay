@@ -119,9 +119,13 @@ POSIX `sh`, idempotent, utilisable à la main depuis `/opt/cplus` :
 3. **Environnement** : `backend/scripts/check-production-env.js` exécuté dans l'image API fraîchement construite
    (`docker compose run … -v backend/scripts:/app/scripts:ro`) — pas besoin de Node ni de `node_modules` sur l'hôte.
 4. **Sauvegarde** : `scripts/backup-db.sh --label pre-<version>` (échec = arrêt, sauf `--skip-backup`).
-5. **Migrations** : `docker compose run --rm --no-deps -e RUN_MIGRATIONS=false api node src/config/migrate.js`.
-6. **Démarrage** : `docker compose up -d --remove-orphans` (api, 4 portails, vitrine, settlement-cron), puis
-   écriture de `.deployed`.
+5. **Migrations** : `docker compose run --rm --no-deps -e RUN_MIGRATIONS=false api-blue node src/config/migrate.js`.
+6. **Démarrage** : bascule bleu/vert de l'API sans coupure (`start_stack`) : la couleur inactive (`api-blue` ou
+   `api-green`) démarre avec la nouvelle image, `/health` est attendu dans le conteneur, le routeur `api-router`
+   (127.0.0.1:3001, `docker/api-router/`) est rechargé gracieusement vers la nouvelle couleur, puis l'ancienne est
+   arrêtée après `CPAY_DRAIN_SECONDS` (10 s) par SIGTERM (les requêtes en cours se terminent, 45 s de grâce).
+   Portails, vitrine et `settlement-cron` sont mis à jour par `docker compose up -d --remove-orphans` (sans les
+   services `api-*`). Puis écriture de `.deployed`.
 7. **Health checks** : `127.0.0.1:3001/health` (API, bloquant, 90 s), `127.0.0.1:3006/` (vitrine, bloquant),
    portails `3002`-`3005` (avertissement seulement). En cas d'échec le script indique la commande de rollback.
 

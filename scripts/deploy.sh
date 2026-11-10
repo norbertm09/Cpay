@@ -11,8 +11,10 @@
 #   3. sauvegarde PostgreSQL (scripts/backup-db.sh --label pre-<version>)
 #   4. images : recuperees depuis GHCR (ghcr.io/norbertm09/cpay/cplus-<svc>:<version>-<sha12>, publiees par la CI
 #      sur main) et sinon construites sur place (docker compose build ; CPLUS_TAG=<version>-<sha12>)
-#   5. migrations (docker compose run --rm --no-deps -e RUN_MIGRATIONS=false api node src/config/migrate.js)
-#   6. docker compose up -d --remove-orphans
+#   5. migrations (docker compose run --rm --no-deps -e RUN_MIGRATIONS=false api-blue node src/config/migrate.js)
+#   6. bascule bleu/vert de l'API sans coupure : demarrage de la couleur inactive avec la nouvelle image, attente
+#      de /health, bascule du routeur (docker/api-router, 127.0.0.1:3001) par rechargement gracieux, drainage puis
+#      arret gracieux (SIGTERM) de l'ancienne couleur ; portails / vitrine / cron par docker compose up -d
 #   7. health checks : API 127.0.0.1:3001/health, vitrine 127.0.0.1:3006/, portails 3002-3005 (bloquants depuis le
 #      hotfix du 2026-11-10 : un conteneur en boucle de redemarrage faisait passer le deploiement pour reussi)
 # Lance par .github/workflows/deploy.yml via SSH, ou a la main depuis /opt/cplus.
@@ -23,6 +25,8 @@ set -eu
 
 # --no-pull (ou CPAY_PULL=false) : ne pas tenter GHCR ; CPAY_GHCR : prefixe des images publiees par la CI
 PULL_IMAGES="${CPAY_PULL:-true}"; GHCR_PREFIX="${CPAY_GHCR:-ghcr.io/norbertm09/cpay}"
+# Bascule bleu/vert : secondes laissees au routeur apres la bascule avant l'arret de l'ancienne couleur
+DRAIN_SECONDS="${CPAY_DRAIN_SECONDS:-10}"
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
@@ -103,6 +107,74 @@ write_cron_env() {
 }
 write_cron_env
 
+# ─── Bascule bleu/vert de l'API (P1-6, 2026-11) ─────────────────
+ROUTER_ACTIVE="$DOCKER_DIR/api-router/active/active.conf"
+color_running() { [ "$(docker inspect -f '{{.State.Running}}' "cplus-api-$1" 2>/dev/null)" = "true" ]; }
+other_color() { if [ "$1" = blue ]; then echo green; else echo blue; fi; }
+active_color() { # couleur servie par le routeur si elle tourne, sinon la couleur qui tourne, sinon rien
+  _c="$(sed -n 's/^set \$cpay_api_upstream api-\([a-z]*\);.*/\1/p' "$ROUTER_ACTIVE" 2>/dev/null | head -1)"
+  if [ -n "$_c" ] && color_running "$_c"; then echo "$_c"; return 0; fi
+  for _c in blue green; do if color_running "$_c"; then echo "$_c"; return 0; fi; done
+  return 0
+}
+write_active() { mkdir -p "$(dirname "$ROUTER_ACTIVE")"; printf 'set $cpay_api_upstream api-%s;\n' "$1" > "$ROUTER_ACTIVE"; }
+api_healthy() { # api_healthy <couleur> <tentatives> : /health dans le conteneur (pas de port hote par couleur)
+  _i=1
+  while [ "$_i" -le "$2" ]; do
+    if docker exec "cplus-api-$1" wget -qO- -T 5 http://localhost:3000/health 2>/dev/null | grep -q '"status":"ok"'; then return 0; fi
+    _i=$((_i + 1)); sleep 2
+  done
+  return 1
+}
+router_switch() { # router_switch <couleur> : bascule gracieuse (nginx -t puis reload, aucune connexion perdue)
+  write_active "$1"
+  docker exec cplus-api-router nginx -t >/dev/null 2>&1 || die "configuration du routeur API invalide (docker/api-router)"
+  docker exec cplus-api-router nginx -s reload >/dev/null 2>&1 || die "rechargement du routeur API impossible"
+  log "routeur API bascule vers api-$1"
+}
+start_stack() { # demarre la nouvelle couleur de l'API, bascule, met a jour le reste, arrete l'ancienne couleur
+  ACTIVE="$(active_color)"; LEGACY=false
+  if [ -z "$ACTIVE" ] && docker inspect cplus-api >/dev/null 2>&1; then LEGACY=true; fi
+  if [ -n "$ACTIVE" ]; then NEXT="$(other_color "$ACTIVE")"; else NEXT=blue; fi
+  if [ -n "$ACTIVE" ] && color_running "$NEXT"; then
+    warn "api-$NEXT tourne encore (deploiement precedent interrompu apres la bascule) : arret avant de repartir"
+    compose stop -t 45 "api-$NEXT" >/dev/null 2>&1 || true; compose rm -f "api-$NEXT" >/dev/null 2>&1 || true
+  fi
+  log "API : couleur active ${ACTIVE:-aucune}$([ "$LEGACY" = true ] && echo ' (conteneur historique cplus-api)') -> demarrage de api-$NEXT ($CPLUS_TAG)"
+  # Les deux couleurs peuvent cohabiter le temps de la bascule ; la couleur active n'est jamais listee dans un
+  # « compose up » (elle ne serait pas recreee de toute facon, mais autant ne pas y toucher).
+  CPAY_API_BLUE=0; CPAY_API_GREEN=0
+  if [ "$NEXT" = blue ] || [ "$ACTIVE" = blue ]; then CPAY_API_BLUE=1; fi
+  if [ "$NEXT" = green ] || [ "$ACTIVE" = green ]; then CPAY_API_GREEN=1; fi
+  export CPAY_API_BLUE CPAY_API_GREEN
+  compose up -d --no-deps "api-$NEXT" || die "demarrage de api-$NEXT impossible"
+  if ! api_healthy "$NEXT" 45; then
+    docker logs --tail 40 "cplus-api-$NEXT" 2>&1 | sed "s/^/  [api-$NEXT] /" | tee -a "$LOG_FILE" >&2 || true
+    compose stop -t 10 "api-$NEXT" >/dev/null 2>&1 || true; compose rm -f "api-$NEXT" >/dev/null 2>&1 || true
+    die "api-$NEXT KO apres 90 s — l'API active (${ACTIVE:-historique}) n'a pas ete touchee ; rien a annuler"
+  fi
+  log "  api-$NEXT OK ($(docker exec "cplus-api-$NEXT" wget -qO- -T 5 http://localhost:3000/health 2>/dev/null | head -c 160))"
+  if [ "$LEGACY" = true ]; then
+    log "Premiere bascule : arret du conteneur historique cplus-api (il tient le port 3001 ; derniere coupure de quelques secondes)"
+    docker stop -t 30 cplus-api >/dev/null 2>&1 || true
+  fi
+  [ -s "$ROUTER_ACTIVE" ] || write_active "$NEXT"
+  [ -n "$ACTIVE" ] || write_active "$NEXT"
+  OTHERS="$(compose config --services | grep -v '^api-blue$' | grep -v '^api-green$' | tr '\n' ' ')"
+  log "docker compose up -d --remove-orphans (routeur, portails, vitrine, cron)…"
+  # shellcheck disable=SC2086
+  compose up -d --remove-orphans $OTHERS || die "docker compose up en echec"
+  if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$NEXT" ]; then router_switch "$NEXT"; fi
+  wait_http http://127.0.0.1:3001/health 30 '"status":"ok"' || die "API KO derriere le routeur (127.0.0.1:3001/health) — ./scripts/deploy.sh --rollback"
+  if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$NEXT" ]; then
+    log "Drainage ${DRAIN_SECONDS}s puis arret gracieux de api-$ACTIVE (SIGTERM, requetes en cours terminees)…"
+    sleep "$DRAIN_SECONDS"
+    compose stop -t 45 "api-$ACTIVE" >/dev/null 2>&1 || warn "arret de api-$ACTIVE en echec (a verifier : docker ps)"
+    compose rm -f "api-$ACTIVE" >/dev/null 2>&1 || true
+  fi
+  log "API servie par api-$NEXT"
+}
+
 CURRENT_SHA="$(git rev-parse HEAD)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 # Lot 3 (audit 2026-11-02 infra P1-5) : une image par commit (VERSION-sha12). Deux deploiements successifs avec la
@@ -149,8 +221,7 @@ if [ "$ROLLBACK" = true ]; then
     else log "Images $CPLUS_TAG absentes : reconstruction"; compose build; fi
   fi
   log "Les migrations ne sont pas annulees (schema compatible ascendant) ; restauration DB manuelle : scripts/restore-db.sh"
-  compose up -d --remove-orphans
-  wait_http http://127.0.0.1:3001/health 45 '"status":"ok"' || die "API KO apres rollback (127.0.0.1:3001/health)"
+  start_stack   # meme bascule bleu/vert : le rollback ne coupe pas l'API non plus
   state_write "$PREV" "$CURRENT_SHA"
   log "Rollback termine sur $PREV ($VERSION)"
   exit 0
@@ -188,7 +259,7 @@ fi
 # ─── 3. Verification de l'environnement production ──────────────
 log "Verification de backend/.env (check-production-env.js)…"
 compose run --rm --no-deps -T -e RUN_MIGRATIONS=false \
-  -v "$ROOT/backend/scripts:/app/scripts:ro" api node scripts/check-production-env.js \
+  -v "$ROOT/backend/scripts:/app/scripts:ro" api-blue node scripts/check-production-env.js \
   || die "Variables d'environnement production incompletes"
 
 # ─── 4. Sauvegarde PostgreSQL ───────────────────────────────────
@@ -202,23 +273,22 @@ fi
 # ─── 5. Migrations ──────────────────────────────────────────────
 if [ "$SKIP_MIGRATIONS" = false ]; then
   log "Migrations (src/config/migrate.js)…"
-  compose run --rm --no-deps -T -e RUN_MIGRATIONS=false api node src/config/migrate.js || die "Migrations echouees"
+  compose run --rm --no-deps -T -e RUN_MIGRATIONS=false api-blue node src/config/migrate.js || die "Migrations echouees"
 else
   warn "Migrations ignorees (--skip-migrations)"
 fi
 
-# ─── 6. Demarrage ───────────────────────────────────────────────
-log "docker compose up -d --remove-orphans…"
-compose up -d --remove-orphans
+# ─── 6. Demarrage : bascule bleu/vert de l'API, puis le reste ───
+start_stack
 state_write "$CURRENT_SHA" "$PREVIOUS_SHA"
 
 # ─── 7. Health checks ───────────────────────────────────────────
-log "Health check API (127.0.0.1:3001/health)…"
-if wait_http http://127.0.0.1:3001/health 45 '"status":"ok"'; then
+log "Health check API via le routeur (127.0.0.1:3001/health)…"
+if wait_http http://127.0.0.1:3001/health 15 '"status":"ok"'; then
   log "  API OK : $(curl -fsS --max-time 5 http://127.0.0.1:3001/health)"
 else
   compose ps | tee -a "$LOG_FILE"
-  die "API KO apres 90 s — ./scripts/deploy.sh --rollback pour revenir a ${PREVIOUS_SHA:-<aucun>}"
+  die "API KO derriere le routeur — ./scripts/deploy.sh --rollback pour revenir a ${PREVIOUS_SHA:-<aucun>}"
 fi
 log "Health check vitrine (127.0.0.1:3006/)…"
 wait_http http://127.0.0.1:3006/ 15 '<html' || die "Vitrine KO (127.0.0.1:3006)"
