@@ -6,6 +6,7 @@ export const FEATURE_UNAVAILABLE_MSG = 'Fonctionnalité en cours d’intégratio
 export const CAPABILITY_BLOCKED_MSG = 'Non disponible dans votre pays pour le moment';
 
 export const errorMessage = (err, ctx = {}) => {
+  if (err && typeof err === 'object') err.handled = true;   // la page affiche ce message : l'intercepteur se tait (403)
   const d = err?.response?.data || {};
   const st = err?.response?.status;
   if (isFeatureUnavailable(err)) return FEATURE_UNAVAILABLE_MSG;

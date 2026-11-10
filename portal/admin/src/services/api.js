@@ -106,7 +106,7 @@ const onResponseError = (instance) => async (err) => {
     }
   } else if (st === 403 && !original?.silent403) {
     // Droits insuffisants : la session reste valide, on prévient sans rediriger
-    toast.error('Accès refusé : vos droits ne permettent pas cette action.');
+    setTimeout(() => { if (!err.handled) toast.error('Accès refusé : vos droits ne permettent pas cette action.'); }, 30);   // un seul toast (errors.js)
   }
   return Promise.reject(err);
 };

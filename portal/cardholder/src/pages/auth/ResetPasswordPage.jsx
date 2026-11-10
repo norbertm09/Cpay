@@ -49,7 +49,7 @@ export default function ResetPasswordPage() {
       <p className="ab-sub">Pour votre sécurité, toutes vos sessions actives seront déconnectées.</p>
       <form onSubmit={submit} noValidate>
         {formError ? <Alert tone="error">{formError}</Alert> : null}
-        <PasswordInput label="Nouveau mot de passe" required value={pwd.next} onChange={(e) => setPwd({ ...pwd, next: e.target.value })} error={errors.next} hint="8 caractères minimum, avec majuscule, minuscule et chiffre" autoComplete="new-password" autoFocus />
+        <PasswordInput label="Nouveau mot de passe" required value={pwd.next} onChange={(e) => setPwd({ ...pwd, next: e.target.value })} error={errors.next} hint="10 caractères minimum, avec majuscule, minuscule et chiffre" autoComplete="new-password" autoFocus />
         <PasswordInput label="Confirmer le mot de passe" required value={pwd.confirm} onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })} error={errors.confirm} autoComplete="new-password" />
         <Button type="submit" variant="primary" size="lg" block loading={loading}>Enregistrer</Button>
       </form>

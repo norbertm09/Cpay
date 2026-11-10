@@ -152,7 +152,7 @@ api.interceptors.response.use((r) => r, async (err) => {
       return api(original);
     } catch (e) { if (e?.code === SESSION_CHANGED) return Promise.reject(e); logoutLocal(); }
   } else if (st === 403) {
-    toast.error('Accès refusé');
+    setTimeout(() => { if (!err.handled) toast.error('Accès refusé'); }, 30);   // un seul toast : la page passe par errorMessage(err)
   }
   return Promise.reject(err);
 });

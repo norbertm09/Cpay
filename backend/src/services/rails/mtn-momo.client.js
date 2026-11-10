@@ -1,4 +1,5 @@
 'use strict';
+const logger = require('../../config/logger');
 // Nettoyer les messages pour MTN (ASCII, max 160 car, pas de caracteres speciaux)
 const sanitizeMsg = (s) => String(s || 'Paiement C-Pay')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // retirer accents
@@ -7,7 +8,7 @@ const sanitizeMsg = (s) => String(s || 'Paiement C-Pay')
 
 
 const https  = require('https');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 
 // Environnement MTN (sandbox | production) resolu une seule fois pour tout le backend : config/mtn-env.js
 const { resolveMtnEnv, warnOnce } = require('../../config/mtn-env');
@@ -42,7 +43,7 @@ const tokenCache = {};
 // facon explicite pour un bac a sable (MTN_TLS_INSECURE=true), jamais par defaut.
 const TLS_INSECURE = String(process.env.MTN_TLS_INSECURE || '').toLowerCase() === 'true';
 if (TLS_INSECURE) {
-  console.error('[MTN-MOMO] MTN_TLS_INSECURE=true : verification TLS desactivee (sandbox uniquement)');
+  logger.error('[MTN-MOMO] MTN_TLS_INSECURE=true : verification TLS desactivee (sandbox uniquement)');
 }
 
 // Raw HTTPS request

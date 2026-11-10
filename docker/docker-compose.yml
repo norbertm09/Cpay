@@ -179,8 +179,10 @@ services:
     container_name: cplus-settlement-cron
     restart: unless-stopped
     depends_on: [api]
+    # Reliquat 2026-11 : seul INTERNAL_TOKEN est necessaire — docker/.cron.env (INTERNAL_TOKEN=…) est genere par
+    # scripts/deploy.sh a partir de backend/.env ; le conteneur ne voit plus les secrets DB / JWT / operateurs.
     env_file:
-      - ../backend/.env
+      - ./.cron.env
     command: >
       sh -c "echo '15 1 * * * wget -qO- --post-data= --header=\"X-Internal-Token: $$INTERNAL_TOKEN\" --header=\"Content-Type: application/json\" http://api:3000/internal/settlement/run' > /etc/crontabs/root && crond -f -l 2"
     security_opt: [no-new-privileges:true]

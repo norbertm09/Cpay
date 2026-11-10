@@ -40,6 +40,7 @@ const { runSettlement } = require('./services/settlement/settlement.engine');
 const { runAutoSettlement } = require('./services/settlement/auto-settlement');
 const { merchantAuth } = require('./middleware/auth');
 const { idempotency } = require('./middleware/idempotency');
+const { sanitizeServerErrors, installProcessHandlers } = require('./middleware/errors');
 const {
   validatePaymentRequest,
   validateLinkRequest,
@@ -80,7 +81,13 @@ app.use(express.urlencoded({ extended: true }));
 app.use(requestContext);
 app.use(httpMetrics);
 
-app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false }));
+// Audit 2026-11-02 § 5 : les reponses 5xx ne portent plus err.message (voir middleware/errors.js)
+app.use(sanitizeServerErrors(logger));
+// Les callbacks operateurs (MTN, Airtel, Orange, Wave…) partagent quelques adresses IP : ils ne doivent pas etre
+// bloques par la limite generale de /api/ (300 / 15 min) — limite dediee, large, par IP.
+app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false,
+  skip: (req) => /^\/v1\/webhooks(\/|$)/.test(req.path) }));
+app.use(['/api/v1/webhooks', '/webhooks'], rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, standardHeaders: true, legacyHeaders: false }));
 app.use('/api/v1/merchant/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false }));
 app.use('/api/v1/admin/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false }));
 // REQ 8.3.4 : Rate limiting strict sur authentification cardholder
@@ -119,7 +126,8 @@ const loadPendingLink = async (shortId) => {
 const capability = require('./middleware/capability');
 const capabilityRoutes = require('./routes/capabilities.routes');
 const { adminAuth } = require('./middleware/auth');
-capability.logStartupMode(); // CAPABILITY_ENFORCE = enforce | report | off (avertissement si report / off)
+capability.logStartupMode();
+installProcessHandlers(logger, { exitOnUncaught: process.env.NODE_ENV !== 'test' }); // CAPABILITY_ENFORCE = enforce | report | off (avertissement si report / off)
 app.post('/api/v1/pay/:shortId/card', capability.payCardCapabilityGuard);
 app.post('/api/v1/pay/:shortId/card', publicPayLimiter, asyncHandler(async (req, res) => {
   if (req.body?.cardNum || req.body?.pan || req.body?.cvv) {
@@ -192,7 +200,8 @@ const cardReturnHandler = async (req, res) => {
   }
 };
 app.get('/pay/:shortId/return', cardReturnHandler);
-app.get('/:shortId([A-Z0-9]{6,10})/return', cardReturnHandler);
+// Express 5 (path-to-regexp 8) : plus de contrainte inline « :shortId([A-Z0-9]{6,10}) » — chemin RegExp, capture positionnelle
+app.get(/^\/([A-Z0-9]{6,10})\/return$/, (req, res) => { req.params = { shortId: req.params[0] }; return cardReturnHandler(req, res); });
 app.post('/api/v1/pay/:shortId', publicPayLimiter, asyncHandler(async (req, res) => {
   const { phone, method } = req.body || {};
   const { shortId } = req.params;
@@ -543,9 +552,9 @@ app.get('/ready', asyncHandler(async (_req, res) => {
 app.get('/metrics', metricsHandler);
 
 // ─── PAY LINK PUBLIC — pages HTML (montées APRÈS les routes API et de santé, voir audit §3.1) ─────
-app.get('/:shortId([A-Z0-9]{6,10})', async (req, res) => {
+app.get(/^\/([A-Z0-9]{6,10})$/, async (req, res) => {   // Express 5 : chemin RegExp (voir /return ci-dessus)
   try {
-    const { shortId } = req.params;
+    const shortId = req.params[0];
     const r = await require('./config/database').query(
       `SELECT pl.*, m.business_name FROM pay_links pl
        JOIN merchants m ON m.merchant_id = pl.merchant_id

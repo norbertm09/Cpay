@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Simulate } from 'react-dom/test-utils';
+import { Simulate } from '../../test/simulate';
 import { MemoryRouter } from 'react-router-dom';
 import CashPage from './CashPage';
 import { cashApi } from '../../services/api';
@@ -51,10 +51,7 @@ const change = async (label, value) => {
     }
   }));
 };
-const mount = async () => flush(() => root.render(<MemoryRouter future={{
-  v7_startTransition: true,
-  v7_relativeSplatPath: true
-}} initialEntries={['/?tab=comptes-marchands']}><CashPage /></MemoryRouter>));
+const mount = async () => flush(() => root.render(<MemoryRouter initialEntries={['/?tab=comptes-marchands']}><CashPage /></MemoryRouter>));
 beforeEach(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();

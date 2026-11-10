@@ -50,7 +50,7 @@ export const Login = () => {
     finally { setLoading(false); }
   };
   const submitPassword = async () => {
-    if (pwd.newPassword.length < 8) { setError('8 caractères minimum.'); return; }
+    if (pwd.newPassword.length < 10) { setError('10 caractères minimum.'); return; }
     if (pwd.newPassword !== pwd.confirm) { setError('Les deux mots de passe ne correspondent pas.'); return; }
     setLoading(true); setError(null);
     try {
@@ -63,7 +63,7 @@ export const Login = () => {
   };
   const onSubmit = (e) => { e.preventDefault(); if (loading) return; if (step === 'password') submitPassword(); else if (step === 'mfa') submitMfa(); else submitCreds(); };
 
-  const titles = { creds: ['Connexion', 'Accédez à votre espace marchand.'], mfa: ['Vérification en deux étapes', 'Saisissez le code à 6 chiffres de votre application d’authentification.'], password: ['Nouveau mot de passe requis', 'Pour continuer, définissez un nouveau mot de passe (8 caractères minimum).'] };
+  const titles = { creds: ['Connexion', 'Accédez à votre espace marchand.'], mfa: ['Vérification en deux étapes', 'Saisissez le code à 6 chiffres de votre application d’authentification.'], password: ['Nouveau mot de passe requis', 'Pour continuer, définissez un nouveau mot de passe (10 caractères minimum).'] };
   return (
     <AuthLayout title={titles[step][0]} lead={titles[step][1]}
       footer={step === 'creds' && <div className="links"><Link to="/forgot-password">Mot de passe oublié ?</Link><span>Pas encore de compte ? <Link to="/register">Créer un compte</Link></span></div>}>
@@ -80,7 +80,7 @@ export const Login = () => {
           <Button variant="ghost" block className="mt-3" onClick={() => { setStep('creds'); setCode(''); setError(null); }}>Retour</Button>
         </>)}
         {step === 'password' && (<>
-          <PasswordInput id="new-password" label="Nouveau mot de passe" value={pwd.newPassword} onChange={v => setPwd(p => ({ ...p, newPassword: v }))} autoComplete="new-password" hint="8 caractères minimum, avec majuscule, minuscule et chiffre recommandés." required autoFocus />
+          <PasswordInput id="new-password" label="Nouveau mot de passe" value={pwd.newPassword} onChange={v => setPwd(p => ({ ...p, newPassword: v }))} autoComplete="new-password" hint="10 caractères minimum, avec majuscule, minuscule et chiffre recommandés." required autoFocus />
           <PasswordInput id="confirm-password" label="Confirmer le mot de passe" value={pwd.confirm} onChange={v => setPwd(p => ({ ...p, confirm: v }))} autoComplete="new-password" required />
           <Button type="submit" variant="primary" size="lg" block loading={loading}>Enregistrer</Button>
         </>)}

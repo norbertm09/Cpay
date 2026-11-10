@@ -3,11 +3,11 @@ export const isPhone = (v) => { const d = String(v || '').replace(/\D/g, ''); re
 export const isPin = (v) => /^[0-9]{4}$/.test(String(v || ''));
 export const isEmailOrPhone = (v) => isEmail(v) || isPhone(v);
 
-/** Regles backend : 8 caracteres, majuscule, minuscule, chiffre. */
+/** Regles backend : 10 caracteres, majuscule, minuscule, chiffre. */
 export const passwordIssues = (pwd) => {
   const p = String(pwd || '');
   const issues = [];
-  if (p.length < 8) issues.push('8 caractères minimum');
+  if (p.length < 10) issues.push('10 caractères minimum');
   if (!/[A-Z]/.test(p)) issues.push('une majuscule');
   if (!/[a-z]/.test(p)) issues.push('une minuscule');
   if (!/[0-9]/.test(p)) issues.push('un chiffre');

@@ -1,5 +1,26 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-reliquat (2026-11-10) — reliquat technique en un patch (dette audit § 5, P1-6, majeures de dependances)
+* Backend : Express 5.3 (chemins RegExp pour les pages de lien de paiement, « // » n'est plus replie), SDK Anthropic
+  1.7 (version d'API 2026-10-21, aucun changement de code requis pour l'assistant), uuid remplace par
+  `crypto.randomUUID()`. Dette § 5 : toute reponse >= 500 est masquee (« Erreur interne », code, `requestId`, detail
+  journalise), `console.*` remplace par le journal dans 13 fichiers, rejets de promesse et exceptions non rattrapees
+  journalises (sortie propre, relance par Docker), limite dediee aux callbacks operateurs (`/v1/webhooks` hors quota
+  general), mot de passe de 10 caracteres minimum sur toutes les routes (`WEAK_PASSWORD`). Tests
+  `reliquat-2611.test.js` (8 cas) ; 912 tests verts.
+* Portails : React 19.3, React Router 7.18, Vite 7.3, plugin-react 5.2 sur les sept portails, Vitest 5.1 sur admin,
+  marchand et porteur ; helper `src/test/simulate.js` (fin de `react-dom/test-utils`) ; chunk « vendor » stable.
+  Mot de passe 10 caracteres (aides et validations), Tab piege dans les modales et tiroirs avec retour du focus, un
+  seul toast « Accès refusé » sur 403. Android : memes regles de mot de passe (chaines, inscription, changement).
+* Exploitation : `settlement-cron` ne recoit plus `backend/.env` mais `docker/.cron.env` (INTERNAL_TOKEN seul,
+  genere par `deploy.sh`, verifie en CI) ; la CI publie sur GHCR les cinq images `cplus-*:<version>-<sha12>` de
+  chaque commit de `main` (admin et porteur desormais construites et demarrees en CI) et `deploy.sh` les recupere
+  au lieu de reconstruire sur le VPS (`--no-pull` pour forcer la construction, rollback aussi via GHCR).
+  `docs/RUNBOOK-INCIDENTS.md` (portails 502 : diagnostic, rollback, redeploiement ; decision Finance sur un retrait
+  incertain), `docs/EXPLOITATION.md` § 4, `docs/CI-CD.md`. Dependabot : exclusions uuid / express / SDK retirees.
+* Hors perimetre (lots a venir) : bascule sans coupure de l'API (seconde moitie de P1-6), palier Android AGP 9 /
+  API 37, refonte de l'application Expo.
+
 ## 2.7.2-android-p2 (2026-11-10) — lot Android P2 (audit du 2 novembre, P2-1, P2-3, P2-4) et chaine de build
 * Dependances : Kotlin 2.2.21 + KSP 2.2.21-2.0.4 (derniere paire supportee par AGP 8.11.1), AndroidX aux dernieres
   versions compatibles compileSdk 36 (core 1.17, appcompat 1.7.1, lifecycle 2.9.4, activity 1.11, fragment 1.8.9,

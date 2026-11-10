@@ -128,7 +128,7 @@ class ProfileFragment : Fragment() {
         val cur = b.etCurrentPassword.text.toString()
         val new = b.etNewPassword.text.toString()
         val cnf = b.etConfirmPassword.text.toString()
-        if (new.length < 8) { toast("8 caractères minimum"); return }
+        if (new.length < 10) { toast("10 caractères minimum"); return }
         if (new != cnf)     { toast("Les mots de passe diffèrent"); return }
         viewLifecycleOwner.lifecycleScope.launch {
             try {

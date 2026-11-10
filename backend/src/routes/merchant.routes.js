@@ -940,7 +940,7 @@ router.post('/transfer/payout', merchantAuth, idempotency, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('[payout]', err.message);
+    logger.error('[payout]', err.message);
     res.status(502).json({ error: err.message, code: 'GATEWAY_ERROR' });
   }
 });
@@ -1003,7 +1003,7 @@ router.post('/terminals/check', async (req, res) => {
     }
     return res.json({ paired: false });
   } catch (err) {
-    console.error('[terminal check]', err.message);
+    logger.error('[terminal check]', err.message);
     res.status(500).json({ error: 'Erreur verification' });
   }
 });
@@ -1039,7 +1039,7 @@ router.post('/terminals/pair', pairLimiter, async (req, res) => {
   } catch (err) {
     if (err.code === '23505')
       return res.status(409).json({ error: 'Cet appareil est deja lie a un autre terminal', code: 'DEVICE_ALREADY_PAIRED' });
-    console.error('[pair]', err.message);
+    logger.error('[pair]', err.message);
     res.status(500).json({ error: 'Erreur appairage' });
   }
 });
@@ -1077,7 +1077,7 @@ router.get('/institutions', async (req, res) => {
        ORDER BY type, name`, params);
     res.json({ institutions: r.rows });
   } catch (err) {
-    console.error('[institutions]', err.message);
+    logger.error('[institutions]', err.message);
     res.status(500).json({ error: 'Erreur chargement institutions' });
   }
 });
@@ -1103,7 +1103,7 @@ router.get('/settlements/daily', merchantAuth, async (req, res) => {
        ORDER BY jour DESC LIMIT 90`, [merchantId]);
     res.json({ days: days.rows });
   } catch (err) {
-    console.error('[settlements/daily]', err.message);
+    logger.error('[settlements/daily]', err.message);
     res.status(500).json({ error: 'Erreur reglements journaliers' });
   }
 });
@@ -1122,7 +1122,7 @@ router.get('/settlements/daily/:date', merchantAuth, async (req, res) => {
        ORDER BY COALESCE(settled_at, initiated_at) DESC`, [merchantId, req.params.date]);
     res.json({ date: req.params.date, transactions: r.rows });
   } catch (err) {
-    console.error('[settlements/daily/date]', err.message);
+    logger.error('[settlements/daily/date]', err.message);
     res.status(500).json({ error: 'Erreur detail journee' });
   }
 });
@@ -1188,7 +1188,7 @@ router.get('/pay-links', merchantAuth, async (req, res) => {
 
 // Créer un pay link
 router.post('/pay-links', merchantAuth, smsLimiter, idempotency, async (req, res) => {
-  const { v4: uuidv4 } = require('uuid');
+  const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
   const { amount, description, channel = 'sms' } = req.body;
   if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) return res.status(422).json({ error: 'Montant invalide' });
   const expiresIn = parseExpiresIn(req.body.expiresIn, 24);
@@ -1320,7 +1320,7 @@ router.post('/kyb/documents', merchantAuth, async (req, res) => {
     try {
       const m = await query('SELECT business_name FROM merchants WHERE merchant_id=$1', [req.user.merchantId]);
       await notify({ type:'kyb_document_submitted', title:'Nouveau document KYB', message:(m.rows[0]?.business_name||'Merchant')+' a soumis: '+(docLabel||docType), entityType:'merchant', entityId:req.user.merchantId, metadata:{docType,docLabel,fileName} });
-    } catch(ne){ console.error('Notify error:', ne.message); }
+    } catch(ne){ logger.error('Notify error:', ne.message); }
     res.status(201).json(r.rows[0]);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
@@ -1457,7 +1457,7 @@ router.post('/collect', merchantAuth, idempotency, async (req, res) => {
       statusUrl: `/api/v1/merchant/collect/${result.txnId}/status`,
     });
   } catch (err) {
-    console.error('[collect]', err.message);
+    logger.error('[collect]', err.message);
     return res.status(500).json({ error: 'Encaissement impossible pour le moment', code: 'INTERNAL_ERROR' });
   }
 });
@@ -1483,7 +1483,7 @@ router.get('/collect/:txnId/status', merchantAuth, async (req, res) => {
         const { reconcileOne } = require('../services/reconcile.service');
         const out = await reconcileOne(t);
         if (out && out.updated) { r = await load(); t = r.rows[0] || t; }
-      } catch (e) { console.error('[collect status]', e.message); }
+      } catch (e) { logger.error('[collect status]', e.message); }
     }
     const labels = {
       pending:    'En attente de confirmation client',
@@ -1589,7 +1589,7 @@ router.post('/disburse', merchantAuth, idempotency, async (req, res) => {
       statusUrl: `/api/v1/merchant/disburse/${t.transferId}/status`,
     });
   } catch (err) {
-    console.error('[disburse]', err.message);
+    logger.error('[disburse]', err.message);
     return res.status(500).json({ error: 'Decaissement impossible pour le moment', code: 'INTERNAL_ERROR' });
   }
 });
@@ -1605,7 +1605,7 @@ router.get('/disburse/:txnId/status', merchantAuth, async (req, res) => {
       if (mt && mt.direction === 'payout') {
         if (cash.UNCERTAIN.includes(mt.status)) {
           try { mt = await cash.refreshPayoutStatus(mt, { source: 'status_poll' }); }
-          catch (e) { console.error('[disburse status]', e.message); }
+          catch (e) { logger.error('[disburse status]', e.message); }
         }
         const status = legacyPayoutStatus(mt.status);
         return res.json({
@@ -1727,7 +1727,7 @@ router.post('/receipts/sms', merchantAuth, smsLimiter, async (req, res) => {
 const changeMerchantPassword = async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(422).json({ error: 'currentPassword et newPassword requis' });
-  if (newPassword.length < 8) return res.status(422).json({ error: 'Minimum 8 caracteres' });
+  if (newPassword.length < 10) return res.status(422).json({ error: 'Mot de passe trop court (10 caractères minimum)', code: 'WEAK_PASSWORD' });
   try {
     // Le JWT marchand porte l'identifiant utilisateur dans `sub` (audit §3.3)
     const userId = req.user?.sub;

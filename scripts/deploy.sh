@@ -9,7 +9,8 @@
 #   1. enregistre le commit en cours/precedent dans .deployed (pour --rollback)
 #   2. verifie backend/.env (backend/scripts/check-production-env.js, dans l'image api)
 #   3. sauvegarde PostgreSQL (scripts/backup-db.sh --label pre-<version>)
-#   4. docker compose build (api + portails ; CPLUS_TAG=<version>-<sha12>, lot 3 : une image par commit)
+#   4. images : recuperees depuis GHCR (ghcr.io/norbertm09/cpay/cplus-<svc>:<version>-<sha12>, publiees par la CI
+#      sur main) et sinon construites sur place (docker compose build ; CPLUS_TAG=<version>-<sha12>)
 #   5. migrations (docker compose run --rm --no-deps -e RUN_MIGRATIONS=false api node src/config/migrate.js)
 #   6. docker compose up -d --remove-orphans
 #   7. health checks : API 127.0.0.1:3001/health, vitrine 127.0.0.1:3006/, portails 3002-3005 (bloquants depuis le
@@ -19,6 +20,9 @@
 # deploy-prod.sh a ete supprime (lot 7).
 # ================================================================
 set -eu
+
+# --no-pull (ou CPAY_PULL=false) : ne pas tenter GHCR ; CPAY_GHCR : prefixe des images publiees par la CI
+PULL_IMAGES="${CPAY_PULL:-true}"; GHCR_PREFIX="${CPAY_GHCR:-ghcr.io/norbertm09/cpay}"
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
@@ -33,6 +37,7 @@ for arg in "$@"; do
   case "$arg" in
     --skip-backup)     SKIP_BACKUP=true ;;
     --skip-build)      SKIP_BUILD=true ;;
+    --no-pull)         PULL_IMAGES=false ;;
     --skip-migrations) SKIP_MIGRATIONS=true ;;
     --rollback)        ROLLBACK=true ;;
     -h|--help)         sed -n '2,18p' "$0"; exit 0 ;;
@@ -78,15 +83,52 @@ command -v git >/dev/null 2>&1 || die "git introuvable"
 command -v curl >/dev/null 2>&1 || die "curl introuvable"
 [ -f "$ROOT/backend/.env" ] || die "backend/.env manquant"
 
+# docker/.cron.env : le conteneur settlement-cron ne recoit que INTERNAL_TOKEN (reliquat 2026-11, audit § 5).
+# Lecture sans « source » (une valeur contenant ( ) $ casserait le shell) : NOM=valeur ou NOM='valeur'.
+read_env_value() { # read_env_value <fichier> <NOM>
+  _raw="$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}$2=//p" "$1" | tail -1 | tr -d '\r')"
+  case "$_raw" in
+    \'*\') _raw="${_raw#\'}"; _raw="${_raw%\'}" ;;
+    \"*\") _raw="${_raw#\"}"; _raw="${_raw%\"}" ;;
+    *) _raw="$(printf '%s' "$_raw" | sed 's/[[:space:]]*$//')" ;;
+  esac
+  printf '%s' "$_raw"
+}
+write_cron_env() {
+  _tok="$(read_env_value "$ROOT/backend/.env" INTERNAL_TOKEN)"
+  [ -n "$_tok" ] || die "INTERNAL_TOKEN absent de backend/.env (requis par settlement-cron)"
+  umask 077
+  printf 'INTERNAL_TOKEN=%s\n' "$_tok" > "$DOCKER_DIR/.cron.env"
+  umask 022
+}
+write_cron_env
+
 CURRENT_SHA="$(git rev-parse HEAD)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 # Lot 3 (audit 2026-11-02 infra P1-5) : une image par commit (VERSION-sha12). Deux deploiements successifs avec la
 # meme VERSION n'ecrasent plus la meme etiquette : le rollback redemarre l'image precedente SANS rebuild.
 tag_for() { echo "$VERSION-$(git rev-parse --short=12 "$1")"; }
 export CPLUS_TAG="$(tag_for HEAD)"
+compose_images() { compose config --images 2>/dev/null | grep '^cplus-' | sed 's/:.*//' | sort -u; }
 images_present() { # images_present <tag> : toutes les images cplus-* du compose existent pour ce tag
-  for img in $(compose config --images 2>/dev/null | grep '^cplus-' | sed 's/:.*//'); do
+  for img in $(compose_images); do
     docker image inspect "$img:$1" >/dev/null 2>&1 || return 1
+  done
+  return 0
+}
+# Reliquat 2026-11 : la CI publie sur GHCR les images de chaque commit de main (ci.yml, job docker). Les recuperer
+# evite de reconstruire sur le VPS (memoire, duree) et garantit que l'image deployee est celle testee en CI.
+# Paquets prives : « docker login ghcr.io » une fois sur le serveur avec un jeton read:packages (docs/EXPLOITATION.md § 4).
+pull_images() { # pull_images <tag> : 0 si toutes les images ont ete recuperees et retiquetees localement
+  [ "$PULL_IMAGES" = true ] || return 1
+  for img in $(compose_images); do
+    _remote="$GHCR_PREFIX/$img:$1"
+    if docker pull -q "$_remote" >/dev/null 2>&1; then
+      docker tag "$_remote" "$img:$1" || return 1
+      log "image $img:$1 recuperee depuis GHCR"
+    else
+      warn "image $_remote indisponible (non publiee, ou docker login ghcr.io requis)"; return 1
+    fi
   done
   return 0
 }
@@ -103,6 +145,7 @@ if [ "$ROLLBACK" = true ]; then
   else
     # ancien deploiement (etiquette = VERSION seule) ou images purgees : reconstruction
     if images_present "$VERSION"; then export CPLUS_TAG="$VERSION"; log "Images historiques $VERSION presentes, redemarrage sans rebuild"
+    elif pull_images "$CPLUS_TAG"; then log "Images $CPLUS_TAG recuperees depuis GHCR, redemarrage sans rebuild"
     else log "Images $CPLUS_TAG absentes : reconstruction"; compose build; fi
   fi
   log "Les migrations ne sont pas annulees (schema compatible ascendant) ; restauration DB manuelle : scripts/restore-db.sh"
@@ -122,8 +165,12 @@ fi
 log "Deploiement C-Pay $VERSION — commit $CURRENT_SHA (precedent : ${PREVIOUS_SHA:-aucun})"
 log "Journal : $LOG_FILE"
 
-# ─── 2. Build des images (necessaire pour la verification d'env dans l'image) ───
-if [ "$SKIP_BUILD" = false ]; then
+# ─── 2. Images : GHCR d'abord, construction locale sinon (necessaires pour la verification d'env dans l'image) ───
+if [ "$SKIP_BUILD" = false ] && images_present "$CPLUS_TAG"; then
+  log "Images $CPLUS_TAG deja presentes localement : ni pull ni build"
+elif [ "$SKIP_BUILD" = false ] && pull_images "$CPLUS_TAG"; then
+  log "Images $CPLUS_TAG recuperees depuis GHCR (construites et testees par la CI) : pas de build sur le VPS"
+elif [ "$SKIP_BUILD" = false ]; then
   log "docker compose build (CPLUS_TAG=$CPLUS_TAG) — un service a la fois pour menager la memoire du VPS…"
   BUILD_STATUS="$LOG_DIR/.build_status_$TIMESTAMP"
   for svc in $(compose config --services); do

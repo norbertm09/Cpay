@@ -16,7 +16,7 @@
 'use strict';
 
 const crypto  = require('crypto');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 const { query, withTransaction } = require('../../config/database');
 const { auditLog, PCI_EVENTS } = require('../../middleware/pci.middleware');
 

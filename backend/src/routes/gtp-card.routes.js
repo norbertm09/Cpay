@@ -4,6 +4,7 @@
 // Montees sous /api/v1/cardholder/gtp
 // ================================================================
 'use strict';
+const logger = require('../config/logger');
 
 const express = require('express');
 const router  = express.Router();
@@ -32,7 +33,7 @@ const ownCard = async (req, res, next) => {
 
 // ─── Gestion d'erreurs GTP ───────────────────────────────────────
 const handleErr = (err, res) => {
-  console.error('[GTP]', err.code || '-', err.message);
+  logger.error('[GTP]', err.code || '-', err.message);
   if (err.code === 'GTP_CARD_NOT_OWNED') return res.status(404).json({ error: 'Carte introuvable' });
   const m = {
     GTP_NOT_CONFIGURED: [503, 'Service GTP non configure (token manquant)'],

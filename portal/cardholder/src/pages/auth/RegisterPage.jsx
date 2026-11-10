@@ -122,7 +122,7 @@ export default function RegisterPage() {
         <form onSubmit={submit} noValidate>
           {formError ? <Alert tone="error">{formError}</Alert> : null}
           <div className="field">
-            <PasswordInput label="Mot de passe" required value={f.password} onChange={set('password')} error={errors.password} autoComplete="new-password" hint="8 caractères minimum, avec majuscule, minuscule et chiffre" autoFocus />
+            <PasswordInput label="Mot de passe" required value={f.password} onChange={set('password')} error={errors.password} autoComplete="new-password" hint="10 caractères minimum, avec majuscule, minuscule et chiffre" autoFocus />
             <Strength pwd={f.password} />
           </div>
           <PasswordInput label="Confirmer le mot de passe" required value={f.confirm} onChange={set('confirm')} error={errors.confirm} autoComplete="new-password" />

@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const bcrypt  = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 const { query, withTransaction } = require('../config/database');
 
 // WAVE-2 : auth unique (audit §1.1). L'ancien `makeAuth(['admin'])` exigeait

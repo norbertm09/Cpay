@@ -1,10 +1,11 @@
+const logger = require('../config/logger');
 // ================================================================
 // CPlus 2.6 — Cardholder Routes
 // Auth, Card, Transactions, TopUp, Unload, PIN, Profile
 // ================================================================
 const express = require('express');
 const bcrypt  = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const router  = express.Router();
@@ -186,8 +187,8 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
   const { firstName, lastName, phone, email, dateOfBirth, idType, idNumber, country = 'CM', password } = req.body;
   if (!firstName || !lastName || !phone || !email || !password)
     return res.status(422).json({ error: "Champs requis : prénom, nom, téléphone, email, mot de passe" });
-  if (password.length < 8)
-    return res.status(422).json({ error: "Mot de passe trop court (min 8 caractères)" });
+  if (password.length < 10)
+    return res.status(422).json({ error: "Mot de passe trop court (10 caractères minimum)", code: "WEAK_PASSWORD" });
   try {
     const hash = await bcrypt.hash(password, 12);
     // La réponse (JWT) n'est envoyée qu'après COMMIT : withTransaction retourne les données.
@@ -236,7 +237,7 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
             <p style="color:#5a6677;font-size:13px">Ou copiez ce lien : ${verifyUrl}</p>
             <p style="color:#5a6677;font-size:13px">Ce lien expire dans 48h. Si vous n'êtes pas à l'origine de cette inscription, ignorez cet email.</p>`,
         });
-      } catch (e) { console.error('[verify-email]', e.message); }
+      } catch (e) { logger.error('[verify-email]', e.message); }
     })();
 
     // Access 15 min (etait 8 h a l'inscription — audit §2.16) + refresh en cookie
@@ -375,7 +376,7 @@ router.post('/card/pin', cardAuth, async (req, res) => {
 
     res.json({ success: true, message: 'PIN defini', cardId: target });
   } catch (err) {
-    console.error('card/pin:', err.message);
+    logger.error('card/pin:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -401,7 +402,7 @@ router.patch('/profile', cardAuth, async (req, res) => {
 const changeCardholderPassword = async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(422).json({ error: 'Champs requis' });
-  if (newPassword.length < 8) return res.status(422).json({ error: 'Mot de passe trop court (min 8 car.)' });
+  if (newPassword.length < 10) return res.status(422).json({ error: 'Mot de passe trop court (10 caractères minimum)', code: 'WEAK_PASSWORD' });
   try {
     const r = await query(`SELECT password_hash FROM cardholders WHERE cardholder_id=$1`, [req.chId]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Compte introuvable' });
@@ -618,7 +619,7 @@ router.get('/cards/session-key', cardAuth, async (req, res) => {
 
 // ─── Enrollment d'une carte ──────────────────────────────────────
 router.post('/cards/enroll', cardAuth, async (req, res) => {
-  const { v4: uuidv4 } = require('uuid');
+  const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
   const { cardNumber, expiryMonth, expiryYear, cardholderName, cvv, network } = req.body;
 
   if (!cardNumber || String(cardNumber).replace(/\s/g,'').length < 13)
@@ -689,7 +690,7 @@ router.post('/cards/enroll', cardAuth, async (req, res) => {
       isDefault: e.is_default, status: e.status, cardType: 'enrolled'
     });
   } catch(err) {
-    console.error('cards/enroll:', err.message);
+    logger.error('cards/enroll:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -718,7 +719,7 @@ router.get('/cards/created', cardAuth, async (req, res) => {
 });
 
 router.post('/cards/create', cardAuth, async (req, res) => {
-  const uuidv4 = require('uuid').v4;
+  const { randomUUID: uuidv4 } = require('crypto');
   const label = req.body.label;
 
   // Ne pas creer de carte fantome si GTP n'est pas actif
@@ -748,7 +749,7 @@ router.post('/cards/create', cardAuth, async (req, res) => {
       label:      label || 'Ma carte',
     });
   } catch(err) {
-    console.error('cards/create GTP:', err.code || '-', err.message);
+    logger.error('cards/create GTP:', err.code || '-', err.message);
     const map = {
       GTP_NOT_CONFIGURED: [503, "Service cartes en cours d'activation"],
       GTP_TIMEOUT:        [504, 'Le service cartes ne repond pas'],
@@ -828,7 +829,7 @@ router.delete('/cards/:enrollmentId', cardAuth, async (req, res) => {
 // Accepte soit { merchantId, amount, pin } (ancien)
 // Soit         { tokenId, amount, pin }    (nouveau — tokenisé)
 router.post('/payment/tokenized', cardAuth, async (req, res) => {
-  const { v4: uuidv4 } = require('uuid');
+  const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
   const bcrypt = require('bcryptjs');
   const { cardId, enrollmentId, merchantId, amount, description, pin } = req.body;
 
@@ -910,7 +911,7 @@ router.post('/payment/tokenized', cardAuth, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('payment/tokenized:', err.message);
+    logger.error('payment/tokenized:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

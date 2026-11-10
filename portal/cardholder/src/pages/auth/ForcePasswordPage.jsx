@@ -45,7 +45,7 @@ export default function ForcePasswordPage() {
       <form onSubmit={submit} noValidate>
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         <PasswordInput label="Mot de passe temporaire reçu" required value={cur} onChange={(e) => setCur(e.target.value)} error={errors.cur} autoComplete="current-password" autoFocus />
-        <PasswordInput label="Nouveau mot de passe" required value={pwd.next} onChange={(e) => setPwd({ ...pwd, next: e.target.value })} error={errors.next} hint="8 caractères minimum, avec majuscule, minuscule et chiffre" autoComplete="new-password" />
+        <PasswordInput label="Nouveau mot de passe" required value={pwd.next} onChange={(e) => setPwd({ ...pwd, next: e.target.value })} error={errors.next} hint="10 caractères minimum, avec majuscule, minuscule et chiffre" autoComplete="new-password" />
         <PasswordInput label="Confirmer le mot de passe" required value={pwd.confirm} onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })} error={errors.confirm} autoComplete="new-password" />
         <Button type="submit" variant="primary" block loading={loading}>Enregistrer et se reconnecter</Button>
         <Button type="button" variant="ghost" block onClick={signOut}>Se déconnecter</Button>

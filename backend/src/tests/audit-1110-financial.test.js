@@ -123,10 +123,14 @@ describe('A. identité de route commune (idempotence, capacité)', () => {
   });
   test('une variante d’URL n’exempte plus de la clé d’idempotence', async () => {
     const { app, orders } = buildApp();
-    for (const v of ['/cash/Withdraw', '/cash/withdraw/', '/cash//withdraw']) {
+    for (const v of ['/cash/Withdraw', '/cash/withdraw/']) {
       const r = await request(app).post(v).send({ amount: 1000 });
       expect(r.status).toBe(400); expect(r.body.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
     }
+    // Express 5 ne replie plus « // » : la variante n'atteint plus la route (404) ; Express 4 la rejetait en 400
+    const dbl = await request(app).post('/cash//withdraw').send({ amount: 1000 });
+    expect([400, 404]).toContain(dbl.status);
+    if (dbl.status === 400) expect(dbl.body.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
     expect(orders()).toBe(0);
   });
   test('la garde de capacité s’applique à /Withdraw comme à /withdraw (pays sans rail configuré)', async () => {

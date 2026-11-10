@@ -1,4 +1,5 @@
 'use strict';
+const logger = require('../../config/logger');
 // ================================================================
 // CPlus 2.6 — PSP Router
 // Sélection automatique du PSP selon le BIN de la carte
@@ -86,7 +87,7 @@ const chargeCard = async ({ amount, currency = 'XAF', tokenId, cardMasked, netwo
   const resolvedNetwork = network || detectNetwork(cardMasked || tokenId);
   const { psp, client }  = selectPSP(resolvedNetwork);
 
-  console.log(`[PSP-ROUTER] ${resolvedNetwork} → ${psp} | debit=${debitAmount} credit=${creditAmount} fee=${fee} bearer=${actualBearer}`);
+  logger.info(`[PSP-ROUTER] ${resolvedNetwork} → ${psp} | debit=${debitAmount} credit=${creditAmount} fee=${fee} bearer=${actualBearer}`);
 
   const result = await client.processPayment({
     amount:     debitAmount,

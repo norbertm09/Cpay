@@ -6,7 +6,7 @@ import { errorMessage } from '../../utils/errors';
 import AuthLayout from '../../layout/AuthLayout';
 
 const RULES = [
-  ['8 caractères minimum', (p) => p.length >= 8],
+  ['10 caractères minimum', (p) => p.length >= 10],
   ['Une majuscule', (p) => /[A-Z]/.test(p)],
   ['Une minuscule', (p) => /[a-z]/.test(p)],
   ['Un chiffre', (p) => /[0-9]/.test(p)],

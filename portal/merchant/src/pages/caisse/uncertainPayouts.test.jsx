@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Simulate } from 'react-dom/test-utils';
+import { Simulate } from '../../test/simulate';
 import { MemoryRouter } from 'react-router-dom';
 import { cashApi, accountApi } from '../../services/api';
 import { TransferRecovery } from './TransferRecovery';
@@ -14,7 +14,7 @@ vi.mock('../../hooks/useCapabilities', () => ({ useCapabilities: () => ({ isOpen
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let root, host;
 const unknown = { transferId: 'order-1', reference: 'PAY-1', status: 'unknown', direction: 'withdraw', amount: 1200, fee: 100, net: 1100, currency: 'XAF', unknownSince: '2026-10-21T10:00:00Z', lastStatusCheckAt: '2026-10-21T10:01:00Z', needsReview: true };
-async function mount(node) { host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); await act(async () => root.render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{node}</MemoryRouter>)); }
+async function mount(node) { host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); await act(async () => root.render(<MemoryRouter>{node}</MemoryRouter>)); }
 async function change(input, value) { await act(async () => Simulate.change(input, { target: { value } })); }
 async function submit(form) { await act(async () => Simulate.submit(form)); }
 async function launch(Component) { await mount(<Component />); await change(host.querySelector('.amount-input input'), '1200'); await submit(host.querySelector('form')); await change(document.querySelector('.modal input[type="password"]'), 'private-secret'); await submit(document.querySelector('.modal form')); }
@@ -59,7 +59,7 @@ test.each(['pending', 'error'])('changing order clears previous %s refresh state
  let finish; const updated = vi.fn();
  vi.spyOn(cashApi, 'getTransfer').mockImplementation(() => previous === 'error' ? Promise.reject(new Error('offline')) : new Promise(resolve => { finish = resolve; }));
  await mount(<TransferRecovery transfer={unknown} onUpdated={updated} />);
- await act(async () => root.render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><TransferRecovery transfer={{ ...unknown, transferId: 'order-2', status: 'completed' }} onUpdated={updated} /></MemoryRouter>));
+ await act(async () => root.render(<MemoryRouter><TransferRecovery transfer={{ ...unknown, transferId: 'order-2', status: 'completed' }} onUpdated={updated} /></MemoryRouter>));
  const button = [...host.querySelectorAll('button')].find(b => b.textContent.includes('Actualiser le statut'));
  expect(button.disabled).toBe(false); expect(host.textContent).not.toContain('Vérification indisponible');
  if (finish) await act(async () => finish({ data: { ...unknown, status: 'rejected' } }));

@@ -403,7 +403,7 @@ const Login = () => {
   };
 
   const submitForcedPwd = async () => {
-    if (pwd.newPassword.length < 8) return toast.error('8 caractères minimum');
+    if (pwd.newPassword.length < 10) return toast.error('10 caractères minimum');
     if (pwd.newPassword !== pwd.confirm) return toast.error('Mots de passe différents');
     setLoading(true);
     try {
@@ -430,7 +430,7 @@ const Login = () => {
   const doReset = async () => {
     if (!resetData.code || !resetData.newPassword) return toast.error('Champs requis');
     if (resetData.newPassword !== resetData.confirm) return toast.error('Mots de passe différents');
-    if (resetData.newPassword.length < 8) return toast.error('8 caractères minimum');
+    if (resetData.newPassword.length < 10) return toast.error('10 caractères minimum');
     setLoading(true);
     try {
       await api.post('/auth/reset-password', { email: resetData.email, code: resetData.code, newPassword: resetData.newPassword });
@@ -468,7 +468,7 @@ const Login = () => {
 
         {view==='password' && (
           <form onSubmit={e=>{ e.preventDefault(); if (!loading) submitForcedPwd(); }}>
-            <p style={{ fontSize:13, color:MUTED, marginBottom:16, textAlign:'center' }}>Pour continuer, définissez un nouveau mot de passe (8 caractères minimum).</p>
+            <p style={{ fontSize:13, color:MUTED, marginBottom:16, textAlign:'center' }}>Pour continuer, définissez un nouveau mot de passe (10 caractères minimum).</p>
             <Inp label="Nouveau mot de passe *" value={pwd.newPassword} onChange={v=>setPwd(p=>({...p,newPassword:v}))} type="password" placeholder="••••••••" autoComplete="new-password" required />
             <Inp label="Confirmer *" value={pwd.confirm} onChange={v=>setPwd(p=>({...p,confirm:v}))} type="password" placeholder="••••••••" autoComplete="new-password" required />
             <Btn disabled={loading} style={{ width:'100%' }}>{loading?'Enregistrement…':'🔐 Enregistrer'}</Btn>
@@ -1336,7 +1336,7 @@ const Profile = () => {
   const changePassword = async () => {
     if (!pwdForm.current || !pwdForm.newPwd) return toast.error('Champs requis');
     if (pwdForm.newPwd !== pwdForm.confirm) return toast.error('Mots de passe différents');
-    if (pwdForm.newPwd.length < 8) return toast.error('8 caractères minimum');
+    if (pwdForm.newPwd.length < 10) return toast.error('10 caractères minimum');
     setSaving(true);
     try {
       await api.post('/auth/change-password', { currentPassword: pwdForm.current, newPassword: pwdForm.newPwd });
@@ -1441,7 +1441,7 @@ const Profile = () => {
             </div>
           ))}
           <div style={{ background:`${P}08`, borderRadius:8, padding:10, marginBottom:14, fontSize:12, color:MUTED }}>
-            ℹ️ Minimum 8 caractères — incluez lettres, chiffres et symboles.
+            ℹ️ Minimum 10 caractères — incluez lettres, chiffres et symboles.
           </div>
           <Btn onClick={changePassword} disabled={saving} style={{ width:'100%' }}>
             {saving?'Modification…':'💾 Changer le mot de passe'}

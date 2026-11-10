@@ -32,16 +32,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       backend-minor: { update-types: [minor, patch] }
-    ignore:
-      # uuid >= 13 est ESM uniquement : incompatible avec le backend CommonJS (remplacement prevu par crypto.randomUUID)
-      - dependency-name: uuid
-        update-types: ["version-update:semver-major"]
-      # Express 5 : migration dediee (routeurs, erreurs async, path-to-regexp) — la CI echoue sur la montee brute
-      - dependency-name: express
-        update-types: ["version-update:semver-major"]
-      # SDK Anthropic 1.x : montee avec le guide de migration 0.x -> 1.x et test de l'assistant, en PR dediee
-      - dependency-name: "@anthropic-ai/sdk"
-        update-types: ["version-update:semver-major"]
+    # Reliquat 2026-11 : uuid retire (crypto.randomUUID), Express 5.3 et @anthropic-ai/sdk 1.7 en place — plus d'exclusion.
 
   - package-ecosystem: npm
     directories: ["/portal/admin", "/portal/merchant", "/portal/cardholder", "/portal/partners", "/portal/bank", "/portal/agency", "/portal/agent"]
@@ -50,8 +41,9 @@ updates:
     open-pull-requests-limit: 3
     groups:
       portails-minor: { update-types: [minor, patch] }
+    # Reliquat 2026-11 : React 19.3, React Router 7.18, Vite 7.3, Vitest 5.1 en place sur les 7 portails.
+    # Les prochaines majeures restent a traiter en une seule PR (7 portails) : exclues ici pour eviter 14 PR separees.
     ignore:
-      # React 19 et Vitest 5 : migrations a mener en une fois sur les 7 portails (PR dediee), pas en 14 PR separees
       - dependency-name: react
         update-types: ["version-update:semver-major"]
       - dependency-name: react-dom
@@ -62,7 +54,6 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: vite
         update-types: ["version-update:semver-major"]
-      # React Router 7 : avec la migration React 19, en une fois sur les 7 portails
       - dependency-name: react-router-dom
         update-types: ["version-update:semver-major"]
 

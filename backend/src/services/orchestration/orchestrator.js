@@ -16,7 +16,7 @@
 
 'use strict';
 
-const { v4: uuidv4 }    = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 const detectionEngine   = require('../detection/detection.engine');
 const mobileMoneyRouter = require('../mobilemoney/mobilemoney.router');
 const cardRouter        = require('../gateways/card.router');

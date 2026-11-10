@@ -1,7 +1,7 @@
 // C-Pay — couche API du portail marchand.
 //
 // Couche axios : token d'accès en mémoire, refresh single-flight via le cookie
-// HttpOnly cp_rt_merchant, 401 -> refresh -> rejeu, 403 -> toast. Les espaces
+// HttpOnly cp_rt_merchant, 401 -> refresh -> rejeu, 403 -> toast (differe, un seul : voir errors.js). Les espaces
 // de noms (authApi, cashApi, activityApi, salesApi, integrationsApi, accountApi)
 // n'appellent que des routes existantes de backend/src/routes/merchant.routes.js,
 // cash.routes.js et server.js (consentement, détection).
@@ -88,7 +88,7 @@ const withInterceptors = (instance) => {
     const original = err.config;
     const isAuthRoute = NO_REFRESH_RE.test(original?.url || '');
     // 403 : droits insuffisants -> simple toast, aucune redirection (la session reste valide)
-    if (err.response?.status === 403 && !isAuthRoute) toast.error('Accès refusé');
+    if (err.response?.status === 403 && !isAuthRoute) setTimeout(() => { if (!err.handled) toast.error('Accès refusé'); }, 30);
     if (err.response?.status === 401 && original && !original._retry && !isAuthRoute) {
       original._retry = true;
       const previous = String(original.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
