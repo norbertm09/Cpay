@@ -1,4 +1,5 @@
 'use strict';
+const logger = require('../config/logger');
 const { query } = require('../config/database');
 
 const notify = async ({ type, title, message, entityType, entityId, metadata = {} }) => {
@@ -8,7 +9,7 @@ const notify = async ({ type, title, message, entityType, entityId, metadata = {
        VALUES ($1,$2,$3,$4,$5,$6)`,
       [type, title, message, entityType||null, entityId||null, JSON.stringify(metadata)]
     );
-  } catch(err) { console.error('Notification error:', err.message); }
+  } catch(err) { logger.error('Notification error:', err.message); }
 };
 
 module.exports = { notify };

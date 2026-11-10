@@ -1,4 +1,5 @@
 'use strict';
+const logger = require('../config/logger');
 // WAVE-7 : Nodemailer 10.x via la fabrique commune (TLS vérifié, STARTTLS forcé hors 465,
 // délais bornés, erreurs décrites sans secret). `secure` suit désormais le port : l'ancien
 // `secure: true` figé rendait SMTP_PORT=587 inutilisable (TLS implicite sur un port STARTTLS).
@@ -21,15 +22,15 @@ const FROM = '"C-Pay | Calculus Plus" <noreply@c-pay.global>';
 const send = async ({ to, subject, html }) => {
   try {
     if (!process.env.SMTP_PASS) {
-      console.warn('[EmailService] SMTP_PASS non configuré — email ignoré:', subject);
+      logger.warn('[EmailService] SMTP_PASS non configuré — email ignoré:', subject);
       return false;
     }
     await getTransporter().sendMail({ from: FROM, to, subject, html });
-    console.info(`[EmailService] Envoyé: ${subject} → ${to}`);
+    logger.info(`[EmailService] Envoyé: ${subject} → ${to}`);
     return true;
   } catch (err) {
     const d = describeSmtpError(err);
-    console.error(`[EmailService] Erreur ${d.code}${d.responseCode ? ` (${d.responseCode})` : ''}: ${d.message}`);
+    logger.error(`[EmailService] Erreur ${d.code}${d.responseCode ? ` (${d.responseCode})` : ''}: ${d.message}`);
     return false;
   }
 };

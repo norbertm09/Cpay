@@ -39,7 +39,8 @@ let dir, certFile, smtp;
 const loadService = (file, env) => {
   process.env = { ...savedEnv, ...env };
   let service;
-  jest.isolateModules(() => { service = require(file); });
+  // Le journal (winston) est charge dans le meme registre isole : on l'expose pour pouvoir l'espionner
+  jest.isolateModules(() => { service = require(file); loadService.logger = require('../config/logger'); });
   return service;
 };
 const envFor = (overrides = {}) => ({
@@ -114,7 +115,7 @@ describe('Nodemailer 10 — STARTTLS + AUTH sur le fixture local', () => {
 
   test('identifiants refusés : le service historique renvoie false sans lever', async () => {
     const svc = loadService('../services/email.service', envFor({ SMTP_PASS: 'wrong-password' }));
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const spy = jest.spyOn(loadService.logger, 'error').mockImplementation(() => {});
     try {
       const before = smtp.messages.length;
       await expect(svc.sendMerchantWelcome({ to: 'merchant@example.test', contactName: 'Awa' })).resolves.toBe(false);

@@ -1,4 +1,5 @@
 'use strict';
+const logger = require('../config/logger');
 // ================================================================
 // CPlus 2.6 — Card ↔ MoMo Orchestrator Routes
 // POST /api/v1/card2momo   — Débit carte → Crédit MoMo
@@ -11,7 +12,7 @@
 'use strict';
 
 const express  = require('express');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 const router   = express.Router();
 const psp      = require('../services/psp/psp.router');
 const mtn      = require('../services/rails/mtn-momo.client');
@@ -112,7 +113,7 @@ router.post('/card2momo', cardAuth, async (req, res) => {
         await query(`UPDATE card_transactions SET status='refunded', failure_reason=$1 WHERE txn_id=$2`,
           [`Leg2 MoMo failed: ${momoErr.message}`, txnId]);
       } catch (refundErr) {
-        console.error('[CARD2MOMO] Refund failed:', refundErr.message);
+        logger.error('[CARD2MOMO] Refund failed:', refundErr.message);
       }
       return res.status(502).json({
         error: `Crédit MoMo échoué: ${momoErr.message}`,
@@ -162,7 +163,7 @@ router.post('/card2momo', cardAuth, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('[CARD2MOMO]', err.message);
+    logger.error('[CARD2MOMO]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -229,7 +230,7 @@ router.post('/momo2card', cardAuth, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('[MOMO2CARD]', err.message);
+    logger.error('[MOMO2CARD]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -282,7 +283,7 @@ router.post('/momo2momo', cardAuth, async (req, res) => {
       currency:  'XAF',
     });
   } catch (err) {
-    console.error('[MOMO2MOMO ERROR]', err.message, err.stack?.split('\n').slice(0,3).join(' | '));
+    logger.error('[MOMO2MOMO ERROR]', err.message, err.stack?.split('\n').slice(0,3).join(' | '));
     res.status(500).json({ error: err.message });
   }
 });
@@ -328,7 +329,7 @@ router.get('/transfers/:txnId/status', cardAuth, async (req, res) => {
           amount: momoStatus.amount, currency: momoStatus.currency,
         });
         if (mismatch) {
-          console.error('[TRANSFER-STATUS] amount/currency mismatch', { txnId: txn.txn_id, ...mismatch });
+          logger.error('[TRANSFER-STATUS] amount/currency mismatch', { txnId: txn.txn_id, ...mismatch });
           return res.status(409).json({ error: 'Montant ou devise incohérent', code: 'AMOUNT_MISMATCH' });
         }
         if (txn.type === 'momo2card') {
@@ -370,7 +371,7 @@ let _stripeSecretWarned = false;
 const verifyStripeSignature = (req) => {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {
-    if (!_stripeSecretWarned) { _stripeSecretWarned = true; console.error('[WEBHOOK-STRIPE] STRIPE_WEBHOOK_SECRET non configuré — webhook refusé (fail-closed)'); }
+    if (!_stripeSecretWarned) { _stripeSecretWarned = true; logger.error('[WEBHOOK-STRIPE] STRIPE_WEBHOOK_SECRET non configuré — webhook refusé (fail-closed)'); }
     return { ok: false, code: 'WEBHOOK_NOT_CONFIGURED' };
   }
   const header = req.headers['stripe-signature'];
@@ -391,7 +392,7 @@ const verifyStripeSignature = (req) => {
 
 router.post('/webhooks/psp/:psp', async (req, res) => {
   const { psp: pspName } = req.params;
-  console.log(`[WEBHOOK-${pspName.toUpperCase()}]`, JSON.stringify(req.body || {}).slice(0, 200));
+  logger.info(`[WEBHOOK-${pspName.toUpperCase()}]`, JSON.stringify(req.body || {}).slice(0, 200));
 
   try {
     // Stripe webhook
@@ -425,7 +426,7 @@ router.post('/webhooks/psp/:psp', async (req, res) => {
       const amount = amountMinor != null ? webhooks.minorToMajor(amountMinor, currency || txn.currency) : null;
       const mismatch = webhooks.checkAmountCurrency({ expectedAmount: txn.amount, expectedCurrency: txn.currency, amount, currency });
       if (mismatch) {
-        console.error('[WEBHOOK-STRIPE] amount/currency mismatch — no state change', { orderId, ...mismatch });
+        logger.error('[WEBHOOK-STRIPE] amount/currency mismatch — no state change', { orderId, ...mismatch });
         await webhooks.recordWebhookEvent({ provider: 'stripe', referenceId: orderId, status: type, outcome: 'mismatch', payload: req.body, ip: req.ip });
         return res.status(409).json({ error: 'Montant ou devise incohérent', code: 'AMOUNT_MISMATCH' });
       }
@@ -447,7 +448,7 @@ router.post('/webhooks/psp/:psp', async (req, res) => {
     // CyberSource et MIGS — routes dédiées /api/v1/webhooks/cybersource|migs (aucun changement d'état ici)
     res.status(200).json({ received: true, ignored: true });
   } catch (err) {
-    console.error('[WEBHOOK-PSP]', err.message);
+    logger.error('[WEBHOOK-PSP]', err.message);
     res.status(500).json({ error: 'Erreur interne' });
   }
 });

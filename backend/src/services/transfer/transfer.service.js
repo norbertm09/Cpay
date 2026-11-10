@@ -1,6 +1,6 @@
 'use strict';
 
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 const { query } = require('../../config/database');
 const gtp   = require('../rails/gtp-card.service');
 const mtn   = require('../rails/mtn-momo.client');

@@ -933,7 +933,7 @@ router.post('/settlements/:transferId/complete', requireRole('super_admin', 'fin
             <p>Reference bancaire : <code>${String(settlementRef).trim().replace(/[<>&"]/g, '')}</code></p>
             <p>Le credit peut prendre 24 a 48h selon votre banque.</p>`,
         });
-      } catch (e) { console.error('[settle-notify]', e.message); }
+      } catch (e) { logger.error('[settle-notify]', e.message); }
     }
 
     res.json({ success: true, transferId: tr.transfer_id, status: 'completed', reference: tr.reference });
@@ -1290,7 +1290,7 @@ router.patch('/alerts/:id/resolve', requireRole('super_admin', 'ops_admin'), asy
 // ─── CREATE MERCHANT (enrichi) ───────────────────────────────────
 router.post('/merchants/create', requireRole('super_admin', 'ops_admin'), async (req, res) => {
   const bcrypt = require('bcryptjs');
-  const { v4: uuidv4 } = require('uuid');
+  const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
   const { businessName, phone, email, password, country = 'CM', currency = 'XAF', settlementType = 'mobile_money', settlementAccount } = req.body;
   if (!businessName || !phone || !email || !password) return res.status(422).json({ error: 'Champs obligatoires manquants' });
   const { query, withTransaction } = require('../config/database');
@@ -1711,7 +1711,7 @@ router.patch('/cardholders/:id/kyc/documents/:docId', requireRole('super_admin',
           try {
             const { sendSmsSmpp } = require('../services/notifications/smpp.service');
             await sendSmsSmpp({ to: phone, message: msg });
-          } catch(smsErr) { console.log('SMS cardholder non envoyé:', smsErr.message); }
+          } catch(smsErr) { logger.info('SMS cardholder non envoyé:', smsErr.message); }
         }
         await notify({
           type: status === 'approved' ? 'kyc_document_approved' : 'kyc_document_rejected',
@@ -1722,7 +1722,7 @@ router.patch('/cardholders/:id/kyc/documents/:docId', requireRole('super_admin',
           metadata: { docId: req.params.docId, status, rejectionReason, email, phone }
         });
       }
-    } catch(notifErr) { console.error('Notification KYC review error:', notifErr.message); }
+    } catch(notifErr) { logger.error('Notification KYC review error:', notifErr.message); }
     res.json({ success: true });
   } catch(err){ res.status(500).json({error:err.message}); }
 });

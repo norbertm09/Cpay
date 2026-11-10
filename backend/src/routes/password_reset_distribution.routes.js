@@ -23,12 +23,13 @@
 // GET  /agent/performance                 — Mes stats + commissions
 // ================================================================
 'use strict';
+const logger = require('../config/logger');
 
 const express  = require('express');
 const bcrypt   = require('bcryptjs');
 const crypto   = require('crypto');
 const rateLimit = require('express-rate-limit');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 const { query, withTransaction } = require('../config/database');
 const email    = require('../services/email.service');
 
@@ -133,14 +134,14 @@ cardholderResetRouter.post('/auth/forgot-password', ...forgotPasswordLimiters(),
     // Envoyer email
     const resetUrl = `${process.env.APP_URL_CARDHOLDER || 'https://app.c-pay.global'}/reset-password?token=${raw}&type=cardholder`;
     await sendResetEmail({ to: ch.email, firstName: ch.first_name, resetUrl, actorType: 'cardholder' });
-  } catch (err) { console.error('[ForgotPassword:Cardholder]', err.message); }
+  } catch (err) { logger.error('[ForgotPassword:Cardholder]', err.message); }
 });
 
 // POST /cardholder/auth/reset-password
 cardholderResetRouter.post('/auth/reset-password', async (req, res) => {
   const { token, newPassword } = req.body;
   if (!token || !newPassword) return res.status(422).json({ error: 'Token et nouveau mot de passe requis' });
-  if (newPassword.length < 8) return res.status(422).json({ error: 'Mot de passe trop court (min 8 caractères)' });
+  if (newPassword.length < 10) return res.status(422).json({ error: 'Mot de passe trop court (10 caractères minimum)' });
   if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword))
     return res.status(422).json({ error: 'Le mot de passe doit contenir majuscule, minuscule et chiffre' });
 
@@ -205,14 +206,14 @@ merchantResetRouter.post('/auth/forgot-password', ...forgotPasswordLimiters(), a
 
     const resetUrl = `${process.env.APP_URL_MERCHANT || 'https://merchant.c-pay.global'}/reset-password?token=${raw}&type=merchant`;
     await sendResetEmail({ to: mu.email, firstName: mu.first_name, resetUrl, actorType: 'merchant_user' });
-  } catch (err) { console.error('[ForgotPassword:Merchant]', err.message); }
+  } catch (err) { logger.error('[ForgotPassword:Merchant]', err.message); }
 });
 
 // POST /merchant/auth/reset-password
 merchantResetRouter.post('/auth/reset-password', async (req, res) => {
   const { token, newPassword } = req.body;
   if (!token || !newPassword) return res.status(422).json({ error: 'Token et nouveau mot de passe requis' });
-  if (newPassword.length < 8) return res.status(422).json({ error: 'Mot de passe trop court (min 8 caractères)' });
+  if (newPassword.length < 10) return res.status(422).json({ error: 'Mot de passe trop court (10 caractères minimum)' });
   if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword))
     return res.status(422).json({ error: 'Le mot de passe doit contenir majuscule, minuscule et chiffre' });
 

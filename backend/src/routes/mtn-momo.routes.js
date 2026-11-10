@@ -18,9 +18,10 @@
 //   * /status/:ref : claim `status='pending'` avant tout crédit (rejeu idempotent).
 
 'use strict';
+const logger = require('../config/logger');
 
 const express = require('express');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');   // ex-uuid v4 (ESM-only depuis uuid 13)
 const router  = express.Router();
 const mtn     = require('../services/rails/mtn-momo.client');
 const { query, withTransaction } = require('../config/database');
@@ -121,7 +122,7 @@ router.post('/topup', cardAuth, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('[MTN-TOPUP]', err.message);
+    logger.error('[MTN-TOPUP]', err.message);
     res.status(err.statusCode || 500).json({ error: err.message, code: 'MTN_ERROR' });
   }
 });

@@ -1,4 +1,5 @@
 'use strict';
+const logger = require('../config/logger');
 const express  = require('express');
 const router   = express.Router();
 const bcrypt   = require('bcryptjs');
@@ -658,7 +659,7 @@ router.patch('/users/:id/role', partnerAuth, requireRole('bank_admin'), async (r
 router.post('/auth/change-password', partnerAuth, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(422).json({error:'Champs requis'});
-  if (newPassword.length < 8) return res.status(422).json({error:'8 caractères minimum'});
+  if (newPassword.length < 10) return res.status(422).json({error:'Mot de passe trop court (10 caractères minimum)', code:'WEAK_PASSWORD'});
   try {
     const { table, idCol, id } = userTarget(req.user);
     const r = await query(`SELECT password_hash FROM ${table} WHERE ${idCol}=$1`, [id]);
@@ -755,7 +756,7 @@ router.post('/users/:id/reset-link', partnerAuth, requireRole('bank_admin','agen
         });
         emailed = true;
       }
-    } catch (e) { console.error('[reset-link] email:', e.message); }
+    } catch (e) { logger.error('[reset-link] email:', e.message); }
 
     res.json({ success:true, emailed, message:'Lien de réinitialisation envoyé au destinataire (valable 24h)' });
   } catch(err){ res.status(500).json({error:err.message}); }
@@ -765,7 +766,7 @@ router.post('/users/:id/reset-link', partnerAuth, requireRole('bank_admin','agen
 router.post('/auth/reset-password', async (req, res) => {
   const { token, newPassword } = req.body;
   if (!token || !newPassword) return res.status(422).json({error:'Token et nouveau mot de passe requis'});
-  if (newPassword.length < 8) return res.status(422).json({error:'8 caractères minimum'});
+  if (newPassword.length < 10) return res.status(422).json({error:'Mot de passe trop court (10 caractères minimum)', code:'WEAK_PASSWORD'});
   try {
     const hash = crypto.createHash('sha256').update(String(token)).digest('hex');
     const r = await query(

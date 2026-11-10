@@ -1,4 +1,5 @@
 'use strict';
+const logger = require('../../config/logger');
 
 const sendSmsSmpp = ({ to, text }) => new Promise((resolve, reject) => {
   let smpp;
@@ -78,7 +79,7 @@ const notifyMultiChannel = async ({ phone, email, text, subject }) => {
   const out = { sms: false, email: false };
   if (phone) {
     try { await sendSmsSmpp({ to: phone, text }); out.sms = true; }
-    catch (e) { console.error('[notify][sms]', e.message); }
+    catch (e) { logger.error('[notify][sms]', e.message); }
   }
   if (email) {
     try {
@@ -92,7 +93,7 @@ const notifyMultiChannel = async ({ phone, email, text, subject }) => {
           <p style="color:#5a6677;font-size:12px">C-Pay · c-pay.global</p></div>`,
       });
       out.email = true;
-    } catch (e) { console.error('[notify][email]', e.message); }
+    } catch (e) { logger.error('[notify][email]', e.message); }
   }
   return out;
 };

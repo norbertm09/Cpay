@@ -157,8 +157,9 @@ describe('services/email.service (historique) — alertes ops', () => {
   });
 
   test('sans SMTP_PASS : ignoré (false), aucun transport créé ; erreur SMTP → false avec journal sans secret', async () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const logger = require('../config/logger');
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => {});
     try {
       const off = load('../services/email.service', { ...SMTP_ENV, SMTP_PASS: '' });
       await expect(off.sendAlertDbIssue({ to: 'ops@example.test', issueType: 'x' })).resolves.toBe(false);
