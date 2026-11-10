@@ -1,4 +1,4 @@
-// Vite 5 — remplace Create React App (react-scripts 5, non maintenu).
+// Vite 7 (ex-Vite 5) — remplace Create React App (react-scripts 5, non maintenu).
 // Les consommateurs (docker/Dockerfile.portal, nginx, CI, dev/mock-api.js)
 // attendent toujours le bundle dans build/.
 import { defineConfig } from 'vite';
@@ -15,6 +15,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'build',
+    // Reliquat 2026-11 : React / Router dans un chunk « vendor » stable (cache navigateur entre deux versions)
+    rollupOptions: { output: { manualChunks: { vendor: ['react', 'react-dom', 'react-dom/client', 'react-router-dom'] } } },
     sourcemap: false,
     // Pas de <script> inline dans index.html : CSP script-src 'self' (ex-INLINE_RUNTIME_CHUNK=false).
     modulePreload: { polyfill: false },

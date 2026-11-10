@@ -42,6 +42,7 @@ const BY_STATUS = {
 
 export const errorMessage = (err, fallback = 'Une erreur est survenue. Merci de réessayer.') => {
   if (!err) return fallback;
+  err.handled = true;   // la page affiche ce message : l'intercepteur ne double pas le toast 403
   if (!err.response) {
     if (err.code === 'ERR_NETWORK' || err.message === 'Network Error') return 'Connexion impossible. Vérifiez votre accès à Internet.';
     return err.message || fallback;

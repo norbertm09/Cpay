@@ -17,6 +17,7 @@ const CODES = {
 
 export const errorMessage = (err, fallback = 'Une erreur est survenue') => {
   if (!err) return fallback;
+  err.handled = true;   // la page affiche ce message : l'intercepteur ne double pas le toast 403
   const data = err.response?.data;
   const status = err.response?.status;
   if (data?.error && typeof data.error === 'string') return data.error;

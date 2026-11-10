@@ -41,7 +41,7 @@ class RegisterActivity : AppCompatActivity() {
         if (firstName.isEmpty() || email.isEmpty() || phone.isEmpty() || password.isEmpty()) {
             showError(getString(R.string.register_error_required)); return
         }
-        if (password.length < 8) { showError(getString(R.string.register_error_password_min)); return }
+        if (password.length < 10) { showError(getString(R.string.register_error_password_min)); return }
         if (password != confirm) { showError(getString(R.string.password_error_mismatch)); return }
 
         setLoading(true)

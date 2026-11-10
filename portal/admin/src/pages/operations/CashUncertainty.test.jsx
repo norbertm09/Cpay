@@ -58,10 +58,7 @@ const click = async text => {
   expect(button(text)).toBeDefined();
   await flush(() => button(text).click());
 };
-const mount = async (url, content = <CashPage />) => flush(() => root.render(<MemoryRouter future={{
-  v7_startTransition: true,
-  v7_relativeSplatPath: true
-}} initialEntries={[url]}>{content}</MemoryRouter>));
+const mount = async (url, content = <CashPage />) => flush(() => root.render(<MemoryRouter initialEntries={[url]}>{content}</MemoryRouter>));
 beforeEach(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();

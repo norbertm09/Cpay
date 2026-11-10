@@ -22,7 +22,7 @@ export const Securite = () => {
     e.preventDefault();
     const er = {};
     if (!pwd.current) er.current = 'Mot de passe actuel requis.';
-    if (pwd.next.length < 8) er.next = '8 caractères minimum.';
+    if (pwd.next.length < 10) er.next = '10 caractères minimum.';
     if (pwd.next !== pwd.confirm) er.confirm = 'Les deux mots de passe ne correspondent pas.';
     setPwdErr(er); if (Object.keys(er).length) return;
     setSaving(true);
@@ -69,7 +69,7 @@ export const Securite = () => {
         <Card title="Mot de passe">
           <form onSubmit={changePassword} noValidate>
             <PasswordInput label="Mot de passe actuel" value={pwd.current} onChange={v => setPwd(p => ({ ...p, current: v }))} autoComplete="current-password" error={pwdErr.current} required />
-            <PasswordInput label="Nouveau mot de passe" value={pwd.next} onChange={v => setPwd(p => ({ ...p, next: v }))} autoComplete="new-password" error={pwdErr.next} hint="8 caractères minimum ; majuscule, minuscule et chiffre recommandés." required />
+            <PasswordInput label="Nouveau mot de passe" value={pwd.next} onChange={v => setPwd(p => ({ ...p, next: v }))} autoComplete="new-password" error={pwdErr.next} hint="10 caractères minimum ; majuscule, minuscule et chiffre recommandés." required />
             <PasswordInput label="Confirmer" value={pwd.confirm} onChange={v => setPwd(p => ({ ...p, confirm: v }))} autoComplete="new-password" error={pwdErr.confirm} required />
             <Button type="submit" variant="primary" loading={saving}>Changer le mot de passe</Button>
             <p className="xs muted mt-3">Le changement déconnecte tous vos appareils ; vous devrez vous reconnecter.</p>

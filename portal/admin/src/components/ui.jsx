@@ -235,15 +235,27 @@ const useEscape = (onClose) => {
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
 };
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+// Tab / Maj+Tab restent dans la boite de dialogue (audit § 5 : le focus sortait vers la page masquee)
+const trapTab = (e, container) => {
+  if (e.key !== 'Tab' || !container) return;
+  const items = Array.from(container.querySelectorAll(FOCUSABLE)).filter((el) => el.offsetParent !== null || el === document.activeElement);
+  if (!items.length) { e.preventDefault(); container.focus?.(); return; }
+  const first = items[0]; const last = items[items.length - 1]; const active = document.activeElement;
+  if (e.shiftKey && (active === first || !container.contains(active))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (active === last || !container.contains(active))) { e.preventDefault(); first.focus(); }
+};
 const useFocusTrap = (ref) => {
   useEffect(() => {
     const prev = document.activeElement;
+    const onKey = (e) => trapTab(e, ref.current);
+    document.addEventListener('keydown', onKey);
     const el = ref.current;
     const first = el?.querySelector('input, select, textarea, button:not([aria-label="Fermer"]), [tabindex]:not([tabindex="-1"])');
     (first || el)?.focus?.();
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prevOverflow; prev?.focus?.(); };
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow; prev?.focus?.(); };
   }, [ref]);
 };
 

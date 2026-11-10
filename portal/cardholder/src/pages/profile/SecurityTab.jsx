@@ -46,7 +46,7 @@ const PasswordModal = ({ open, onClose }) => {
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         <Alert tone="info">Pour votre sécurité, toutes vos sessions seront déconnectées après le changement.</Alert>
         <PasswordInput label="Mot de passe actuel" required value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} error={errors.current} autoComplete="current-password" autoFocus />
-        <PasswordInput label="Nouveau mot de passe" required value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} error={errors.next} autoComplete="new-password" hint="8 caractères minimum, avec majuscule, minuscule et chiffre" />
+        <PasswordInput label="Nouveau mot de passe" required value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} error={errors.next} autoComplete="new-password" hint="10 caractères minimum, avec majuscule, minuscule et chiffre" />
         <PasswordInput label="Confirmer" required value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} error={errors.confirm} autoComplete="new-password" />
         <button type="submit" className="sr-only">Modifier</button>
       </form>

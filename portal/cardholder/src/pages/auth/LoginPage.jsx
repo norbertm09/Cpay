@@ -96,7 +96,7 @@ export default function LoginPage() {
         <p className="ab-sub">Votre mot de passe est temporaire. Choisissez-en un nouveau pour sécuriser votre compte.</p>
         <form onSubmit={submitPwd} noValidate>
           {formError ? <Alert tone="error">{formError}</Alert> : null}
-          <PasswordInput label="Nouveau mot de passe" required value={pwd.next} onChange={(e) => setPwd({ ...pwd, next: e.target.value })} error={errors.next} hint="8 caractères minimum, avec majuscule, minuscule et chiffre" autoComplete="new-password" autoFocus />
+          <PasswordInput label="Nouveau mot de passe" required value={pwd.next} onChange={(e) => setPwd({ ...pwd, next: e.target.value })} error={errors.next} hint="10 caractères minimum, avec majuscule, minuscule et chiffre" autoComplete="new-password" autoFocus />
           <PasswordInput label="Confirmer le mot de passe" required value={pwd.confirm} onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })} error={errors.confirm} autoComplete="new-password" />
           <Button type="submit" variant="primary" size="lg" block loading={loading}>Enregistrer et continuer</Button>
         </form>

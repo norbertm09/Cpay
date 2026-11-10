@@ -1,13 +1,24 @@
 import React, { useEffect, useRef } from 'react';
 import Icon from './Icon';
 
-/** Modale accessible : focus initial, fermeture Echap et clic sur le fond. */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+// Tab / Maj+Tab restent dans la boite de dialogue (audit § 5 : le focus sortait vers la page masquee)
+const trapTab = (e, container) => {
+  if (e.key !== 'Tab' || !container) return;
+  const items = Array.from(container.querySelectorAll(FOCUSABLE)).filter((el) => el.offsetParent !== null || el === document.activeElement);
+  if (!items.length) { e.preventDefault(); container.focus?.(); return; }
+  const first = items[0]; const last = items[items.length - 1]; const active = document.activeElement;
+  if (e.shiftKey && (active === first || !container.contains(active))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (active === last || !container.contains(active))) { e.preventDefault(); first.focus(); }
+};
+
+/** Modale accessible : focus initial, Tab piege, fermeture Echap et clic sur le fond. */
 export default function Modal({ open, title, onClose, children, footer, size, closable = true }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
     const prev = document.activeElement;
-    const onKey = (e) => { if (e.key === 'Escape' && closable) onClose?.(); };
+    const onKey = (e) => { if (e.key === 'Escape' && closable) onClose?.(); trapTab(e, ref.current); };
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     const first = ref.current?.querySelector('input, select, textarea, button:not([data-close])');

@@ -22,7 +22,7 @@ export const ForcePassword = () => {
     e.preventDefault();
     if (loading) return;
     if (!cur) { setError('Saisissez le mot de passe temporaire reçu.'); return; }
-    if (pwd.newPassword.length < 8) { setError('8 caractères minimum.'); return; }
+    if (pwd.newPassword.length < 10) { setError('10 caractères minimum.'); return; }
     if (pwd.newPassword === cur) { setError('Le nouveau mot de passe doit différer du mot de passe temporaire.'); return; }
     if (pwd.newPassword !== pwd.confirm) { setError('Les deux mots de passe ne correspondent pas.'); return; }
     setLoading(true); setError(null);
@@ -40,7 +40,7 @@ export const ForcePassword = () => {
         <Notice tone="warn" className="mb-4">Aucune opération (encaissement, retrait, paramètres) n’est possible avant ce changement.</Notice>
         {error && <Notice tone="error" className="mb-4">{error}</Notice>}
         <PasswordInput id="current-password" label="Mot de passe temporaire reçu" value={cur} onChange={setCur} autoComplete="current-password" required autoFocus />
-        <PasswordInput id="new-password" label="Nouveau mot de passe" value={pwd.newPassword} onChange={v => setPwd(p => ({ ...p, newPassword: v }))} autoComplete="new-password" hint="8 caractères minimum, avec majuscule, minuscule et chiffre recommandés." required />
+        <PasswordInput id="new-password" label="Nouveau mot de passe" value={pwd.newPassword} onChange={v => setPwd(p => ({ ...p, newPassword: v }))} autoComplete="new-password" hint="10 caractères minimum, avec majuscule, minuscule et chiffre recommandés." required />
         <PasswordInput id="confirm-password" label="Confirmer le mot de passe" value={pwd.confirm} onChange={v => setPwd(p => ({ ...p, confirm: v }))} autoComplete="new-password" required />
         <Button type="submit" variant="primary" size="lg" block loading={loading}>Enregistrer et se reconnecter</Button>
         <Button variant="ghost" block className="mt-3" onClick={logout}>Se déconnecter</Button>

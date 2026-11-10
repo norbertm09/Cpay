@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Simulate } from 'react-dom/test-utils';
+import { Simulate } from '../../test/simulate';
 import { MemoryRouter } from 'react-router-dom';
 import { cashApi, accountApi } from '../../services/api';
 import { Retirer } from './Retirer';
@@ -16,7 +16,7 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 let root, host;
 async function mount(Component) {
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
-  await act(async () => { root.render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Component /></MemoryRouter>); });
+  await act(async () => { root.render(<MemoryRouter><Component /></MemoryRouter>); });
 }
 function unmount() { act(() => root.unmount()); host.remove(); }
 function button(text) { return [...host.querySelectorAll('button')].find(b => b.textContent.includes(text)); }

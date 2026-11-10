@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Simulate } from 'react-dom/test-utils';
+import { Simulate } from '../../test/simulate';
 import { MemoryRouter } from 'react-router-dom';
 import { api, authApi, accountApi, cashApi } from '../../services/api';
 import { BankAccountForm } from '../caisse/shared';
@@ -14,7 +14,7 @@ vi.mock('../../components', async () => {
 });
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let root, host;
-async function mount(node) { host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); await act(async () => root.render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{node}</MemoryRouter>)); }
+async function mount(node) { host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); await act(async () => root.render(<MemoryRouter>{node}</MemoryRouter>)); }
 async function change(input, value) { await act(async () => Simulate.change(input, { target: { value } })); }
 async function submit(form) { await act(async () => Simulate.submit(form)); }
 async function fill() { await change(host.querySelector('select'), 'bank1'); const inputs = host.querySelectorAll('input'); await change(inputs[0], 'Company'); await change(inputs[1], '123456789'); await submit(host.querySelector('form')); }
@@ -74,7 +74,7 @@ test.each(['add', 'remove'])('%s cannot confirm a previous owner operation after
  if (kind === 'add') await fill(); else await act(async () => Simulate.click([...host.querySelectorAll('button')].find(b => b.textContent === 'Retirer')));
  const oldConfirm = mockStepUpProps.onConfirm;
  mockUser = { ...mockUser, userId: 'other-owner', merchantId: 'other-merchant' };
- await act(async () => root.render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{node()}</MemoryRouter>));
+ await act(async () => root.render(<MemoryRouter>{node()}</MemoryRouter>));
  await act(async () => oldConfirm({ password: 'old-secret' }));
  expect(mutation).not.toHaveBeenCalled(); expect(document.querySelector('.modal input')).toBeNull();
 });

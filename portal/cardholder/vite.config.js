@@ -22,6 +22,8 @@ export default defineConfig({
   preview: { port: 3003 },
   build: {
     outDir: 'build',
+    // Reliquat 2026-11 : React / Router dans un chunk « vendor » stable (cache navigateur entre deux versions)
+    rollupOptions: { output: { manualChunks: { vendor: ['react', 'react-dom', 'react-dom/client', 'react-router-dom'] } } },
     sourcemap: false,
     // Aucun script inline dans index.html : CSP script-src 'self' (nginx / mock).
     modulePreload: { polyfill: false },

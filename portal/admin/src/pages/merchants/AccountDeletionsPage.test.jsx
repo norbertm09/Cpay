@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Simulate } from 'react-dom/test-utils';
+import { Simulate } from '../../test/simulate';
 import { MemoryRouter } from 'react-router-dom';
 import AccountDeletionsPage from './AccountDeletionsPage';
 import { merchantsApi } from '../../services/api';
@@ -16,7 +16,7 @@ let root, host;
 const flush = async (fn = () => {}) => { await act(async () => { fn(); await Promise.resolve(); }); };
 const button = (label) => [...host.querySelectorAll('button')].find((b) => b.textContent === label);
 const click = async (label) => { const b = button(label); expect(b).toBeDefined(); await flush(() => b.click()); };
-const mount = async () => flush(() => root.render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AccountDeletionsPage /></MemoryRouter>));
+const mount = async () => flush(() => root.render(<MemoryRouter><AccountDeletionsPage /></MemoryRouter>));
 
 beforeEach(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;

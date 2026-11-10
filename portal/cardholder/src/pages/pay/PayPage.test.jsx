@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { webcrypto } from 'node:crypto';
 import { vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
-import { Simulate } from 'react-dom/test-utils';
+import { Simulate } from '../../test/simulate';
 import { MemoryRouter } from 'react-router-dom';
 import PayPage from './PayPage';
 import * as ops from '../../services/operations';
