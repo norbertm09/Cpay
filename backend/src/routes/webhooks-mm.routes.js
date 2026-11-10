@@ -245,18 +245,45 @@ const verifySharedToken = async (provider, req, { viaSecretPath }) => {
 
 // ─── Traitement commun ────────────────────────────────────────────
 
-const findTransaction = async (info) => {
+// Audit 2026-11-10 § 2 : un callback authentifié pour un opérateur ne peut finaliser QUE les transactions de cet
+// opérateur. Avant, un jeton Moov (de test) et une référence Orange suffisaient à finaliser un encaissement Orange.
+// Opérateurs détectés (detection.engine) par provider de webhook ; gateway_name ∈ GATEWAY_KEYS[provider].
+const PROVIDER_OPERATORS = {
+  orange: ['ORANGE_MONEY', 'ORANGE'],
+  wave: ['WAVE'],
+  africell: ['AFRICELL_MONEY', 'AFRICELL'],
+  express_union: ['EXPRESS_UNION', 'EXPRESS_UNION_MOBILE_MONEY', 'EU_MOBILE_MONEY'],
+  free_money: ['FREE_MONEY'],
+  moov: ['MOOV_MONEY', 'MOOV'],
+};
+const providerOwnsTransaction = (provider, txn) => {
+  if (!txn) return false;
+  const gw = String(txn.gateway_name || '').toLowerCase();
+  const op = String(txn.detected_operator || '').toUpperCase();
+  // gateway persisté à l'initiation (clé `<provider>_<pays>`) : seule source de vérité quand il existe
+  if (gw) return (GATEWAY_KEYS[provider] || []).includes(gw) || gw === provider || gw.startsWith(`${provider}_`);
+  return (PROVIDER_OPERATORS[provider] || []).includes(op);              // transactions anciennes sans gateway_name
+};
+
+const findTransaction = async (info, provider) => {
+  const gateways = GATEWAY_KEYS[provider] || [];
+  const operators = PROVIDER_OPERATORS[provider] || [];
   const r = await query(
     `SELECT transaction_id, merchant_id, type, amount, currency, status, gateway_name, gateway_payment_id,
             detected_operator, detected_country, pay_link_id
        FROM transactions
-      WHERE ($1::text IS NOT NULL AND transaction_id::text = $1)
-         OR ($2::text IS NOT NULL AND gateway_payment_id = $2)
+      WHERE (($1::text IS NOT NULL AND transaction_id::text = $1)
+         OR ($2::text IS NOT NULL AND gateway_payment_id = $2))
+        AND (lower(COALESCE(gateway_name,'')) = ANY($3::text[])
+             OR lower(COALESCE(gateway_name,'')) = $5 OR lower(COALESCE(gateway_name,'')) LIKE $5 || '\_%'
+             OR (COALESCE(gateway_name,'') = '' AND upper(COALESCE(detected_operator,'')) = ANY($4::text[])))
       ORDER BY (status = 'pending') DESC, initiated_at DESC
       LIMIT 1`,
-    [info.ref ? String(info.ref) : null, info.gatewayRef ? String(info.gatewayRef) : null]
+    [info.ref ? String(info.ref) : null, info.gatewayRef ? String(info.gatewayRef) : null, gateways, operators, String(provider).toLowerCase()]
   );
-  return r.rows[0] || null;
+  const txn = r.rows[0] || null;
+  // Défense en profondeur (base mockée, anciennes lignes) : la liaison opérateur ↔ transaction est revérifiée en JS
+  return txn && providerOwnsTransaction(provider, txn) ? txn : null;
 };
 
 /**
@@ -301,8 +328,9 @@ const processWebhook = async (provider, req, res, { viaSecretPath = false, pathT
     return res.status(400).json({ error: 'Référence absente', code: 'REFERENCE_REQUIRED' });
   }
 
-  // 2. Transaction
-  const txn = await findTransaction(info);
+  // 2. Transaction — liée à l'opérateur authentifié (audit 2026-11-10 § 2) : une référence appartenant à un autre
+  //    opérateur est traitée comme inconnue, sans aucun changement d'état ni fuite d'information.
+  const txn = await findTransaction(info, provider);
   if (!txn) {
     await recordWebhookEvent({ provider, referenceId: info.ref || info.gatewayRef, status: body.status, outcome: 'unknown_reference', payload: body, ip: req.ip });
     return res.status(200).json({ received: true, outcome: 'unknown_reference' });
@@ -417,6 +445,7 @@ module.exports = {
   secretRouter,
   legacyRouter,
   processWebhook,
+  providerOwnsTransaction, PROVIDER_OPERATORS,
   _adapters: ADAPTERS,
   _helpers: { checkAmountCurrency, timingSafeEqualStr, signedPayload, gatewayKeyFor },
 };

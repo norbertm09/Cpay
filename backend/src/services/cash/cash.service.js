@@ -50,9 +50,15 @@ const withdrawDailyLimit = (kybLevel) => {
 // Statuts — WAVE-6 : `unknown` = résultat opérateur incertain (timeout, 5xx, réseau, réponse
 // illisible) ; la réservation est CONSERVÉE (compté comme pending/processing dans le solde)
 // jusqu'à ce que l'opérateur confirme (completed) ou refuse explicitement (failed).
-const OUT_NOT_FAILED = ['pending', 'processing', 'unknown', 'pending_settlement', 'pending_manual', 'completed'];
-const OUT_INFLIGHT   = ['pending', 'processing', 'unknown', 'pending_settlement', 'pending_manual'];
-const UNCERTAIN      = ['unknown', 'processing'];   // interrogés par refreshPayoutStatus / reconcile
+// Audit 2026-11-10 § 2 : `sending` = état d'envoi DURABLE, posé juste avant l'appel rail. Un processus interrompu
+// entre la réservation et la réponse opérateur laisse la ligne en `sending` (ou `pending` pour les anciennes) : elle
+// est comptée dans le solde, reprise par le rapprochement (statut opérateur si une référence existe), mise en revue
+// après la période de grâce, jamais renvoyée ni libérée automatiquement — seule une décision Finance tranche.
+const OUT_NOT_FAILED = ['pending', 'sending', 'processing', 'unknown', 'pending_settlement', 'pending_manual', 'completed'];
+const OUT_INFLIGHT   = ['pending', 'sending', 'processing', 'unknown', 'pending_settlement', 'pending_manual'];
+const UNCERTAIN      = ['unknown', 'processing', 'sending'];   // interrogés par refreshPayoutStatus / reconcile
+const STALE_RESERVED = ['pending', 'sending'];      // réservation sans réponse rail : interrompu avant/pendant l'envoi
+const RESOLVABLE     = ['unknown', 'processing', 'sending', 'pending']; // décision Finance (resolveUncertainPayout), retraits wallet
 const MANUAL_QUEUE   = ['pending_manual', 'pending_settlement']; // pending_settlement = legacy /transfer/payout
 const CANCELLABLE    = ['awaiting_funds', 'pending_manual'];
 const REJECTABLE     = ['awaiting_funds', 'pending_manual', 'pending_settlement'];
@@ -553,7 +559,7 @@ async function createPayout(p) {
 
   // Résultat incertain : statut `unknown`, réservation conservée, référence/requête stockées (WAVE-6)
   const markUnknown = async ({ reason, gatewayReference = null, responseCode = null, railName = null }) => {
-    await transitionTransfer({ transferId, from: ['pending'], to: 'unknown',
+    await transitionTransfer({ transferId, from: STALE_RESERVED, to: 'unknown',
       patch: { gatewayReference, errorMessage: String(reason || 'Résultat opérateur incertain').slice(0, 200) },
       event: event('unknown', { rail: railName, reason: String(reason || '').slice(0, 200), responseCode, gatewayReference }) }).catch((e) => logger.error('cash: unknown transition failed', { transferId, err: e.message }));
     logger.warn('cash: payout outcome unknown (reservation kept)', { transferId, reason, rail: railName });
@@ -568,18 +574,22 @@ async function createPayout(p) {
           patch: { errorMessage: 'Opérateur non configuré' }, event: event('failed', { reason: 'rail_unavailable' }) });
         return { error: { status: 503, body: { error: `${operatorLabel(walletOperator)} non configuré`, code: 'OPERATOR_NOT_CONFIGURED', transferId } } };
       }
+      // Audit 2026-11-10 § 2 : état d'envoi durable AVANT l'appel rail (reprise après interruption, voir STALE_RESERVED)
+      const sendingRow = await transitionTransfer({ transferId, from: ['pending'], to: 'sending',
+        event: event('sending', { rail: rail.kind === 'mtn_client' ? 'mtn_client' : rail.gateway, gateway: rail.gateway || null }) });
+      if (!sendingRow) return markUnknown({ reason: 'Ordre déjà traité par ailleurs (état inattendu avant envoi)', railName: rail.gateway || rail.kind });
       if (rail.kind === 'mtn_client') {
         const mtn = require('../rails/mtn-momo.client');
         let d;
         try { d = await mtn.transfer({ amount: net, phone: walletPhone, description: description || 'Retrait C-Pay', externalId: ref }); }
         catch (err) {
           if (classifyRailError(err) === 'unknown') return markUnknown({ reason: err.message, railName: 'mtn_client', responseCode: err.statusCode || null });
-          await transitionTransfer({ transferId, from: ['pending'], to: 'failed',
+          await transitionTransfer({ transferId, from: ['sending'], to: 'failed',
             patch: { errorMessage: String(err.message || 'Retrait refusé').slice(0, 200) }, event: event('failed', { rail: 'mtn_client', reason: 'declined', responseCode: err.statusCode || null }) });
           return { error: { status: 502, body: { error: err.message, code: 'GATEWAY_ERROR', transferId, outcome: 'declined' } } };
         }
         if (!d || typeof d !== 'object') return markUnknown({ reason: 'Réponse opérateur illisible', railName: 'mtn_client' });
-        await transitionTransfer({ transferId, from: ['pending'], to: 'processing',
+        await transitionTransfer({ transferId, from: ['sending'], to: 'processing',
           patch: { gatewayReference: d.referenceId || null }, event: event('processing', { rail: 'mtn_client', gatewayReference: d.referenceId || null }) });
         return { transfer: { ...base, status: 'processing', gatewayReference: d.referenceId || null } };
       }
@@ -592,19 +602,19 @@ async function createPayout(p) {
       const outcome = classifyRailResult(res);
       const gwRef = res && (res.gatewayRef || res.authCode) ? (res.gatewayRef || res.authCode) : null;
       if (outcome === 'completed') {
-        await transitionTransfer({ transferId, from: ['pending'], to: 'completed',
+        await transitionTransfer({ transferId, from: ['sending'], to: 'completed',
           patch: { gatewayReference: gwRef }, event: event('completed', { rail: rail.gateway, responseCode: res.responseCode }) });
         return { transfer: { ...base, status: 'completed', gatewayReference: gwRef } };
       }
       if (outcome === 'accepted') {
-        await transitionTransfer({ transferId, from: ['pending'], to: 'processing',
+        await transitionTransfer({ transferId, from: ['sending'], to: 'processing',
           patch: { gatewayReference: gwRef }, event: event('processing', { rail: rail.gateway, responseCode: res.responseCode }) });
         return { transfer: { ...base, status: 'processing', gatewayReference: gwRef } };
       }
       if (outcome === 'unknown') {
         return markUnknown({ reason: res?.declineReason || 'Opérateur injoignable', gatewayReference: gwRef, responseCode: res?.responseCode || null, railName: rail.gateway });
       }
-      await transitionTransfer({ transferId, from: ['pending'], to: 'failed',
+      await transitionTransfer({ transferId, from: ['sending'], to: 'failed',
         patch: { errorMessage: String(res.declineReason || 'Retrait refusé').slice(0, 200) }, event: event('failed', { rail: rail.gateway, responseCode: res.responseCode, reason: res.declineReason || null }) });
       return { error: { status: 502, body: { error: res.declineReason || 'Retrait refusé par l’opérateur', code: 'GATEWAY_ERROR', transferId, outcome: 'declined', retryable: !!res.retryable } } };
     }
@@ -621,6 +631,37 @@ async function createPayout(p) {
     logger.error('cash: payout rail error (outcome unknown)', { transferId, err: err.message });
     return markUnknown({ reason: err.message || 'erreur rail', railName: rail?.kind || rail?.gateway || null, responseCode: err.statusCode || null });
   }
+}
+
+// ─── Décision Finance sur un retrait incertain (audit 2026-11-10 § 2) ──────────────
+/**
+ * Tranche un retrait wallet resté `unknown` / `processing` / `sending` / `pending` à partir d'une preuve externe
+ * (relevé opérateur, référence de transaction) : `completed` (fonds sortis) ou `failed` (fonds libérés).
+ * Ni renvoi, ni libération automatique : la décision est explicite, journalisée (événement `finance_decision`)
+ * et protégée par le claim de statut — une réponse opérateur tardive ne peut plus l'écraser (`late_operator_response`).
+ * @returns {{ transfer?: object, error?: { status:number, body:object } }}
+ */
+async function resolveUncertainPayout({ transferId, outcome, evidence, note, adminId = null, actor = 'admin' }) {
+  if (!['completed', 'failed'].includes(outcome)) return { error: { status: 422, body: { error: 'outcome: completed | failed', code: 'VALIDATION_ERROR' } } };
+  const ev = String(evidence || '').trim();
+  if (ev.length < 4) return { error: { status: 422, body: { error: 'evidence requis (référence du relevé opérateur ou de la vérification)', code: 'VALIDATION_ERROR' } } };
+  const t = await getTransfer(transferId);
+  if (!t) return { error: { status: 404, body: { error: 'Transfert introuvable', code: 'TRANSFER_NOT_FOUND' } } };
+  if (t.direction !== 'payout' || t.dest_type !== 'wallet' || !RESOLVABLE.includes(t.status)) {
+    return { error: { status: 409, body: { error: `Transfert non résoluble (statut ${t.status})`, code: 'INVALID_STATUS', status: t.status, resolvable: RESOLVABLE } } };
+  }
+  const row = await transitionTransfer({
+    transferId: t.transfer_id, from: RESOLVABLE, to: outcome,
+    patch: {
+      executedBy: adminId, adminNote: String(note || ev).slice(0, 500),
+      ...(outcome === 'completed' ? { gatewayReference: t.gateway_reference ? null : ev.slice(0, 128) } : { errorMessage: `Décision Finance : ${String(note || ev).slice(0, 180)}` }),
+      needsReview: false,
+    },
+    event: event('finance_decision', { by: actor, outcome, evidence: ev.slice(0, 200), note: note ? String(note).slice(0, 500) : null, from: t.status }),
+  });
+  if (!row) return { error: { status: 409, body: { error: 'Statut modifié entre-temps : recharger le transfert', code: 'INVALID_STATUS' } } };
+  logger.info('cash: finance decision on uncertain payout', { transferId: t.transfer_id, from: t.status, outcome, by: actor });
+  return { transfer: { ...t, ...row }, released: outcome === 'failed' ? num(t.amount) : 0 };
 }
 
 // ─── Notifications ops (e-mail best effort) ───────────────────────
@@ -683,7 +724,7 @@ async function notifyOpsBankPayout({ merchant, merchantId, ref, amt, fee, net, c
 // généré par le client rails) → reste `unknown` jusqu'à revue ops ; les providers du routeur MM
 // sont interrogés par txnId (= transfer_id, référence externe).
 async function refreshPayoutStatus(t, { graceMinutes = null, source = 'status_poll' } = {}) {
-  if (!t || !UNCERTAIN.includes(t.status) || t.direction !== 'payout' || t.dest_type !== 'wallet') return t;
+  if (!t || !(UNCERTAIN.includes(t.status) || STALE_RESERVED.includes(t.status)) || t.direction !== 'payout' || t.dest_type !== 'wallet') return t;
   const code = normalizeOperatorCode(t.wallet_operator);
   const savedGateway = t.request_payload?.gateway || null;
   const savedCountry = savedGateway && /_([a-z]{2})$/i.exec(savedGateway)?.[1];
@@ -693,15 +734,29 @@ async function refreshPayoutStatus(t, { graceMinutes = null, source = 'status_po
   const from = [t.status];
   // Every attempt, including unsupported/config/network failures, advances the durable
   // check timestamp. Returning the current row avoids reporting stale state after a callback.
+  const OPEN = [...UNCERTAIN, ...STALE_RESERVED];
   const checked = async (marker, error = null, review = false) => {
     const r = await query(`UPDATE merchant_transfers SET last_status_check_at=NOW(),
       needs_review = CASE WHEN status = ANY($2::text[]) AND $3 THEN TRUE ELSE needs_review END,
       events = CASE WHEN status = ANY($2::text[]) AND $3 AND NOT COALESCE(needs_review,FALSE)
         THEN COALESCE(events,'[]'::jsonb) || $4::jsonb ELSE events END
       WHERE transfer_id=$1 RETURNING *`,
-    [t.transfer_id, UNCERTAIN, review, JSON.stringify([event('needs_review', { source, reason: marker })])]);
+    [t.transfer_id, OPEN, review, JSON.stringify([event('needs_review', { source, reason: marker })])]);
     return { ...t, ...(r.rows[0] || {}), _statusCheck: marker, ...(error ? { _statusError: String(error).slice(0, 200) } : {}) };
   };
+  // Audit 2026-11-10 § 2 : réponse opérateur arrivée APRÈS une décision Finance (ou une autre finalisation) —
+  // la ligne n'est plus dans l'état attendu : rien n'est écrasé, l'information est journalisée pour la revue.
+  const lateResponse = async (providerStatus, extra = {}) => {
+    const r = await query(`UPDATE merchant_transfers SET events = COALESCE(events,'[]'::jsonb) || $2::jsonb
+      WHERE transfer_id=$1 RETURNING *`,
+    [t.transfer_id, JSON.stringify([event('late_operator_response', { source, expectedFrom: t.status, providerStatus, ...extra })])]);
+    const row = r.rows[0] || {};
+    return { ...t, ...row, _statusCheck: 'already_final', _lateResponse: providerStatus };
+  };
+  // Réservation interrompue avant/pendant l'envoi, sans référence opérateur : rien à interroger → revue après la grâce
+  if (STALE_RESERVED.includes(t.status) && !t.gateway_reference) {
+    return ageMinutes < grace ? checked('interrupted_in_grace') : checked('interrupted_before_response', null, true);
+  }
   try {
     let st = null; let reason = null; let gatewayRef = null;
     // An aggregator's reference belongs to its account/API, not to the direct
@@ -719,7 +774,7 @@ async function refreshPayoutStatus(t, { graceMinutes = null, source = 'status_po
       return checked('original_gateway_unsupported');
     }
     if (code === 'mtn_momo') {
-      if (!t.gateway_reference) return checked('no_reference');
+      if (!t.gateway_reference) return checked('no_reference', null, ageMinutes >= grace);
       let s = null;
       if (!country) return checked('config_unavailable', 'Pays du rail MTN inconnu');
       try {
@@ -753,7 +808,7 @@ async function refreshPayoutStatus(t, { graceMinutes = null, source = 'status_po
         if (airtel) {
           // Airtel generates its own reference in sendPayout; the internal UUID is
           // not a usable substitute after a timeout before its response.
-          if (!t.gateway_reference) return checked('no_reference');
+          if (!t.gateway_reference) return checked('no_reference', null, ageMinutes >= grace);
           const a = await provider.queryDisbursement({ txId: t.gateway_reference, currency: t.currency || 'XAF', config: cfg });
           s = a && { status: a.success === true ? 'SUCCESSFUL' : a.failed === true ? 'FAILED' : a.pending === true ? 'PENDING' : a.rawStatus,
             reason: a.message, gatewayRef: a.airtelMoneyId };
@@ -766,12 +821,12 @@ async function refreshPayoutStatus(t, { graceMinutes = null, source = 'status_po
     if (st === 'SUCCESSFUL' || st === 'SUCCESS' || st === 'COMPLETED') {
       const row = await transitionTransfer({ transferId: t.transfer_id, from, to: 'completed',
         patch: { gatewayReference: gatewayRef }, event: event('completed', { source, from: t.status, gatewayReference: gatewayRef }) });
-      return row ? { ...t, ...row } : checked('already_final');
+      return row ? { ...t, ...row } : lateResponse(st, { gatewayReference: gatewayRef });
     }
     if (st === 'FAILED' || st === 'REJECTED') {
       const row = await transitionTransfer({ transferId: t.transfer_id, from, to: 'failed',
         patch: { errorMessage: String(reason || 'Retrait échoué').slice(0, 200) }, event: event('failed', { source, from: t.status, reason, providerStatus: st }) });
-      return row ? { ...t, ...row } : checked('already_final');
+      return row ? { ...t, ...row } : lateResponse(st, { reason });
     }
     if (st === 'NOT_FOUND') {
       if (ageMinutes < grace) {
@@ -794,7 +849,7 @@ async function claimPayoutReviewNotification(t, ageHours, alertHours) {
   return withTransaction(async (client) => {
     const r = await client.query('SELECT * FROM merchant_transfers WHERE transfer_id=$1 FOR UPDATE', [t.transfer_id]);
     const row = r.rows[0];
-    if (!row || !UNCERTAIN.includes(row.status)) return null;
+    if (!row || !(UNCERTAIN.includes(row.status) || STALE_RESERVED.includes(row.status))) return null;
     const events = Array.isArray(row.events) ? row.events : [];
     const previous = events.find(e => e.type === 'review_notification');
     // Legacy timestamps were recorded as delivery, so never resend them merely
@@ -832,16 +887,21 @@ async function finishPayoutReviewNotification(transferId, token, sent) {
  */
 async function sweepUncertainPayouts({ graceMinutes = null, alertHours = null, limit = 200 } = {}) {
   const alertH = alertHours === null || alertHours === undefined ? unknownAlertHours() : Number(alertHours);
+  const grace = graceMinutes === null || graceMinutes === undefined ? unknownGraceMinutes() : Number(graceMinutes);
+  // Audit 2026-11-10 § 2 : les réservations `sending` / `pending` (wallet) plus vieilles que la grâce sont des envois
+  // interrompus : reprises ici (statut opérateur si référence, sinon revue), jamais renvoyées.
   const r = await query(
     `${TRANSFER_SELECT}
-     WHERE mt.direction='payout' AND mt.dest_type='wallet' AND mt.status = ANY($1::text[])
+     WHERE mt.direction='payout' AND mt.dest_type='wallet'
+       AND (mt.status = ANY($1::text[])
+            OR (mt.status = ANY($3::text[]) AND mt.created_at < NOW() - ($4 || ' minutes')::interval))
      ORDER BY COALESCE(mt.last_status_check_at, mt.created_at) ASC, mt.transfer_id ASC LIMIT $2`,
-    [UNCERTAIN, Math.min(1000, Math.max(1, parseInt(limit, 10) || 200))]);
+    [UNCERTAIN.filter((st) => !STALE_RESERVED.includes(st)), Math.min(1000, Math.max(1, parseInt(limit, 10) || 200)), STALE_RESERVED, String(Math.max(0, grace))]);
   const results = [];
   for (const t of r.rows) {
     const out = await refreshPayoutStatus(t, { graceMinutes, source: 'reconcile' });
     const entry = { transferId: t.transfer_id, reference: t.reference, from: t.status, status: out.status, check: out._statusCheck || null };
-    if (UNCERTAIN.includes(out.status)) {
+    if (UNCERTAIN.includes(out.status) || STALE_RESERVED.includes(out.status)) {
       const ageH = (Date.now() - new Date(t.unknown_since || t.created_at).getTime()) / 3600000;
       if (ageH >= alertH || out.needs_review) {
         const claim = await claimPayoutReviewNotification(t, ageH, alertH);
@@ -858,7 +918,7 @@ async function sweepUncertainPayouts({ graceMinutes = null, alertHours = null, l
     scanned: r.rows.length,
     completed: results.filter((x) => x.status === 'completed' && x.from !== 'completed').length,
     failed: results.filter((x) => x.status === 'failed').length,
-    still_uncertain: results.filter((x) => UNCERTAIN.includes(x.status)).length,
+    still_uncertain: results.filter((x) => UNCERTAIN.includes(x.status) || STALE_RESERVED.includes(x.status)).length,
     flagged: results.filter((x) => x.needsReview).length,
     errors: results.filter((x) => x.check === 'error').length,
   };
@@ -1119,7 +1179,7 @@ module.exports = {
   generateReference, referenceFromDescription,
   // règles
   TRANSFER_MIN, FUNDING_EXPIRES_DAYS, FEE_RATES, CASH_LIMITS, CASH_LIMITS_DEFAULT, withdrawDailyLimit,
-  OUT_NOT_FAILED, OUT_INFLIGHT, UNCERTAIN, MANUAL_QUEUE, CANCELLABLE, REJECTABLE, FINAL, HISTORY_TYPES,
+  OUT_NOT_FAILED, OUT_INFLIGHT, UNCERTAIN, STALE_RESERVED, RESOLVABLE, MANUAL_QUEUE, CANCELLABLE, REJECTABLE, FINAL, HISTORY_TYPES,
   // opérateurs
   OPERATOR_LABELS, normalizeOperatorCode, operatorLabel, detectWallet, maskNumber,
   // solde / frais
@@ -1128,6 +1188,7 @@ module.exports = {
   payoutRail, collectRail, cardGatewayFor,
   // WAVE-6 : classification des résultats rail, retraits incertains, ops
   classifyRailResult, classifyRailError, unknownGraceMinutes, unknownAlertHours, sweepUncertainPayouts, notifyOps, notifyOpsUnknownPayout,
+  resolveUncertainPayout,
   // WAVE-6 : bénéficiaires
   recordBeneficiaryEvent, beneficiaryHistory, serializeBeneficiaryEvent, notifyBeneficiaryChange, maskBankAccount, maskWallet,
   // step-up

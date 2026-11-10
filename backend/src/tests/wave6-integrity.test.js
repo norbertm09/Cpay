@@ -180,7 +180,7 @@ describe('1. Résultat opérateur incertain → statut unknown, réservation con
     expect(t.status).toBe('unknown'); expect(t.unknown_since).toBeTruthy(); expect(t.needs_review).toBe(false);
     expect(t.request_payload).toMatchObject({ gateway: 'orange_cm', amount: 49500, currency: 'XAF', externalId: r.body.reference });
     expect(t.request_payload.phoneMasked).toMatch(/^\*+001$/);
-    expect(t.events.map((e) => e.type)).toEqual(['created', 'unknown']);
+    expect(t.events.map((e) => e.type)).toEqual(['created', 'sending', 'unknown']);   // audit 2026-11-10 : etat d'envoi durable
     expect(await available()).toBe(50000);           // réservation conservée
     // l'opérateur confirme l'exécution → completed (via GET /transfers/:id)
     mockGetStatus.mockResolvedValue({ available: true, status: 'SUCCESSFUL', gatewayRef: 'OP-REF-1' });

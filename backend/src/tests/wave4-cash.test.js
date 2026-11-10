@@ -443,8 +443,11 @@ describe('5. POST /merchant/cash/withdraw', () => {
     const [, ins] = calls(mockTxQuery, /INSERT INTO merchant_transfers/)[0];
     expect(ins.slice(1, 6)).toEqual(['wallet', null, 'mtn_momo', '+237670000001', 50000]);
     expect(mockSendPayout).toHaveBeenCalledWith(expect.objectContaining({ txnId: TRANSFER_ID, amount: 49500, currency: 'XAF', phone: '+237670000001', gateway: 'mtn_cm', operator: 'MTN_MOMO' }));
-    const [sql, params] = calls(mockDbQuery, /UPDATE merchant_transfers/)[0];
-    expect(params[1]).toBe('processing'); expect(params[11]).toEqual(['pending']); expect(params[4]).toBe('MM-REF');
+    // audit 2026-11-10 : premiere transition pending → sending (etat d'envoi durable), puis sending → processing
+    const [, sendingParams] = calls(mockDbQuery, /UPDATE merchant_transfers/)[0];
+    expect(sendingParams[1]).toBe('sending'); expect(sendingParams[11]).toEqual(['pending']);
+    const [sql, params] = calls(mockDbQuery, /UPDATE merchant_transfers/)[1];
+    expect(params[1]).toBe('processing'); expect(params[11]).toEqual(['sending']); expect(params[4]).toBe('MM-REF');
     expect(JSON.parse(params[3])[0]).toMatchObject({ type: 'processing', rail: 'mtn_cm' });
     expect(sql).toMatch(/events = COALESCE\(events, '\[\]'::jsonb\) \|\| \$4::jsonb/);
   });
@@ -473,7 +476,7 @@ describe('5. POST /merchant/cash/withdraw', () => {
     res = await withdraw({ amount: 50000, confirm });
     expect(res.status).toBe(502);
     expect(res.body).toMatchObject({ code: 'GATEWAY_ERROR', transferId: TRANSFER_ID });
-    const [, params] = calls(mockDbQuery, /UPDATE merchant_transfers/)[0];
+    const [, params] = calls(mockDbQuery, /UPDATE merchant_transfers/)[1];   // [0] = pending → sending
     expect(params[1]).toBe('failed'); expect(params[6]).toBe('Compte inactif');
     expect(calls(mockDbQuery, /cash_wallet_verified_at = NOW/)).toHaveLength(0);
   });

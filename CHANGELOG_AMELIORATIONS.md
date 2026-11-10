@@ -1,5 +1,18 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-audit1110-finance (2026-11-10) — audit du 10 novembre, § 2 risques financiers
+* Identite de route canonique (`utils/route-identity.js`) pour l'idempotence (cle obligatoire, identite de la cle) et la
+  garde de capacite : `/Withdraw`, `/withdraw/` et `/withdraw` = une seule intention ; une variante d'URL ne cree plus
+  un second ordre ni ne contourne les controles.
+* Webhooks Mobile Money : un callback authentifie pour un operateur ne finalise que les transactions de cet operateur
+  (`gateway_name` persiste, a defaut `detected_operator`) — un jeton Moov ne finalise plus un encaissement Orange.
+* Retraits : etat d'envoi durable `sending` pose avant l'appel rail ; les envois interrompus (`sending` / anciens
+  `pending`) restent reserves, sont repris par le rapprochement et mis en revue apres la grace, sans renvoi ni
+  liberation automatique ; `POST /admin/cash/transfers/:id/resolve` (decision Finance sur preuve, `finance_decision`) ;
+  une reponse operateur tardive ne peut plus ecraser une decision (`late_operator_response`). Back-office : action
+  « Decision Finance » dans le volet d'un transfert ; libelle `sending` dans les portails et les applications.
+* Tests `audit-1110-financial.test.js` (14 cas, PGlite, operateurs simules).
+
 ## 2.7.2-hotfix-portails (2026-11-10) — portails en 502 apres le lot 7
 * Cause : dans `docker/Dockerfile.portal` et `portal/partners/Dockerfile`, `nginx -t` etait execute en root au build de
   l'image `nginx-unprivileged` ; il creait `/tmp/client_temp` & co. en root, que l'utilisateur nginx ne pouvait plus

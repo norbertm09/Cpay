@@ -204,6 +204,8 @@ export const cashApi = {
   confirmFunds: (id, data) => api.post(`/cash/transfers/${id}/confirm-funds`, data),
   markExecuted: (id, data) => api.post(`/cash/transfers/${id}/mark-executed`, data),
   reject: (id, reason) => api.post(`/cash/transfers/${id}/reject`, { reason }),
+  // Audit 2026-11-10 : décision Finance sur un retrait incertain (unknown/processing/sending/pending) — jamais de renvoi
+  resolve: (id, data) => api.post(`/cash/transfers/${id}/resolve`, data),
   platformAccounts: () => api.get('/cash/platform-accounts', quiet),
   createPlatformAccount: (data) => api.post('/cash/platform-accounts', data),
   updatePlatformAccount: (id, data) => api.patch(`/cash/platform-accounts/${id}`, data),

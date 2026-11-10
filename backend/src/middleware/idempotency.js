@@ -29,6 +29,8 @@
 const crypto = require('crypto');
 const { query } = require('../config/database');
 const logger = require('../config/logger');
+// Audit 2026-11-10 § 2 : identité de route canonique (casse, slash final, doubles slashs)
+const { canonicalPath, routeIdentity } = require('../utils/route-identity');
 
 const PURGE_INTERVAL_MS = 10 * 60 * 1000;
 let _lastPurge = 0;
@@ -42,7 +44,7 @@ const ttlHours = () => {
 const MONEY_ENDPOINTS = ['/cash/withdraw', '/cash/transfers', '/cash/collect', '/transfer/payout', '/disburse', '/collect', '/payout'];
 const isMoneyEndpoint = (req) => {
   if (String(req.method).toUpperCase() !== 'POST') return false;
-  const path = String(req.originalUrl || req.url || '').split('?')[0].replace(/\/+$/, '');
+  const path = canonicalPath(req.originalUrl || req.url);
   return MONEY_ENDPOINTS.some((p) => path === p || path.endsWith(p));
 };
 
@@ -103,7 +105,7 @@ const keyContext = (req) => {
   return {
     key,
     merchantId: req.user?.merchantId || req.user?.sub || 'anonymous',
-    endpoint: `${req.method} ${req.originalUrl.split('?')[0]}`,
+    endpoint: routeIdentity(req),   // `/Withdraw`, `/withdraw/` et `/withdraw` = une seule intention
   };
 };
 

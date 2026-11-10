@@ -144,7 +144,11 @@ du wallet n'a pas de rail de paiement sortant configuré.
   "iban?", "swift?", "reference": "FND-XXXXXX", "expiresAt" } }`. Sans compte de collecte pour la devise :
   `409 FUNDING_UNAVAILABLE`. **Aucune confirmation forte n'est exigée** pour `bank_to_wallet` (aucun fonds ne
   quitte le compte) : `confirm` est ignoré ; le step-up ne s'applique qu'à `wallet_to_bank`.
-- Statuts : `pending`, `processing`, `unknown`, `pending_manual`, `awaiting_funds`, `completed`, `failed`, `cancelled`, `rejected`
+- Statuts : `pending`, `sending`, `processing`, `unknown`, `pending_manual`, `awaiting_funds`, `completed`, `failed`, `cancelled`, `rejected`
+  - `sending` (audit du 10/11/2026) : état d'envoi **durable**, posé juste avant l'appel à l'opérateur. Un processus
+    interrompu entre la réservation et la réponse laisse la ligne en `sending` (ou `pending` pour les lignes antérieures) :
+    fonds réservés, reprise par le rapprochement (statut opérateur si une référence existe), `needsReview` après la période
+    de grâce, **jamais de renvoi ni de libération automatique** ; seule une décision Finance (`/admin/cash/transfers/:id/resolve`) tranche.
   (+ `pending_settlement`, statut historique des transferts créés par `POST /merchant/transfer/payout`, traité comme
   `pending_manual` par l'admin).
   - `unknown` (vague 6) : résultat opérateur incertain (timeout, réseau, 5xx, réponse illisible) pour un retrait /
@@ -179,7 +183,8 @@ que les autres routes (pas d'auth par cookie). Entrées : `collect|transfer_in` 
 | GET | `/admin/cash/transfers?status&direction&merchantId&q&needsReview&limit&offset` | liste (`status=uncertain` = `unknown,processing` ; `needsReview=1`) |
 | GET | `/admin/cash/transfers/:id` | détail + journal des changements ; rafraîchit `processing`/`unknown` ; `needsReview`, `unknownSince`, `requestPayload`, `context.beneficiaryHistory` |
 | GET | `/admin/cash/reconcile/status` | état du worker de ce processus : planification, exécution, dernier succès, échecs et résumés des trois traitements ; aucune donnée fournisseur sensible |
-| POST | `/admin/cash/reconcile/uncertain-payouts` `{ graceMinutes? }` | interroge l'opérateur pour tous les retraits `unknown`/`processing` (même logique que le cron) |
+| POST | `/admin/cash/reconcile/uncertain-payouts` `{ graceMinutes? }` | interroge l'opérateur pour tous les retraits `unknown`/`processing` et les envois interrompus (`sending`/`pending` plus vieux que la grâce) ; même logique que le cron |
+| POST | `/admin/cash/transfers/:id/resolve` `{ outcome: completed \| failed, evidence, note? }` | **décision Finance** (rôles finance, ops, super) sur un retrait wallet `unknown`/`processing`/`sending`/`pending` à partir d'une preuve externe (relevé opérateur). `completed` = fonds sortis (la preuve devient la référence opérateur si absente) ; `failed` = libération explicite des fonds, marchand notifié. Événement `finance_decision` ; une réponse opérateur ultérieure est journalisée (`late_operator_response`) sans rien écraser |
 | POST | `/admin/cash/repair/settlement-queue` `{ minAgeMinutes? }` | enfile les encaissements `authorized` sans ligne `settlement_queue` (> 5 min) |
 | GET | `/admin/cash/bank-accounts?status=pending_verification` | comptes marchands masqués ; cette file inclut `pending` historique. Filtres `verified` et `rejected`, méthode/référence de contrôle et motif de refus renvoyés ; maximum 200 lignes |
 | POST | `/admin/cash/bank-accounts/:id/verify` `{ method: "document\|micro_deposit\|manual", reference, note? }` | `pending_verification` ou `pending` → `verified` ; référence de 1 à 128 caractères, note facultative de 1000 caractères maximum ; déjà vérifié → `409 ALREADY_VERIFIED` |
@@ -247,6 +252,15 @@ matrice complète avec les prérequis. Les `GET` de la caisse ne sont jamais fil
 la route (`422 VALIDATION_ERROR`). L'inscription (`POST /merchant/auth/register`) est refusée (`422 COUNTRY_NOT_OPEN`)
 pour un pays sans encaissement `active|pilot` ou hors périmètre (SN, CI).
 
+
+## 10 bis. Identité de route et liaison des callbacks (audit du 10/11/2026)
+
+- Les contrôles fondés sur le chemin (clé d'idempotence obligatoire, garde de capacité, identité de la clé) utilisent
+  un chemin **canonique** (`utils/route-identity.js` : minuscules, slash final et doubles slashs retirés) :
+  `/withdraw`, `/Withdraw` et `/withdraw/` sont une seule intention — même clé ⇒ même ordre, variante ⇒ même refus.
+- Un callback Mobile Money n'est rapproché que des transactions **de l'opérateur authentifié** (`gateway_name`
+  `<provider>_<pays>` persisté à l'initiation, à défaut `detected_operator`) : une référence appartenant à un autre
+  opérateur est traitée comme inconnue (`unknown_reference`), sans changement d'état.
 
 ## 11. Reprise automatique des opérations incertaines (lot 4)
 

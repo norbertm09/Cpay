@@ -107,7 +107,7 @@ const DIRECTION_SQL = {
   payout:         `mt.direction='payout'`,
   funding:        `mt.direction='funding'`,
 };
-const STATUS_ALIASES = { pending_manual: cash.MANUAL_QUEUE, uncertain: cash.UNCERTAIN };
+const STATUS_ALIASES = { pending_manual: cash.MANUAL_QUEUE, uncertain: [...cash.UNCERTAIN, 'pending'] };
 
 router.get('/transfers', cashAdmin, async (req, res) => {
   const { status, direction, merchantId, q, needsReview } = req.query;
@@ -139,7 +139,7 @@ router.get('/transfers', cashAdmin, async (req, res) => {
 router.get('/transfers/:id', cashAdmin, async (req, res) => {
   let t = await cash.getTransfer(req.params.id);
   if (!t) return fail(res, 404, 'Transfert introuvable', 'TRANSFER_NOT_FOUND');
-  if (cash.UNCERTAIN.includes(t.status)) t = await cash.refreshPayoutStatus(t);
+  if (cash.UNCERTAIN.includes(t.status) || cash.STALE_RESERVED.includes(t.status)) t = await cash.refreshPayoutStatus(t);
   let beneficiaryHistory = [];
   try { beneficiaryHistory = (await cash.beneficiaryHistory(t.merchant_id, { limit: 10 })).data; }
   catch (e) { logger.warn('[cash-admin] beneficiary history failed', { err: e.message }); }
@@ -305,6 +305,23 @@ router.post('/transfers/:id/mark-executed', cashAdmin, async (req, res) => {
   notifyMerchant(t, `Virement effectué — ${Number(t.net_amount || t.amount)} ${t.currency || ''}`,
     `<p>Bonjour ${t.business_name || ''},</p><p>Le virement <b>${t.reference}</b> de <b>${Number(t.net_amount || t.amount)} ${t.currency || ''}</b> vers ${t.inst_name || 'votre banque'} (compte ${cash.maskNumber(t.account_number)}) a été exécuté.</p><p>Référence bancaire : <code>${String(bankReference)}</code>. Le crédit peut prendre 24 à 48 h selon votre banque.</p>`).catch(() => {});
   res.json({ success: true, ...cash.serializeTransfer({ ...t, ...row }, { admin: true }) });
+});
+
+// Audit 2026-11-10 § 2 : décision Finance sur un retrait incertain (unknown / processing / sending / pending wallet)
+//   { outcome: 'completed' | 'failed', evidence: '<référence relevé opérateur>', note? } — jamais de renvoi ;
+//   `failed` libère les fonds sur décision explicite seulement. Rôle finance ou ops (super_admin inclus).
+router.post('/transfers/:id/resolve', requireRole('super_admin', 'ops_admin', 'finance_admin'), async (req, res) => {
+  const { outcome, evidence, note } = req.body || {};
+  const r = await cash.resolveUncertainPayout({ transferId: req.params.id, outcome, evidence, note, adminId: actorId(req), actor: `admin:${req.user?.sub || ''}` });
+  if (r.error) return res.status(r.error.status).json(r.error.body);
+  const t = r.transfer;
+  await audit(req, 'CASH_TRANSFER_FINANCE_DECISION', 'merchant_transfer', t.transfer_id,
+    { reference: t.reference, merchantId: t.merchant_id, outcome, evidence: String(evidence).slice(0, 200), note: note ? String(note).slice(0, 500) : null }, { status: t.status });
+  if (outcome === 'failed') {
+    notifyMerchant(t, `Retrait non abouti — ${t.reference}`,
+      `<p>Bonjour ${t.business_name || ''},</p><p>Après vérification auprès de l’opérateur, le retrait <b>${t.reference}</b> (${Number(t.amount)} ${t.currency || ''}) n’a pas abouti. Les fonds sont de nouveau disponibles sur votre solde.</p>`).catch(() => {});
+  }
+  res.json({ success: true, released: r.released, ...cash.serializeTransfer(t, { admin: true }) });
 });
 
 // → rejected : libère les fonds (le statut sort des sorties comptées dans le solde)

@@ -13,7 +13,7 @@ object StatusUi {
 
     fun statusLabel(ctx: Context, status: String?): String = when (status) {
         "pending"        -> ctx.getString(R.string.status_pending)
-        "processing"     -> ctx.getString(R.string.status_processing)
+        "processing", "sending" -> ctx.getString(R.string.status_processing)   // sending : envoi en cours (audit 2026-11-10), fonds reserves
         "pending_manual", "pending_settlement" -> ctx.getString(R.string.status_pending_manual)
         "awaiting_funds" -> ctx.getString(R.string.status_awaiting_funds)
         "completed"      -> ctx.getString(R.string.status_completed)
