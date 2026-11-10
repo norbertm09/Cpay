@@ -43,7 +43,7 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
   const { data, loading, error, reload } = useQuery(() => cashApi.transfer(id).then((r) => r.data), [id]);
   const t = data || initial;
   const [action, setAction] = useState(null);
-  const [form, setForm] = useState({ amountReceived: '', bankReference: '', reason: '', note: '' });
+  const [form, setForm] = useState({ amountReceived: '', bankReference: '', reason: '', note: '', outcome: 'completed', evidence: '' });
   const [busy, setBusy] = useState(false);
 
   if (!t && loading) return <Drawer title="Transfert" onClose={onClose}><Skeleton lines={8} /></Drawer>;
@@ -51,7 +51,7 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
 
   const dir = directionOf(t);
   const cur = t.currency;
-  const openAction = (a) => { setForm({ amountReceived: String(t.amount ?? ''), bankReference: '', reason: '', note: '' }); setAction(a); };
+  const openAction = (a) => { setForm({ amountReceived: String(t.amount ?? ''), bankReference: '', reason: '', note: '', outcome: 'completed', evidence: '' }); setAction(a); };
   const run = async () => {
     setBusy(true);
     try {
@@ -65,6 +65,10 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
         if (!form.bankReference.trim()) throw new Error('Référence bancaire requise');
         await cashApi.markExecuted(id, { bankReference: form.bankReference.trim(), note: form.note || undefined });
         toast.success('Virement marqué comme exécuté.');
+      } else if (action === 'resolve') {
+        if (form.evidence.trim().length < 4) throw new Error('Indiquez la référence du relevé opérateur');
+        const { data: r } = await cashApi.resolve(id, { outcome: form.outcome, evidence: form.evidence.trim(), note: form.note || undefined });
+        toast.success(form.outcome === 'completed' ? 'Retrait confirmé sur preuve opérateur.' : `Retrait déclaré non abouti : ${fmtMoney(r?.released, cur)} libérés.`);
       } else {
         if (form.reason.trim().length < 3) throw new Error('Indiquez un motif');
         await cashApi.reject(id, form.reason.trim());
@@ -75,8 +79,11 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
     finally { setBusy(false); }
   };
 
-  const TITLES = { confirm: 'Confirmer la réception des fonds', execute: 'Marquer le virement exécuté', reject: 'Rejeter le transfert' };
+  const TITLES = { confirm: 'Confirmer la réception des fonds', execute: 'Marquer le virement exécuté', reject: 'Rejeter le transfert', resolve: 'Décision Finance sur un retrait incertain' };
   const actionable = canAct && !loading && !error && !t.needsReview && (t.status === 'awaiting_funds' || MANUAL.includes(t.status));
+  // Audit 2026-11-10 : retrait wallet resté incertain (unknown / processing / sending / pending) → décision sur preuve
+  const RESOLVABLE = ['unknown', 'processing', 'sending', 'pending'];
+  const resolvable = canAct && !loading && !error && t.wallet && t.direction !== 'bank_to_wallet' && RESOLVABLE.includes(t.status);
 
   return (
     <Drawer title={`${dir.label} · ${t.reference || ''}`} sub={`${fmtMoney(t.amount, cur)} · créé le ${fmtDateTime(t.createdAt)}`} onClose={onClose}
@@ -84,7 +91,7 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
         <Button variant="danger-outline" icon="x" onClick={() => openAction('reject')}>Rejeter</Button>
         {t.status === 'awaiting_funds' && <Button variant="success" icon="check" onClick={() => openAction('confirm')}>Confirmer la réception</Button>}
         {MANUAL.includes(t.status) && <Button variant="primary" icon="check" onClick={() => openAction('execute')}>Marquer exécuté</Button>}
-      </> : null}>
+      </> : resolvable ? <Button variant="primary" icon="shield" onClick={() => openAction('resolve')}>Décision Finance</Button> : null}>
       <div className="stack-lg">
         <div className="row-wrap"><StatusBadge status={t.status} /><Badge tone={dir.tone}>{dir.label}</Badge>{loading && <span className="xs muted">actualisation…</span>}</div>
         {error && <div role="alert"><ErrorState error={errorMessage(error)} onRetry={reload} /></div>}
@@ -107,10 +114,22 @@ export default function CashTransferDrawer({ id, initial, onClose, onChanged }) 
         <div><h3 className="mb-2">Journal des changements</h3><Events events={t.events} /></div>
       </div>
 
-      {action && actionable && (
+      {action && (actionable || (action === 'resolve' && resolvable)) && (
         <Modal title={TITLES[action]} sub={`${t.reference} · ${fmtMoney(t.amount, cur)} · ${t.merchant || ''}`} onClose={busy ? undefined : () => setAction(null)} size="sm"
-          footer={<><Button onClick={() => setAction(null)} disabled={busy}>Annuler</Button><Button variant={action === 'reject' ? 'danger' : 'success'} loading={busy} onClick={run}>{action === 'reject' ? 'Confirmer le rejet' : 'Confirmer'}</Button></>}>
+          footer={<><Button onClick={() => setAction(null)} disabled={busy}>Annuler</Button><Button variant={action === 'reject' || (action === 'resolve' && form.outcome === 'failed') ? 'danger' : 'success'} loading={busy} onClick={run}>{action === 'reject' ? 'Confirmer le rejet' : action === 'resolve' ? (form.outcome === 'failed' ? 'Déclarer non abouti et libérer' : 'Confirmer le retrait') : 'Confirmer'}</Button></>}>
           <div className="stack">
+            {action === 'resolve' && <>
+              <Callout tone="warn">Aucun renvoi n’est effectué. La décision est journalisée (événement « finance_decision ») et une réponse opérateur ultérieure ne pourra plus la modifier.</Callout>
+              <Field label="Constat après vérification du relevé opérateur" required>
+                <div className="row-wrap">
+                  <label className="check"><input type="radio" name="outcome" checked={form.outcome === 'completed'} onChange={() => setForm((f) => ({ ...f, outcome: 'completed' }))} /> Fonds sortis chez l’opérateur (retrait effectué)</label>
+                  <label className="check"><input type="radio" name="outcome" checked={form.outcome === 'failed'} onChange={() => setForm((f) => ({ ...f, outcome: 'failed' }))} /> Aucune sortie de fonds (libérer la réservation)</label>
+                </div>
+              </Field>
+              <Field label="Preuve : référence du relevé ou de la transaction opérateur" required><Input value={form.evidence} onChange={(v) => setForm((f) => ({ ...f, evidence: v }))} placeholder="ex. MTN FT-2026110900123 / relevé du 09/11" aria-label="Preuve" /></Field>
+              <Field label="Note interne"><Input value={form.note} onChange={(v) => setForm((f) => ({ ...f, note: v }))} /></Field>
+              {form.outcome === 'failed' && <Callout tone="error">Les {fmtMoney(t.amount, cur)} réservés redeviennent disponibles pour le marchand, qui est notifié. À n’utiliser qu’avec la preuve que l’opérateur n’a rien versé.</Callout>}
+            </>}
             {action === 'confirm' && <>
               <Field label={`Montant reçu (${cur || 'devise du marchand'})`} required><Input type="number" inputMode="decimal" value={form.amountReceived} onChange={(v) => setForm((f) => ({ ...f, amountReceived: v }))} /></Field>
               <Field label="Référence du virement reçu" required><Input value={form.bankReference} onChange={(v) => setForm((f) => ({ ...f, bankReference: v }))} placeholder="Libellé / référence bancaire" /></Field>

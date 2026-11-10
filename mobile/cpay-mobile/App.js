@@ -502,7 +502,7 @@ const operatorCodeFor = (d) => {
   return hit ? hit[0] : null;
 };
 const transferStatusLabel = (st) => ({
-  pending: 'En attente', processing: 'En cours', pending_manual: 'Traitement J+1', awaiting_funds: 'Virement attendu',
+  pending: 'En attente', sending: 'Envoi en cours', processing: 'En cours', pending_manual: 'Traitement J+1', awaiting_funds: 'Virement attendu',
   completed: 'Effectué', failed: 'Échoué', cancelled: 'Annulé', rejected: 'Rejeté', authorized: 'Autorisé', expired: 'Expiré',
   unknown: 'Résultat incertain', // lot 5 (P1-2) : operateur muet, fonds reserves — jamais un succes
 }[st] || st || '—');

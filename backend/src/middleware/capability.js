@@ -68,8 +68,10 @@ async function merchantCountry(req) {
 }
 
 /** Opération / méthode demandées par un POST caisse (null = la garde ne s'applique pas). */
+// Audit 2026-11-10 § 2 : chemin canonique (Express route `/Withdraw` et `/withdraw/` vers le même handler)
+const { canonicalPath, lastSegment } = require('../utils/route-identity');
 const mapCashRequest = (req) => {
-  const path = String(req.path || '').replace(/\/+$/, '') || '/';
+  const path = canonicalPath(req.path);
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   if (path === '/collect') {
     if (!['mobile_money', 'card'].includes(body.method)) return null;          // la route renvoie 422
@@ -85,9 +87,8 @@ const mapCashRequest = (req) => {
 
 /** Routes historiques : /merchant/collect, /merchant/disburse, /collect, /payout. */
 const mapLegacyRequest = (req) => {
-  const path = String(req.path || '').replace(/\/+$/, '');
   const body = req.body && typeof req.body === 'object' ? req.body : {};
-  const last = path.split('/').pop();
+  const last = lastSegment(req.path);
   const card = ['card', 'card_nfc', 'qr'].includes(String(body.method || '').toLowerCase()) || !!body.emvPayload || !!body.aidDetected;
   if (last === 'collect') return { operation: 'collect', method: card ? 'card' : 'mobile_money', operator: card ? null : (body.method && body.method !== 'mobile_money' ? body.method : body.operator) };
   if (last === 'disburse' || last === 'payout') return { operation: 'withdraw', method: card ? 'card' : 'mobile_money', operator: card ? null : (body.method && body.method !== 'mobile_money' ? body.method : body.operator) };

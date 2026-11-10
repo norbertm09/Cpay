@@ -4,7 +4,7 @@ const S = (label, tone) => ({ label, tone });
 export const STATUS = {
   // Transactions
   authorized: S('Autorisée', 'success'), approved: S('Approuvée', 'success'), completed: S('Terminé', 'success'),
-  failed: S('Échouée', 'error'), pending: S('En attente', 'warn'), processing: S('En cours', 'info'),
+  failed: S('Échouée', 'error'), pending: S('En attente', 'warn'), sending: S('Envoi en cours', 'warn'), processing: S('En cours', 'info'),
   reversed: S('Annulée', 'neutral'), cancelled: S('Annulé', 'neutral'), rejected: S('Rejeté', 'error'), expired: S('Expiré', 'neutral'),
   // Caisse
   unknown: S('Issue inconnue', 'warn'), awaiting_funds: S('Fonds attendus', 'warn'), pending_manual: S('À exécuter', 'warn'), pending_settlement: S('À virer', 'warn'),
