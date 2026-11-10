@@ -22,8 +22,10 @@ object UiPrefs {
         get() = prefs.getBoolean(KEY_BALANCE_HIDDEN, false)
         set(v) = prefs.edit().putBoolean(KEY_BALANCE_HIDDEN, v).apply()
 
+    // Lot Android P2 (audit P2-1) : verrou a l'ouverture actif par defaut (desactivable dans Profil) ; sans
+    // biometrie/code configure sur l'appareil, SplashActivity passe outre (BiometricHelper.isAvailable).
     var biometricLock: Boolean
-        get() = prefs.getBoolean(KEY_BIOMETRIC_LOCK, false)
+        get() = prefs.getBoolean(KEY_BIOMETRIC_LOCK, true)
         set(v) = prefs.edit().putBoolean(KEY_BIOMETRIC_LOCK, v).apply()
 
     var pairingSkipped: Boolean

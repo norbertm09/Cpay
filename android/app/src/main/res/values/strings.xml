@@ -148,6 +148,13 @@
     <string name="pairing_error_invalid">Code invalide ou déjà utilisé</string>
     <string name="pairing_error_other_device">Cet appareil est déjà lié à un autre terminal</string>
     <string name="pairing_error_generic">Échec de l\'appairage</string>
+    <!-- Lot Android P2 (audit P2-4) : chaînes sorties du code Kotlin -->
+    <string name="password_error_current_required">Mot de passe actuel requis</string>
+    <string name="password_error_min_length">Nouveau mot de passe : 8 caractères minimum</string>
+    <string name="password_error_same">Le nouveau mot de passe doit être différent</string>
+    <string name="password_error_mismatch">Les mots de passe ne correspondent pas</string>
+    <string name="register_error_required">Tous les champs obligatoires (*) doivent être remplis</string>
+    <string name="register_error_password_min">Mot de passe : 8 caractères minimum</string>
     <string name="pairing_done_fmt">Terminal %1$s appairé</string>
     <string name="pairing_already_fmt">Appareil déjà lié à %1$s</string>
 

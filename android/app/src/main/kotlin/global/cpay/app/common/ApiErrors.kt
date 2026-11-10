@@ -12,6 +12,7 @@ import retrofit2.Response
 object ApiErrors {
 
     const val FEATURE_DISABLED = "FEATURE_DISABLED"
+    const val DEVICE_ALREADY_PAIRED = "DEVICE_ALREADY_PAIRED"   // 409 POST /terminals/pair (lot Android P2)
     const val FEATURE_DISABLED_MESSAGE = "Fonctionnalité en cours d'intégration"
 
     private val gson = Gson()

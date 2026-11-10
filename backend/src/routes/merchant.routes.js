@@ -1038,7 +1038,7 @@ router.post('/terminals/pair', pairLimiter, async (req, res) => {
       terminalName: t.terminal_name, siteName: t.site_name, merchantName: t.business_name });
   } catch (err) {
     if (err.code === '23505')
-      return res.status(409).json({ error: 'Cet appareil est deja lie a un autre terminal' });
+      return res.status(409).json({ error: 'Cet appareil est deja lie a un autre terminal', code: 'DEVICE_ALREADY_PAIRED' });
     console.error('[pair]', err.message);
     res.status(500).json({ error: 'Erreur appairage' });
   }

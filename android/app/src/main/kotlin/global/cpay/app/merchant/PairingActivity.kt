@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import global.cpay.app.BuildConfig
 import global.cpay.app.R
+import global.cpay.app.common.ApiErrors
 import global.cpay.app.common.ApiClient
 import global.cpay.app.common.PairRequest
 import global.cpay.app.common.SessionManager
@@ -76,10 +77,11 @@ class PairingActivity : AppCompatActivity() {
                     startActivity(Intent(this@PairingActivity, MerchantMainActivity::class.java))
                     finish()
                 } else {
-                    val err = r.errorBody()?.string() ?: ""
+                    // Lot Android P2 (audit P2-4) : decision sur le code d'erreur structure, plus sur une sous-chaine
+                    val err = ApiErrors.of(r)
                     b.tvError.text = when {
-                        err.contains("INVALID_PAIRING") -> getString(R.string.pairing_error_invalid)
-                        err.contains("deja lie")        -> getString(R.string.pairing_error_other_device)
+                        err.code == "INVALID_PAIRING" || r.code() == 404 -> getString(R.string.pairing_error_invalid)
+                        err.code == ApiErrors.DEVICE_ALREADY_PAIRED || r.code() == 409 -> getString(R.string.pairing_error_other_device)
                         else -> getString(R.string.pairing_error_generic)
                     }
                     b.tvError.visibility = View.VISIBLE

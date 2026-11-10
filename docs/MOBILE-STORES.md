@@ -37,8 +37,8 @@ et les deux mots de passe dans un coffre : **perdre le keystore interdit toute m
 git tag -a v2.7.1 -m "C-Pay 2.7.1" && git push origin v2.7.1
 ```
 `release.yml` produit `app-release.aab` et les APK signés, crée la GitHub Release et déploie la production. Vérifier
-dans le run que l'étape de signature n'affiche pas « non signés ». Première release : contrôler que `minifyEnabled`
-ne casse rien (installer l'APK universel signé et refaire le plan de test).
+dans le run que l'étape de signature n'affiche pas « non signés ». Avant chaque release : recette sur l'APK `staging`
+(R8 identique, § 1.5 et § 1.7), puis plan de test sur l'APK universel signé.
 
 ### 1.4 Google Play Console
 1. Compte développeur Google Play (25 USD, une fois) au nom de Calculus Plus SAS ; vérification d'identité (quelques jours).
@@ -69,6 +69,28 @@ compte » (propriétaire, confirmation step-up). La demande (`POST /merchant/acc
 de rétractation de 30 jours affiché dans l'écran, annulable depuis l'app ; les opérations la traitent dans le
 back-office (`/admin/account-deletion-requests`). URL web équivalente, à déclarer dans la Play Console :
 `https://c-pay.global/legal/suppression-compte.html`.
+
+### 1.7 Chaîne de build, R8 et prochain palier (lot Android P2, 2026-11-10)
+
+Chaîne actuelle : AGP 8.11.1, Gradle 8.13, compileSdk/targetSdk 36, Kotlin 2.2.21 + KSP 2.2.21-2.0.4, Java 17 ;
+dépendances aux dernières versions **compatibles compileSdk 36** (core 1.17, appcompat 1.7.1, lifecycle 2.9.4,
+activity 1.11, fragment 1.8.9, navigation 2.9.5, Room 2.8.5, Retrofit 3.0, OkHttp 4.12, coroutines 1.10.2).
+
+- **R8 (audit P2-3)** : les règles « garde-tout » (`retrofit2.**`, `okhttp3.**`, `gson.**`, `global.cpay.app.common.**`)
+  sont retirées ; seules les classes portant des champs `@SerializedName` sont conservées (obfuscation autorisée),
+  OkHttp/Retrofit 3/Gson apportent leurs règles consommateur. La CI construit `assembleRelease`, `bundleRelease` et
+  `assembleStaging` ; un symbole manquant fait échouer le job (`missing_rules.txt` affiché). **Recette obligatoire
+  avant chaque release** : installer l'APK `staging` (même R8 que la release) et dérouler connexion, résumé caisse,
+  encaissement, retrait, journal, appairage — une désérialisation Gson cassée par R8 ne se voit qu'à l'exécution.
+- **Tests unitaires (audit P2-4)** : `./gradlew :app:testDebugUnitTest` (CI, rapport en artefact en cas d'échec) :
+  `SecurityManagerTest`, `ApiErrorsTest`, `CashLabelsTest`. Les chaînes restantes hors `strings.xml` (`ApiErrors.cashMessage`,
+  `CashLabels`, paquet `cardholder/` masqué) sont le reliquat connu.
+- **Biométrie (audit P2-1)** : `BIOMETRIC_STRONG | DEVICE_CREDENTIAL` (plus de visage 2D), verrou à l'ouverture actif
+  par défaut (désactivable dans Profil), code mort de `SecurityManager` retiré.
+- **Prochain palier « AGP 9 / API 37 »** (lot dédié) : `androidx.core` 1.18+, `navigation` 2.10+, `okhttp` 5.x
+  (`okhttp-android`), KSP 2.3+ et le wrapper Gradle 9 exigent compileSdk 37, AGP ≥ 8.12/9 et Gradle 9. Les exclusions
+  Dependabot correspondantes (`.github/dependabot.yml`, écosystème `gradle`) sont à retirer avec ce lot ; la CI
+  devra installer `platforms;android-37` et `build-tools;37.0.0`.
 
 ## 2. Expo → App Store (iOS)
 

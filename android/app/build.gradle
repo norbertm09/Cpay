@@ -68,32 +68,39 @@ android {
             enable false
         }
     }
+
+    // Lot Android P2 : tests unitaires JVM (android.util.Log, Base64… retournent des valeurs neutres)
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
 }
 
 dependencies {
     // Core
-    implementation 'androidx.core:core-ktx:1.12.0'
-    implementation 'androidx.appcompat:appcompat:1.6.1'
+    // Lot Android P2 (2026-11-10) : dernieres versions compatibles compileSdk 36 / AGP 8.11.1. Les versions suivantes
+    // (core 1.18+, navigation 2.10+, okhttp 5.x « android ») exigent compileSdk 37 : lot « AGP 9 / API 37 » dedie.
+    implementation 'androidx.core:core-ktx:1.17.0'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'com.google.android.material:material:1.14.0'
-    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
-    implementation 'androidx.activity:activity-ktx:1.8.2'
-    implementation 'androidx.fragment:fragment-ktx:1.6.2'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.4'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4'
+    implementation 'androidx.activity:activity-ktx:1.11.0'
+    implementation 'androidx.fragment:fragment-ktx:1.8.9'
 
     // Navigation
-    implementation 'androidx.navigation:navigation-fragment-ktx:2.7.7'
-    implementation 'androidx.navigation:navigation-ui-ktx:2.7.7'
+    implementation 'androidx.navigation:navigation-fragment-ktx:2.9.5'
+    implementation 'androidx.navigation:navigation-ui-ktx:2.9.5'
 
-    // Network
-    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
-    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    // Network — Retrofit 3 livre ses regles R8 consommateur (proguard-rules.pro allege, audit P2-3)
+    implementation 'com.squareup.retrofit2:retrofit:3.0.0'
+    implementation 'com.squareup.retrofit2:converter-gson:3.0.0'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
 
     // Coroutines
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
 
     // QR Code (generation du lien carte uniquement — lot 4 : scanner ML Kit/CameraX retires avec le profil porteur)
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
@@ -105,12 +112,13 @@ dependencies {
     implementation 'androidx.security:security-crypto:1.1.0'
 
     // Room (base de données locale)
-    implementation 'androidx.room:room-runtime:2.7.2'
-    implementation 'androidx.room:room-ktx:2.7.2'
-    ksp 'androidx.room:room-compiler:2.7.2'
+    implementation 'androidx.room:room-runtime:2.8.5'
+    implementation 'androidx.room:room-ktx:2.8.5'
+    ksp 'androidx.room:room-compiler:2.8.5'
 
-    // Test
+    // Test — unitaires JVM (:app:testDebugUnitTest en CI, audit P2-4)
     testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    testImplementation 'com.google.code.gson:gson:2.13.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
 }

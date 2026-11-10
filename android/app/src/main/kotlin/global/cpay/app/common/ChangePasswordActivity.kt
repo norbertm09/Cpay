@@ -55,10 +55,10 @@ class ChangePasswordActivity : AppCompatActivity() {
         val new = findViewById<EditText>(R.id.et_new_password).text.toString()
         val cnf = findViewById<EditText>(R.id.et_confirm_password).text.toString()
 
-        if (cur.isEmpty())  { showError("Mot de passe actuel requis"); return }
-        if (new.length < 8) { showError("Nouveau mot de passe : 8 caractères minimum"); return }
-        if (new == cur)     { showError("Le nouveau mot de passe doit être différent"); return }
-        if (new != cnf)     { showError("Les mots de passe ne correspondent pas"); return }
+        if (cur.isEmpty())  { showError(getString(R.string.password_error_current_required)); return }
+        if (new.length < 8) { showError(getString(R.string.password_error_min_length)); return }
+        if (new == cur)     { showError(getString(R.string.password_error_same)); return }
+        if (new != cnf)     { showError(getString(R.string.password_error_mismatch)); return }
 
         setLoading(true)
         lifecycleScope.launch {
