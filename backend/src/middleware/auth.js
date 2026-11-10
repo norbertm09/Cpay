@@ -128,9 +128,12 @@ const requireSub = (req, res, next) => {
 // Lot 2 (audit 2026-11-02 portails P1-1) : un acteur connecté avec un mot de passe TEMPORAIRE (claim `pwdTemp`
 // posé au login / refresh tant que temp_password = TRUE) ne peut que lire son profil, changer son mot de passe
 // ou se déconnecter. Défense en profondeur : le portail impose l'écran de changement, l'API le garantit.
-const PASSWORD_CHANGE_ALLOWED_RE = /\/(auth\/(me|change-password|logout|refresh)|account\/change-password|profile\/change-password)(\?|$)/;
+// Audit 2026-11-10 § 3 : la liste blanche est evaluee sur le CHEMIN canonique (sans query string, sans slash final,
+// minuscules) et ancree en fin — `/cash/withdraw?next=/auth/me` ne passe plus pour `/auth/me`.
+const PASSWORD_CHANGE_ALLOWED_RE = /\/(auth\/(me|change-password|logout|refresh)|account\/change-password|profile\/change-password)$/;
+const { canonicalPath: canonicalRoutePath } = require('../utils/route-identity');
 const requirePasswordChanged = (req, res, next) => {
-  if (req.user?.pwdTemp === true && !PASSWORD_CHANGE_ALLOWED_RE.test(String(req.originalUrl || req.url || ''))) {
+  if (req.user?.pwdTemp === true && !PASSWORD_CHANGE_ALLOWED_RE.test(canonicalRoutePath(req.originalUrl || req.url))) {
     return res.status(403).json({ error: 'Changement de mot de passe requis avant toute opération', code: 'PASSWORD_CHANGE_REQUIRED' });
   }
   next();
@@ -431,6 +434,50 @@ const buildTotpEnrollment = async ({ label, issuer = 'C-Pay' }) => {
   return { secret: secret.base32, otpauthUrl: secret.otpauth_url, qrCode };
 };
 
+/**
+ * Audit 2026-11-10 § 3 — enrôlement TOTP protégé contre le remplacement.
+ *   - 2FA inactive : nouveau secret posé sur `mfa_secret`, `enabledCol`=FALSE (activation à /verify) — inchangé ;
+ *   - 2FA active : un code TOTP courant est OBLIGATOIRE (428 MFA_CONFIRMATION_REQUIRED sinon), le nouveau secret
+ *     attend dans `mfa_pending_secret`, le secret actif reste valide jusqu'à ce que /verify réussisse.
+ * @returns {{ status:number, body:object }}
+ */
+const beginTotpEnrollment = async ({ table, idCol, id, enabledCol = 'mfa_enabled', label, issuer, token }) => {
+  const u = await query(`SELECT mfa_secret, ${enabledCol} AS enabled FROM ${table} WHERE ${idCol}=$1`, [id]);
+  const row = u.rows[0];
+  if (!row) return { status: 404, body: { error: 'Utilisateur introuvable', code: 'NOT_FOUND' } };
+  const active = !!row.enabled && !!row.mfa_secret;
+  if (active) {
+    if (!token || typeof token !== 'string') {
+      return { status: 428, body: { error: 'Code de l’authentificateur actuel requis pour remplacer la 2FA', code: 'MFA_CONFIRMATION_REQUIRED', methods: ['totp'] } };
+    }
+    if (!verifyTotp(row.mfa_secret, token)) return { status: 401, body: { error: 'Code invalide', code: 'INVALID_TOTP' } };
+  }
+  const enrollment = await buildTotpEnrollment({ label, issuer });
+  if (active) {
+    await query(`UPDATE ${table} SET mfa_pending_secret=$1 WHERE ${idCol}=$2`, [enrollment.secret, id]);
+    return { status: 200, body: { ...enrollment, replacing: true, message: 'La 2FA actuelle reste active jusqu’à la vérification du nouveau code' } };
+  }
+  await query(`UPDATE ${table} SET mfa_secret=$1, ${enabledCol}=FALSE, mfa_pending_secret=NULL WHERE ${idCol}=$2`, [enrollment.secret, id]);
+  return { status: 200, body: enrollment };
+};
+
+/** Vérifie le code du nouvel enrôlement : promeut `mfa_pending_secret` s'il existe, sinon active `mfa_secret`. */
+const completeTotpEnrollment = async ({ table, idCol, id, enabledCol = 'mfa_enabled', token }) => {
+  if (!token || typeof token !== 'string') return { status: 422, body: { error: 'Code requis', code: 'VALIDATION_ERROR' } };
+  const u = await query(`SELECT mfa_secret, mfa_pending_secret FROM ${table} WHERE ${idCol}=$1`, [id]);
+  const row = u.rows[0];
+  if (!row) return { status: 404, body: { error: 'Utilisateur introuvable', code: 'NOT_FOUND' } };
+  if (row.mfa_pending_secret) {
+    if (!verifyTotp(row.mfa_pending_secret, token)) return { status: 400, body: { error: 'Code invalide', code: 'INVALID_TOTP' } };
+    await query(`UPDATE ${table} SET mfa_secret=mfa_pending_secret, mfa_pending_secret=NULL, ${enabledCol}=TRUE WHERE ${idCol}=$1`, [id]);
+    return { status: 200, body: { success: true, replaced: true } };
+  }
+  if (!row.mfa_secret) return { status: 400, body: { error: '2FA non configurée', code: 'MFA_NOT_CONFIGURED' } };
+  if (!verifyTotp(row.mfa_secret, token)) return { status: 400, body: { error: 'Code invalide', code: 'INVALID_TOTP' } };
+  await query(`UPDATE ${table} SET ${enabledCol}=TRUE WHERE ${idCol}=$1`, [id]);
+  return { status: 200, body: { success: true } };
+};
+
 // ─── Mots de passe temporaires ────────────────────────────────────
 // Alea cryptographique, 16 caracteres, jamais stocke en clair (bcrypt seul).
 const generateTempPassword = (prefix = 'Tmp') => `${prefix}-${crypto.randomBytes(12).toString('base64url')}`;
@@ -448,7 +495,7 @@ module.exports = {
   issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
   readRefreshToken, clearRefreshCookie, refreshCookieName, legacyWindowOpen,
   // 2FA
-  signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
+  signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment, beginTotpEnrollment, completeTotpEnrollment,
   // divers
   generateTempPassword,
 };

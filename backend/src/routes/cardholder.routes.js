@@ -10,7 +10,7 @@ const rateLimit = require('express-rate-limit');
 const router  = express.Router();
 // WAVE-2 : module d'auth unique (audit §1.1) — aucun jwt.sign/verify local
 const {
-  cardholderAuth, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
+  cardholderAuth, issueSession, rotateRefresh, revokeRefreshToken, revokeAll, beginTotpEnrollment, completeTotpEnrollment,
   readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
 } = require('../middleware/auth');
 const {
@@ -1006,12 +1006,12 @@ router.post('/support/tickets/:id/messages', cardAuth, async (req, res) => {
 // QR genere cote serveur ; le login emet un mfaToken (cardholder_mfa) quand
 // mfa_enabled, consomme par POST /auth/2fa/validate (declare avec le login).
 
+// Audit 2026-11-10 § 3 : remplacement de la 2FA protege (code courant exige, secret actif conserve jusqu'a /verify)
 router.post('/auth/2fa/setup', cardAuth, async (req, res) => {
   try {
     const u = await query(`SELECT email FROM cardholders WHERE cardholder_id=$1`, [req.chId]);
-    const enrollment = await buildTotpEnrollment({ label: u.rows[0]?.email || req.cardholder.email || String(req.chId), issuer: 'C-Pay' });
-    await query(`UPDATE cardholders SET mfa_secret=$1, mfa_enabled=FALSE WHERE cardholder_id=$2`, [enrollment.secret, req.chId]);
-    res.json(enrollment);
+    const r = await beginTotpEnrollment({ table: 'cardholders', idCol: 'cardholder_id', id: req.chId, label: u.rows[0]?.email || req.cardholder.email || String(req.chId), issuer: 'C-Pay', token: req.body?.token });
+    res.status(r.status).json(r.body);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -1019,11 +1019,8 @@ router.post('/auth/2fa/verify', cardAuth, async (req, res) => {
   const { token } = req.body;
   if (!token || typeof token !== 'string') return res.status(400).json({error:'Code requis'});
   try {
-    const u = await query(`SELECT mfa_secret FROM cardholders WHERE cardholder_id=$1`, [req.chId]);
-    if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
-    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
-    await query(`UPDATE cardholders SET mfa_enabled=TRUE WHERE cardholder_id=$1`, [req.chId]);
-    res.json({success:true, message:'2FA activé ✅'});
+    const r = await completeTotpEnrollment({ table: 'cardholders', idCol: 'cardholder_id', id: req.chId, token });
+    res.status(r.status).json(r.status === 200 ? { ...r.body, message: '2FA activé ✅' } : r.body);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 

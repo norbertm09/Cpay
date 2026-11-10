@@ -49,8 +49,9 @@ async function checkVelocity(merchantId, amount, type) {
 
 // WAVE-2 : module d'auth unique (audit §1.1) — aucun jwt.sign/verify local
 const {
-  merchantAuth, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
+  merchantAuth, requireMerchantOwner, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
   readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
+  beginTotpEnrollment, completeTotpEnrollment,
 } = require('../middleware/auth');
 const logger  = require('../config/logger');
 const { detectFromPhone, normalizePhone } = require('../services/detection/detection.engine');
@@ -1789,16 +1790,14 @@ router.post('/collect/contactless', merchantAuth, (req, res) => featureDisabled(
 // quand mfa_enabled (voir POST /auth/2fa/validate plus haut).
 
 // Setup 2FA — générer secret + QR (non activé tant que /verify n'a pas réussi)
+// Audit 2026-11-10 § 3 : si la 2FA est active, un code courant est exige et le secret actuel reste valide
+// jusqu'a /verify (plus de desactivation silencieuse par une session volee).
 router.post('/auth/2fa/setup', merchantAuth, async (req, res) => {
   try {
     const u = await query(`SELECT email FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
     const label = u.rows[0]?.email || req.user.email || String(req.user.sub);
-    const enrollment = await buildTotpEnrollment({ label, issuer: 'C-Pay Merchant' });
-    await query(
-      `UPDATE merchant_users SET mfa_secret=$1, mfa_enabled=FALSE WHERE user_id=$2`,
-      [enrollment.secret, req.user.sub]
-    );
-    res.json(enrollment);
+    const r = await beginTotpEnrollment({ table: 'merchant_users', idCol: 'user_id', id: req.user.sub, label, issuer: 'C-Pay Merchant', token: req.body?.token });
+    res.status(r.status).json(r.body);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -1807,11 +1806,8 @@ router.post('/auth/2fa/verify', merchantAuth, async (req, res) => {
   const { token } = req.body;
   if (!token || typeof token !== 'string') return res.status(422).json({error:'Token requis'});
   try {
-    const u = await query(`SELECT mfa_secret FROM merchant_users WHERE user_id=$1`, [req.user.sub]);
-    if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configuré'});
-    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
-    await query(`UPDATE merchant_users SET mfa_enabled=TRUE WHERE user_id=$1`, [req.user.sub]);
-    res.json({success:true, message:'2FA activé ✅'});
+    const r = await completeTotpEnrollment({ table: 'merchant_users', idCol: 'user_id', id: req.user.sub, token });
+    res.status(r.status).json(r.status === 200 ? { ...r.body, message: '2FA activé ✅' } : r.body);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -1874,9 +1870,13 @@ router.get('/api-keys', merchantAuth, async (req, res) => {
 });
 
 // Créer une nouvelle API key — la cle et le secret bruts sont renvoyes UNE SEULE FOIS
-router.post('/api-keys', merchantAuth, async (req, res) => {
-  const { keyName, permissions, expiresAt } = req.body;
+// Audit 2026-11-10 § 3 : reservee au proprietaire du compte marchand, avec confirmation forte (step-up : TOTP si 2FA,
+// sinon mot de passe) — une session volee d'un employe ne peut plus emettre de credentials API.
+router.post('/api-keys', merchantAuth, requireMerchantOwner, async (req, res) => {
+  const { keyName, permissions, expiresAt, confirm } = req.body;
   if (!keyName) return res.status(422).json({error:'Nom de la clé requis'});
+  const step = await require('../services/cash/cash.service').verifyStepUp({ userId: req.user?.sub, confirm });
+  if (!step.ok) return res.status(step.status).json(step.body);
   try {
     const apiKey    = 'sk_live_' + crypto.randomBytes(24).toString('hex');
     const apiSecret = 'sk_secret_' + crypto.randomBytes(32).toString('hex');
@@ -1897,7 +1897,7 @@ router.post('/api-keys', merchantAuth, async (req, res) => {
 });
 
 // Révoquer une API key
-router.delete('/api-keys/:keyId', merchantAuth, async (req, res) => {
+router.delete('/api-keys/:keyId', merchantAuth, requireMerchantOwner, async (req, res) => {
   try {
     await query(
       `UPDATE merchant_api_keys SET is_active=FALSE, updated_at=NOW()
@@ -1909,7 +1909,7 @@ router.delete('/api-keys/:keyId', merchantAuth, async (req, res) => {
 });
 
 // Supprimer une API key
-router.delete('/api-keys/:keyId/permanent', merchantAuth, async (req, res) => {
+router.delete('/api-keys/:keyId/permanent', merchantAuth, requireMerchantOwner, async (req, res) => {
   try {
     await query(
       `DELETE FROM merchant_api_keys WHERE key_id=$1 AND merchant_id=$2`,

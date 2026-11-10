@@ -49,6 +49,13 @@ const setAccessToken = (t) => {
 };
 const getAccessToken = () => accessToken;
 
+// Audit 2026-11-10 § 3 : identité portée par un jeton (utilisateur + marchand). Une requête mise en attente pendant
+// le rafraîchissement n'est rejouée que si la nouvelle session appartient au même compte ; sinon, l'onglet est
+// déconnecté (un autre onglet a changé de compte : rejouer l'action sous une autre identité est interdit).
+const identityOf = (token) => { const c = decodeJwt(token) || (token ? (() => { try { return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch { return null; } })() : null); return c ? `${c.sub}|${c.merchantId || ''}` : null; };
+const sameIdentity = (previousToken, nextToken) => { const a = identityOf(previousToken); const b = identityOf(nextToken); return !a || !b || a === b; };
+export const SESSION_CHANGED = 'SESSION_CHANGED';
+
 // Appel de refresh nu : pas d'instance api, pour éviter toute récursion
 // d'intercepteur si le refresh lui-même répond 401.
 const callRefresh = () =>
@@ -84,11 +91,22 @@ const withInterceptors = (instance) => {
     if (err.response?.status === 403 && !isAuthRoute) toast.error('Accès refusé');
     if (err.response?.status === 401 && original && !original._retry && !isAuthRoute) {
       original._retry = true;
+      const previous = String(original.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
       try {
         const t = await refreshAccessToken();
+        if (!sameIdentity(previous, t)) {
+          // Le compte a changé pendant le rafraîchissement : la requête n'est pas rejouée, l'onglet se déconnecte.
+          setAccessToken(null);
+          toast.error('Votre session a changé de compte : reconnectez-vous.');
+          window.location.href = '/login';
+          const changed = new Error('Session changée pendant le rafraîchissement');
+          changed.code = SESSION_CHANGED;
+          return Promise.reject(changed);
+        }
         original.headers.Authorization = `Bearer ${t}`;
         return instance(original);
       } catch (e) {
+        if (e?.code === SESSION_CHANGED) return Promise.reject(e);
         setAccessToken(null);
         window.location.href = '/login';
       }
@@ -123,7 +141,7 @@ export const authApi = {
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
   resetPassword:  (body)  => api.post('/auth/reset-password', body),
   twoFaStatus:    ()      => api.get('/auth/2fa/status'),
-  twoFaSetup:     ()      => api.post('/auth/2fa/setup'),
+  twoFaSetup:     (token) => api.post('/auth/2fa/setup', token ? { token } : {}),   // token : code courant si la 2FA est deja active (remplacement)
   twoFaVerify:    (token) => api.post('/auth/2fa/verify', { token }),
   twoFaDisable:   (token) => api.post('/auth/2fa/disable', { token }),
   institutions:   (country) => api.get('/institutions', { params: { country } }),
@@ -226,5 +244,5 @@ export const isStepUp = (err) => err?.response?.status === 428 || err?.response?
 // 403 CAPABILITY_NOT_ACTIVE : moyen / opérateur non activé dans le pays du marchand (registre de capacités).
 export const isCapabilityBlocked = (err) => err?.response?.data?.code === 'CAPABILITY_NOT_ACTIVE';
 
-export { api, apiBaseUrl, setAccessToken, getAccessToken, authListeners, refreshAccessToken, decodeJwt, userFromClaims };
+export { api, apiBaseUrl, setAccessToken, getAccessToken, authListeners, refreshAccessToken, decodeJwt, userFromClaims, sameIdentity, identityOf };
 export default api;

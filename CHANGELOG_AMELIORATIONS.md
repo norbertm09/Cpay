@@ -1,5 +1,23 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-audit1110-comptes (2026-11-10) — audit du 10 novembre, § 3 comptes et parcours
+* Portails (marchand, admin, porteur) : une requete mise en attente pendant le rafraichissement de session n'est
+  rejouee que si la nouvelle session appartient au meme compte (utilisateur + marchand / role / porteur) ; sinon
+  deconnexion locale, erreur `SESSION_CHANGED`, jamais de rejeu sous une autre identite.
+* Changement de mot de passe obligatoire : liste blanche evaluee sur le chemin canonique et ancree en fin
+  (`?next=/auth/me` ne contourne plus le blocage).
+* Second facteur : `POST /auth/2fa/setup` sur une 2FA active exige un code courant (428 `MFA_CONFIRMATION_REQUIRED`),
+  le nouveau secret attend dans `mfa_pending_secret` (migration 015) et le secret actif reste valide jusqu'a `/verify`
+  — marchands, administrateurs, porteurs, partenaires.
+* Droits : creation de banques et de comptes `bank_admin` (distribution) reservee au `super_admin` ; cles API
+  marchandes creees et revoquees par le proprietaire seulement, avec confirmation forte (step-up) ; portail marchand :
+  fenetre de confirmation a la creation, bouton masque pour les employes.
+* Caisse marchande : la detection d'operateur est invalidee des que le numero saisi change ; un refus definitif
+  verifie par le serveur (ordre existant refuse par l'operateur) permet une nouvelle intention, un echec incertain
+  non.
+* Tests : `audit-1110-accounts.test.js` (10 cas) ; portail marchand `api.test.js`, `phoneDetection.test.jsx`,
+  `useFinancialIntent` (refus definitif) — 51 tests vitest.
+
 ## 2.7.2-audit1110-finance (2026-11-10) — audit du 10 novembre, § 2 risques financiers
 * Identite de route canonique (`utils/route-identity.js`) pour l'idempotence (cle obligatoire, identite de la cle) et la
   garde de capacite : `/Withdraw`, `/withdraw/` et `/withdraw` = une seule intention ; une variante d'URL ne cree plus

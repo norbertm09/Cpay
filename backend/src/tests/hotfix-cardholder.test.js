@@ -317,6 +317,9 @@ describe('2FA partenaires (partners.routes)', () => {
   const partnersQuery = async (sql, params = []) => {
     sqlLog.push({ sql, params });
     if (/SELECT mfa_secret FROM bank_users/i.test(sql)) return { rows: [{ mfa_secret: SECRET }] };
+    // audit 2026-11-10 : enrolement protege
+    if (/SELECT mfa_secret, is_mfa_enabled AS enabled FROM bank_users/i.test(sql)) return { rows: [{ mfa_secret: SECRET, enabled: true }] };
+    if (/SELECT mfa_secret, mfa_pending_secret FROM bank_users/i.test(sql)) return { rows: [{ mfa_secret: SECRET, mfa_pending_secret: null }] };
     if (/FROM bank_users u/i.test(sql)) return { rows: [bankUser] };
     if (/FROM agents a/i.test(sql)) return { rows: [] };
     return { rows: [] };
@@ -324,14 +327,18 @@ describe('2FA partenaires (partners.routes)', () => {
 
   beforeEach(() => db.query.mockImplementation(partnersQuery));
 
-  test('POST /auth/2fa/setup : secret base32 + otpauth + QR serveur, stocké sur l utilisateur', async () => {
-    const r = await request(app).post('/api/v1/partners/auth/2fa/setup').set('Authorization', partnerToken);
+  test('POST /auth/2fa/setup : 2FA active → code courant exigé (audit 2026-11-10), puis secret base32 + otpauth + QR en attente', async () => {
+    const refused = await request(app).post('/api/v1/partners/auth/2fa/setup').set('Authorization', partnerToken);
+    expect(refused.status).toBe(428); expect(refused.body.code).toBe('MFA_CONFIRMATION_REQUIRED');
+    expect(sqlLog.some(q => /UPDATE bank_users/i.test(q.sql))).toBe(false);
+    const r = await request(app).post('/api/v1/partners/auth/2fa/setup').set('Authorization', partnerToken).send({ token: speakeasy.totp({ secret: SECRET, encoding: 'base32' }) });
     expect(r.status).toBe(200);
     expect(r.body.secret).toMatch(/^[A-Z2-7]+=*$/);
     expect(r.body.otpauthUrl).toMatch(/^otpauth:\/\/totp\//);
     expect(r.body.qrCode).toMatch(/^data:image\/png;base64,/);
-    const upd = sqlLog.find(q => /UPDATE bank_users SET mfa_secret=\$1, is_mfa_enabled=FALSE/i.test(q.sql));
+    const upd = sqlLog.find(q => /UPDATE bank_users SET mfa_pending_secret=\$1/i.test(q.sql));
     expect(upd.params[0]).toBe(r.body.secret);
+    expect(sqlLog.some(q => /is_mfa_enabled=FALSE/i.test(q.sql))).toBe(false);   // le secret actif n'est jamais desactive par le setup
     expect(sqlLog.some(q => /admin_notifications/i.test(q.sql))).toBe(false);
   });
 

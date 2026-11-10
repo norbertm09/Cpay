@@ -127,17 +127,30 @@ export const logoutServer = () => api.post('/auth/logout', {}, { headers: XHR_HE
 // Routes d'authentification non protegees : un 401 est une reponse metier.
 const NO_REFRESH_RE = /\/auth\/(login|refresh|register|2fa\/validate|forgot-password|reset-password|verify-email)(\?|$)/;
 
+// Audit 2026-11-10 § 3 : rejeu seulement si la session rafraichie appartient au meme porteur (sub).
+const rawClaims = (t) => { try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (e) { return null; } };
+export const identityOf = (token) => { const c = token ? rawClaims(token) : null; return c ? String(c.sub) : null; };
+export const sameIdentity = (previousToken, nextToken) => { const a = identityOf(previousToken); const b = identityOf(nextToken); return !a || !b || a === b; };
+export const SESSION_CHANGED = 'SESSION_CHANGED';
+
 api.interceptors.response.use((r) => r, async (err) => {
   const st = err.response?.status;
   const original = err.config;
   const isAuthRoute = NO_REFRESH_RE.test(original?.url || '');
   if (st === 401 && original && !original._retry && !isAuthRoute) {
     original._retry = true;
+    const previous = String(original.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
     try {
       const t = await refreshAccessToken();
+      if (!sameIdentity(previous, t)) {
+        toast.error('Votre session a changé de compte : reconnectez-vous.');
+        logoutLocal();
+        const changed = new Error('Session changée pendant le rafraîchissement'); changed.code = SESSION_CHANGED;
+        return Promise.reject(changed);
+      }
       original.headers.Authorization = `Bearer ${t}`;
       return api(original);
-    } catch (e) { logoutLocal(); }
+    } catch (e) { if (e?.code === SESSION_CHANGED) return Promise.reject(e); logoutLocal(); }
   } else if (st === 403) {
     toast.error('Accès refusé');
   }

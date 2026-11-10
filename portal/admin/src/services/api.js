@@ -76,17 +76,32 @@ export const logoutLocal = () => {
   if (window.location.pathname !== '/login') window.location.href = '/login';
 };
 
+// Audit 2026-11-10 § 3 : la requête en attente n'est rejouée que si la session rafraîchie est celle du même
+// administrateur (sub + rôle) ; sinon déconnexion locale, jamais de rejeu sous une autre identité.
+const rawClaims = (t) => { try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (e) { return null; } };
+export const identityOf = (token) => { const c = token ? rawClaims(token) : null; return c ? `${c.sub}|${c.role || ''}` : null; };
+export const sameIdentity = (previousToken, nextToken) => { const a = identityOf(previousToken); const b = identityOf(nextToken); return !a || !b || a === b; };
+export const SESSION_CHANGED = 'SESSION_CHANGED';
+
 const onResponseError = (instance) => async (err) => {
   const st = err.response?.status;
   const original = err.config;
   const isAuthRoute = NO_REFRESH_RE.test(original?.url || '');
   if (st === 401 && original && !original._retry && !isAuthRoute) {
     original._retry = true;
+    const previous = String(original.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
     try {
       const t = await refreshAccessToken();
+      if (!sameIdentity(previous, t)) {
+        toast.error('Votre session a changé de compte : reconnectez-vous.');
+        logoutLocal();
+        const changed = new Error('Session changée pendant le rafraîchissement'); changed.code = SESSION_CHANGED;
+        return Promise.reject(changed);
+      }
       original.headers.Authorization = `Bearer ${t}`;
       return instance(original);
     } catch (e) {
+      if (e?.code === SESSION_CHANGED) return Promise.reject(e);
       logoutLocal();
     }
   } else if (st === 403 && !original?.silent403) {
@@ -109,7 +124,7 @@ export const authApi = {
   logout: () => api.post('/auth/logout'),
   changePassword: (data) => api.post('/auth/change-password', data),
   mfaStatus: () => api.get('/auth/2fa/status'),
-  mfaSetup: () => api.post('/auth/2fa/setup'),
+  mfaSetup: (token) => api.post('/auth/2fa/setup', token ? { token } : {}),   // token : code courant si la 2FA est deja active
   mfaVerify: (token) => api.post('/auth/2fa/verify', { token }),
   mfaDisable: (token) => api.post('/auth/2fa/disable', { token }),
 };
