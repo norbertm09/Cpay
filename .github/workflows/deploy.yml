@@ -166,8 +166,22 @@ jobs:
             done
             echo "::error::$1 ne repond pas comme attendu ($2)"; return 1
           }
+          check_code() { # check_code <url> <codes acceptes> — vhost reserve (admin : VPN) : nginx doit repondre, 403 compris
+            for i in $(seq 1 12); do
+              code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$1" 2>/dev/null || true)"
+              case " $2 " in *" $code "*) echo "ok  $1 (HTTP $code)"; return 0 ;; esac
+              sleep 5
+            done
+            echo "::error::$1 repond HTTP ${code:-?} (attendu : $2)"; return 1
+          }
           check "https://api.$CPAY_DOMAIN/health" '"status":"ok"'
           check "https://$CPAY_DOMAIN/" '<html'
+          # Hotfix 2026-11-10 : les pages de connexion des portails sont verifiees publiquement et BLOQUENT le deploiement
+          # (les conteneurs portails etaient en boucle de redemarrage alors que le deploiement etait vert).
+          check "https://merchant.$CPAY_DOMAIN/" '<html'
+          check "https://app.$CPAY_DOMAIN/" '<html'
+          check "https://card.$CPAY_DOMAIN/" '<html'
+          check_code "https://admin.$CPAY_DOMAIN/" "200 403"
           DEPLOYED="$(curl -fsS --max-time 10 "https://api.$CPAY_DOMAIN/health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
           echo "version exposee par /health : ${DEPLOYED:-?}"
           case "$REF" in

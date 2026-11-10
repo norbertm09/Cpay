@@ -1,5 +1,17 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-hotfix-portails (2026-11-10) — portails en 502 apres le lot 7
+* Cause : dans `docker/Dockerfile.portal` et `portal/partners/Dockerfile`, `nginx -t` etait execute en root au build de
+  l'image `nginx-unprivileged` ; il creait `/tmp/client_temp` & co. en root, que l'utilisateur nginx ne pouvait plus
+  ouvrir au demarrage : les quatre conteneurs portails redemarraient en boucle (502 sur merchant, app, admin, partners)
+  alors que le deploiement etait vert (health checks portails non bloquants). Correction : plus aucun `USER root`,
+  copies `--chown=nginx:nginx`, configuration preparee a l'etape de build, `nginx -t` en utilisateur nginx.
+* `scripts/deploy.sh` : les health checks des quatre portails sont bloquants (journaux des conteneurs affiches,
+  consigne de rollback) ; `deploy.yml` : smoke test HTTPS public bloquant sur merchant, app, card et admin (403 VPN
+  accepte) en plus de l'API et de la vitrine.
+* CI : les images merchant et partenaires sont demarrees avec les contraintes de production (sans root, `cap_drop ALL`,
+  128 Mo) et doivent servir `index.html` avec l'en-tete CSP.
+
 ## 2.7.2-deps (2026-11-09) — tri de la premiere vague Dependabot
 * Deuxieme vague : majeures exclues pour Express, `@anthropic-ai/sdk` (backend), React Router (portails), `@babel/*` (Expo) ;
   montees fusionnees : actions GitHub, nodemailer/pg/pglite, dotenv 18, helmet 8, bcryptjs 3, axios, supertest 7.
