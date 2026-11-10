@@ -6,5 +6,5 @@ plugins {
     // (AGP 9 / Gradle 9) : passage prevu dans un lot « AGP 9 / API 37 » dedie, cf. docs/MOBILE-STORES.md § 1.7.
     id 'org.jetbrains.kotlin.android' version '2.2.21' apply false
     // KSP remplace kapt (kapt echoue sous Kotlin 2.x avec Room ; KSP est le processeur recommande par Room)
-    id 'com.google.devtools.ksp' version '2.2.21-2.0.4' apply false
+    id 'com.google.devtools.ksp' version '2.2.21-2.0.5' apply false
 }
