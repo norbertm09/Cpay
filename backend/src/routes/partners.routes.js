@@ -9,7 +9,7 @@ const { query, withTransaction } = require('../config/database');
 // `requireRole` garde son nom historique dans ce fichier (= requirePartnerRole).
 const {
   partnerAuth, requirePartnerRole: requireRole, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
-  readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
+  readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment, beginTotpEnrollment, completeTotpEnrollment,
 } = require('../middleware/auth');
 
 // Rate limit login partenaires : 10 / 15 min / IP (audit §2.19)
@@ -685,13 +685,12 @@ router.get('/auth/2fa/status', partnerAuth, async (req, res) => {
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
+// Audit 2026-11-10 § 3 : remplacement de la 2FA protege (code courant exige, secret actif conserve jusqu'a /verify)
 router.post('/auth/2fa/setup', partnerAuth, async (req, res) => {
   try {
     const { table, idCol, id } = userTarget(req.user);
-    const enrollment = await buildTotpEnrollment({ label: req.user.email, issuer: 'C-Pay Partners' });
-    // Secret stocké sur l'utilisateur, 2FA non activée tant que /verify n'a pas réussi
-    await query(`UPDATE ${table} SET mfa_secret=$1, is_mfa_enabled=FALSE, updated_at=NOW() WHERE ${idCol}=$2`, [enrollment.secret, id]);
-    res.json(enrollment);
+    const r = await beginTotpEnrollment({ table, idCol, id, enabledCol: 'is_mfa_enabled', label: req.user.email, issuer: 'C-Pay Partners', token: req.body?.token });
+    res.status(r.status).json(r.body);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 
@@ -700,11 +699,8 @@ router.post('/auth/2fa/verify', partnerAuth, async (req, res) => {
   if (!token || typeof token !== 'string') return res.status(400).json({error:'Code requis'});
   try {
     const { table, idCol, id } = userTarget(req.user);
-    const u = await query(`SELECT mfa_secret FROM ${table} WHERE ${idCol}=$1`, [id]);
-    if (!u.rows[0]?.mfa_secret) return res.status(400).json({error:'2FA non configurée'});
-    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({error:'Code invalide'});
-    await query(`UPDATE ${table} SET is_mfa_enabled=TRUE, updated_at=NOW() WHERE ${idCol}=$1`, [id]);
-    res.json({success:true});
+    const r = await completeTotpEnrollment({ table, idCol, id, enabledCol: 'is_mfa_enabled', token });
+    res.status(r.status).json(r.body);
   } catch(err){ res.status(500).json({error:err.message}); }
 });
 

@@ -17,7 +17,7 @@ const crypto  = require('crypto');
 const { query, withTransaction } = require('../config/database');
 // WAVE-2 : module d'auth unique (audit §1.1)
 const {
-  adminAuth, requireRole, issueSession, rotateRefresh, revokeRefreshToken, revokeAll,
+  adminAuth, requireRole, issueSession, rotateRefresh, revokeRefreshToken, revokeAll, beginTotpEnrollment, completeTotpEnrollment,
   readRefreshToken, clearRefreshCookie, signMfaToken, verifyMfaToken, verifyTotp, buildTotpEnrollment,
   generateTempPassword,
 } = require('../middleware/auth');
@@ -194,12 +194,12 @@ router.get('/auth/2fa/status', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
+// Audit 2026-11-10 § 3 : remplacement de la 2FA protege (code courant exige, secret actif conserve jusqu'a /verify)
 router.post('/auth/2fa/setup', adminAuth, async (req, res) => {
   try {
     const u = await query('SELECT email FROM admin_users WHERE admin_id = $1', [req.user.sub]);
-    const enrollment = await buildTotpEnrollment({ label: u.rows[0]?.email || req.user.email || String(req.user.sub), issuer: 'C-Pay Admin' });
-    await query('UPDATE admin_users SET mfa_secret=$1, mfa_enabled=FALSE WHERE admin_id=$2', [enrollment.secret, req.user.sub]);
-    res.json(enrollment);
+    const r = await beginTotpEnrollment({ table: 'admin_users', idCol: 'admin_id', id: req.user.sub, label: u.rows[0]?.email || req.user.email || String(req.user.sub), issuer: 'C-Pay Admin', token: req.body?.token });
+    res.status(r.status).json(r.body);
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -207,11 +207,8 @@ router.post('/auth/2fa/verify', adminAuth, async (req, res) => {
   const { token } = req.body;
   if (!token || typeof token !== 'string') return res.status(422).json({ error: 'Code requis' });
   try {
-    const u = await query('SELECT mfa_secret FROM admin_users WHERE admin_id = $1', [req.user.sub]);
-    if (!u.rows[0]?.mfa_secret) return res.status(400).json({ error: '2FA non configurée' });
-    if (!verifyTotp(u.rows[0].mfa_secret, token)) return res.status(400).json({ error: 'Code invalide' });
-    await query('UPDATE admin_users SET mfa_enabled=TRUE WHERE admin_id=$1', [req.user.sub]);
-    res.json({ success: true });
+    const r = await completeTotpEnrollment({ table: 'admin_users', idCol: 'admin_id', id: req.user.sub, token });
+    res.status(r.status).json(r.body);
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 

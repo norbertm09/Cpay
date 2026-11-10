@@ -183,3 +183,23 @@ test('switching away and back does not revive a stale strong-auth callback', asy
   await act(async () => { await expect(execute(payment, async () => { sent = true; })).rejects.toThrow(/session/); });
   expect(sent).toBe(false);
 });
+
+// Audit 2026-11-10 § 3 : un refus définitif vérifié par le serveur (ordre existant, refusé par l'opérateur) rend
+// l'intention connue : une nouvelle opération est possible ; un échec incertain (5xx) ne l'est pas.
+test('a verified definitive refusal allows a new intent, an uncertain failure does not', async () => {
+  const declined = { response: { status: 402, data: { code: 'PAYMENT_DECLINED', txnId: 'txn-1', error: 'Solde client insuffisant' } } };
+  await act(async () => { await expect(intent.execute(payment, async () => { throw declined; })).rejects.toBe(declined); });
+  expect(intent.canStartNew).toBe(true);
+  act(() => intent.startNew());
+  expect(intent.pending).toBe(false);
+
+  const serverError = { response: { status: 500, data: { error: 'boom' } } };
+  await act(async () => { await expect(intent.execute(payment, async () => { throw serverError; })).rejects.toBe(serverError); });
+  expect(intent.canStartNew).toBe(false);
+  expect(() => intent.startNew()).toThrow();
+
+  const uncertain = { response: { status: 502, data: { code: 'GATEWAY_ERROR', outcome: 'unknown', transferId: 't-2' } } };
+  sessionStorage.clear(); unmount(); mount();
+  await act(async () => { await expect(intent.execute(payment, async () => { throw uncertain; })).rejects.toBe(uncertain); });
+  expect(intent.canStartNew).toBe(false);
+});

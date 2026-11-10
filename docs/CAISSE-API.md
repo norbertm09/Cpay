@@ -167,6 +167,12 @@ du wallet n'a pas de rail de paiement sortant configuré.
   `wallet_to_bank | bank_to_wallet | withdraw`.
 
 ## 6. Confirmation forte (step-up) — objet `confirm`
+
+Audit du 10/11/2026 (§ 3) : la création d'une clé API (`POST /merchant/api-keys`) exige désormais le rôle `owner`
+**et** l'objet `confirm` (même mécanique que les retraits) ; la révocation est réservée au propriétaire. Le
+remplacement du second facteur (`POST /auth/2fa/setup` quand la 2FA est active) exige le code TOTP courant
+(`{ "token": "123456" }`, sinon `428 MFA_CONFIRMATION_REQUIRED`) ; le nouveau secret n'entre en vigueur qu'après
+`POST /auth/2fa/verify` avec un code du nouvel authentificateur, l'ancien restant valide entre-temps.
 `{ "code": "<TOTP 6 chiffres>" }` si le 2FA du compte est activé, sinon `{ "password": "<mot de passe>" }`.
 Absent ou invalide → `428 STEP_UP_REQUIRED { "methods": ["totp"] | ["password"] }`. Cinq échecs / 15 min → `429`.
 

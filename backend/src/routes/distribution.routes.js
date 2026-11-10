@@ -9,7 +9,7 @@ const { query, withTransaction } = require('../config/database');
 // inaccessible) -> adminAuth du module commun (type admin). Les portails
 // bank/agency/agent recoivent des JWT type 'distribution' + role.
 const {
-  adminAuth, distributionAuth, issueSession, rotateRefresh, revokeRefreshToken,
+  adminAuth, requireRole, distributionAuth, issueSession, rotateRefresh, revokeRefreshToken,
   readRefreshToken, clearRefreshCookie,
 } = require('../middleware/auth');
 
@@ -66,13 +66,14 @@ addSessionRoutes(agentPortalRouter, 'agent',  'agent',        loadDistributionUs
 
 // Admin — banques
 adminRouter.get('/banks',  adminAuth, async (req, res) => { const r = await query(`SELECT * FROM distribution_banks ORDER BY bank_name`); res.json({ data: r.rows }); });
-adminRouter.post('/banks', adminAuth, async (req, res) => {
+// Audit 2026-11-10 § 3 : creation de banques et de comptes bank_admin reservee au super_admin (comme /admin/partners/banks)
+adminRouter.post('/banks', adminAuth, requireRole('super_admin'), async (req, res) => {
   const { bankName, bankCode, country='CM', commissionRate=0.002 } = req.body;
   if (!bankName||!bankCode) return res.status(422).json({ error: 'bankName et bankCode requis' });
   try { const r = await query(`INSERT INTO distribution_banks (bank_name,bank_code,country,commission_rate) VALUES ($1,$2,$3,$4) RETURNING *`,[bankName,bankCode.toUpperCase(),country,commissionRate]); res.status(201).json(r.rows[0]); }
   catch(err){ if(err.code==='23505') return res.status(409).json({error:'Code banque déjà utilisé'}); res.status(500).json({error:err.message}); }
 });
-adminRouter.post('/banks/:id/users', adminAuth, async (req, res) => {
+adminRouter.post('/banks/:id/users', adminAuth, requireRole('super_admin'), async (req, res) => {
   const { firstName, lastName, email, phone, password } = req.body;
   if (!firstName||!email||!password) return res.status(422).json({ error: 'Champs requis' });
   try { const hash = await bcrypt.hash(password, 12); const r = await query(`INSERT INTO distribution_users (first_name,last_name,email,phone,password_hash,role,bank_id,created_by_type,created_by_id) VALUES ($1,$2,$3,$4,$5,'bank_admin',$6,'admin',$7) RETURNING user_id,email,role`,[firstName,lastName,email.toLowerCase(),phone||null,hash,req.params.id,req.user.sub]); res.status(201).json(r.rows[0]); }

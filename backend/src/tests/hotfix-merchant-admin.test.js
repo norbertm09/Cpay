@@ -42,7 +42,7 @@ app.use('/merchant', merchantRouter);
 app.use('/admin', adminRouter);
 
 const MERCHANT_ID = '11111111-1111-4111-8111-111111111111';
-const merchantToken = () => signToken({ sub: 'user-1', merchantId: MERCHANT_ID, type: 'merchant', email: 'm@test.io' });
+const merchantToken = (extra = {}) => signToken({ sub: 'user-1', merchantId: MERCHANT_ID, type: 'merchant', email: 'm@test.io', ...extra });
 const adminToken = (role) => signToken({ sub: 'admin-1', type: 'admin', role, email: 'admin@test.io' });
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 
@@ -218,11 +218,15 @@ describe('3. Cles API hachees (apiKeyAuth)', () => {
     expect(res.status).toBe(200);
   });
 
-  test('POST /merchant/api-keys stocke hash + prefixe, renvoie la cle brute une fois', async () => {
+  test('POST /merchant/api-keys stocke hash + prefixe, renvoie la cle brute une fois (proprietaire + confirmation, audit 2026-11-10)', async () => {
+    const pwdHash = require('bcryptjs').hashSync('owner-pass', 4);
     mockDbQuery.mockImplementation(async (sql, params) => sql.includes('INSERT INTO merchant_api_keys')
       ? rows([{ key_id: 'k2', key_name: 'n', key_prefix: params[3], permissions: [], is_active: true, expires_at: null, created_at: 'now' }])
+      : /SELECT user_id, password_hash, mfa_enabled, mfa_secret FROM merchant_users/.test(sql) ? rows([{ user_id: 'u1', password_hash: pwdHash, mfa_enabled: false, mfa_secret: null }])
       : rows([]));
-    const res = await request(app).post('/merchant/api-keys').set(bearer(merchantToken())).send({ keyName: 'n' });
+    const ownerToken = merchantToken({ role: 'owner' });
+    expect((await request(app).post('/merchant/api-keys').set(bearer(ownerToken)).send({ keyName: 'n' })).status).toBe(428);
+    const res = await request(app).post('/merchant/api-keys').set(bearer(ownerToken)).send({ keyName: 'n', confirm: { password: 'owner-pass' } });
     expect(res.status).toBe(201);
     const raw = res.body.key.api_key;
     expect(raw).toMatch(/^sk_live_[0-9a-f]{48}$/);

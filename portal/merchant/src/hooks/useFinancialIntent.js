@@ -7,6 +7,18 @@ const FIELDS = {
   transfer: ['direction', 'amount', 'description', 'accountId'],
 };
 const SAFE_REJECTIONS = ['VALIDATION_ERROR', 'PHONE_INVALID', 'INVALID_PHONE', 'CURRENCY_MISMATCH'];
+// Audit 2026-11-10 § 3 : refus DÉFINITIF vérifié par le serveur — l'ordre existe (référence renvoyée) et l'opérateur
+// l'a refusé (outcome declined / PAYMENT_DECLINED). L'intention est connue : une nouvelle opération devient possible,
+// la clé n'est jamais réutilisée (le serveur rejouerait le refus).
+const DEFINITIVE_REFUSALS = ['PAYMENT_DECLINED', 'GATEWAY_ERROR'];
+const RESOURCE_FIELDS = ['txnId', 'transactionId', 'transferId', 'withdrawalId', 'resourceId', 'orderId', 'id', 'reference', 'resource'];
+const isDefinitiveRefusal = (err) => {
+  const data = err?.response?.data; const status = err?.response?.status;
+  if (!data || ![402, 409, 502].includes(status)) return false;
+  if (!(data.outcome === 'declined' || DEFINITIVE_REFUSALS.includes(data.code))) return false;
+  if (data.outcome && data.outcome !== 'declined') return false;          // unknown / pending : résultat incertain, rien ne change
+  return RESOURCE_FIELDS.some(field => data[field] != null);
+};
 const STORAGE_ERROR = 'L’enregistrement de l’opération est indisponible. Autorisez le stockage de cet onglet puis réessayez.';
 const CONFLICT = 'Reprenez les paramètres de l’opération enregistrée avant de réessayer. Son résultat doit être connu avant une nouvelle opération.';
 
@@ -97,8 +109,17 @@ export function useFinancialIntent(user, operation) {
       // Only verified pre-execution validation failures allow business edits.
       // Network, server, conflict and step-up failures always retain the key.
       const data = err?.response?.data;
-      const resourceFields = ['txnId', 'transactionId', 'transferId', 'withdrawalId', 'resourceId', 'orderId', 'id', 'reference', 'resource'];
-      if ([400, 422].includes(err?.response?.status) && SAFE_REJECTIONS.includes(data?.code)
+      const resourceFields = RESOURCE_FIELDS;
+      if (isDefinitiveRefusal(err)) {
+        try {
+          const current = read(scope, operation);
+          if (current?.key === entry.key) {
+            const known = { ...current, known: true };
+            window.sessionStorage.setItem(scope, JSON.stringify(known));
+            if (scopeRef.current === scope && generationRef.current.version === generation) set(known);
+          }
+        } catch (_) { if (scopeRef.current === scope && generationRef.current.version === generation) set(entry, STORAGE_ERROR); }
+      } else if ([400, 422].includes(err?.response?.status) && SAFE_REJECTIONS.includes(data?.code)
           && !resourceFields.some(field => data[field] != null)) {
         try {
           const current = read(scope, operation);

@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { integrationsApi } from '../../services/api';
 import { useAsync } from '../../hooks/useAsync';
-import { Button, Card, PageHeader, Input, Checkbox, Table, Badge, Modal, ConfirmDialog, Notice, CopyRow } from '../../components';
+import { Button, Card, PageHeader, Input, Checkbox, Table, Badge, Modal, ConfirmDialog, Notice, CopyRow, StepUpModal } from '../../components';
+import { useAuth } from '../../hooks/useAuth';
+import { useStepUp } from '../../hooks/useStepUp';
 import { fmtDateTime, fmtRelative } from '../../utils/format';
 import { errorMessage } from '../../utils/errors';
 
@@ -11,6 +13,9 @@ const permLabel = (p) => (PERMS.find(x => x[0] === p) || [p, p])[1];
 
 // Clés API : la clé et le secret sont affichés UNE SEULE FOIS à la création.
 export const ClesApi = () => {
+  const { user } = useAuth();
+  const stepUp = useStepUp(user);   // audit 2026-11-10 § 3 : la création d'une clé exige le propriétaire + confirmation forte
+  const isOwner = !user?.role || user.role === 'owner';
   const list = useAsync(() => integrationsApi.apiKeys(), []);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ keyName: '', permissions: ['collect', 'transactions', 'pay_links'] });
@@ -25,10 +30,11 @@ export const ClesApi = () => {
     e?.preventDefault();
     if (form.keyName.trim().length < 2) { setError('Nom de la clé requis.'); return; }
     if (!form.permissions.length) { setError('Choisissez au moins une permission.'); return; }
-    setSaving(true);
-    try { const { data } = await integrationsApi.createApiKey({ keyName: form.keyName.trim(), permissions: form.permissions }); setCreated(data.key); setCreating(false); setForm({ keyName: '', permissions: ['collect', 'transactions', 'pay_links'] }); list.reload(); }
-    catch (err) { toast.error(errorMessage(err)); }
-    finally { setSaving(false); }
+    stepUp.request(async (confirm) => {
+      setSaving(true);
+      try { const { data } = await integrationsApi.createApiKey({ keyName: form.keyName.trim(), permissions: form.permissions, confirm }); setCreated(data.key); setCreating(false); setForm({ keyName: '', permissions: ['collect', 'transactions', 'pay_links'] }); list.reload(); }
+      finally { setSaving(false); }
+    });
   };
   const doConfirm = async () => {
     setBusy(true);
@@ -50,7 +56,8 @@ export const ClesApi = () => {
   return (
     <div className="stack-lg">
       <PageHeader title="Clés API" subtitle="Authentifiez vos applications et plugins auprès de l’API C-Pay. La clé et le secret ne sont affichés qu’une seule fois, à la création."
-        actions={<Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Nouvelle clé</Button>} />
+        actions={isOwner ? <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Nouvelle clé</Button> : null} />
+      {!isOwner && <Notice tone="info">Seul le propriétaire du compte marchand peut créer ou révoquer des clés API.</Notice>}
       <Card title="Utilisation" subtitle="En-têtes à joindre à chaque appel de l’API publique">
         <pre className="code-block">{`curl https://api.c-pay.global/api/v1/merchant/public/transactions \\
   -H "X-API-Key: sk_live_…" \\
@@ -78,6 +85,7 @@ export const ClesApi = () => {
           <div className="kv-box"><CopyRow label="Clé API (X-API-Key)" value={created.api_key} /><CopyRow label="Secret (X-API-Secret)" value={created.api_secret} /></div>
         </Modal>
       )}
+      {stepUp.state && <StepUpModal {...stepUp.state} title="Confirmer la création de la clé API" onConfirm={stepUp.confirm} onClose={stepUp.close} />}
       {confirm && <ConfirmDialog title={confirm.action === 'revoke' ? 'Révoquer la clé' : 'Supprimer la clé'} message={confirm.action === 'revoke' ? `Les applications utilisant « ${confirm.key.key_name} » cesseront immédiatement de fonctionner.` : `La clé révoquée « ${confirm.key.key_name} » sera définitivement supprimée de la liste.`} confirmLabel={confirm.action === 'revoke' ? 'Révoquer' : 'Supprimer'} busy={busy} onConfirm={doConfirm} onClose={() => setConfirm(null)} />}
     </div>
   );

@@ -152,6 +152,11 @@ const fakeQuery = async (sql, params = []) => {
   if (/UPDATE merchant_users SET password_hash=\$1, temp_password=FALSE/.test(s)) { db.merchantUser.password_hash = params[0]; db.merchantUser.temp_password = false; return rows([]); }
   if (/UPDATE merchant_users SET failed_attempts=\$1/.test(s)) { db.merchantUser.failed_attempts = params[0]; db.merchantUser.locked_until = params[1]; return rows([]); }
   if (/SELECT mfa_secret FROM merchant_users/.test(s)) return rows([{ mfa_secret: db.merchantUser.mfa_secret }]);
+  // audit 2026-11-10 : enrolement protege (beginTotpEnrollment / completeTotpEnrollment)
+  if (/SELECT mfa_secret, mfa_enabled AS enabled FROM merchant_users/.test(s)) return rows([{ mfa_secret: db.merchantUser.mfa_secret, enabled: db.merchantUser.mfa_enabled }]);
+  if (/SELECT mfa_secret, mfa_pending_secret FROM merchant_users/.test(s)) return rows([{ mfa_secret: db.merchantUser.mfa_secret, mfa_pending_secret: db.merchantUser.mfa_pending_secret || null }]);
+  if (/UPDATE merchant_users SET mfa_pending_secret=\$1/.test(s)) { db.merchantUser.mfa_pending_secret = params[0]; return rows([]); }
+  if (/SET mfa_secret=mfa_pending_secret, mfa_pending_secret=NULL, mfa_enabled=TRUE/.test(s)) { db.merchantUser.mfa_secret = db.merchantUser.mfa_pending_secret; db.merchantUser.mfa_pending_secret = null; db.merchantUser.mfa_enabled = true; return rows([]); }
   if (/SELECT email FROM merchant_users/.test(s)) return rows([{ email: db.merchantUser.email }]);
   if (/UPDATE merchant_users SET mfa_secret=\$1, mfa_enabled=FALSE/.test(s)) { db.merchantUser.mfa_secret = params[0]; db.merchantUser.mfa_enabled = false; return rows([]); }
   if (/UPDATE merchant_users SET mfa_enabled=TRUE/.test(s)) { db.merchantUser.mfa_enabled = true; return rows([]); }
@@ -304,6 +309,20 @@ describe('1. 2FA au login', () => {
     expect(db.merchantUser.mfa_enabled).toBe(false);
     // mfa_secret NULL -> 400, jamais 500 (audit §3.8)
     expect((await request(app).post('/api/v1/merchant/auth/2fa/disable').set(bearer(tok)).send({ token: '123456' })).status).toBe(400);
+  });
+
+  test('audit 2026-11-10 : 2FA active → setup exige le code courant, le secret actif reste valide jusqu’au verify du nouveau', async () => {
+    const tok = auth.signToken({ sub: 'mu-1', type: 'merchant', merchantId: MERCHANT_ID });
+    db.merchantUser.mfa_enabled = true; db.merchantUser.mfa_secret = SECRET;
+    const refused = await request(app).post('/api/v1/merchant/auth/2fa/setup').set(bearer(tok));
+    expect(refused.status).toBe(428); expect(refused.body.code).toBe('MFA_CONFIRMATION_REQUIRED');
+    expect(db.merchantUser.mfa_secret).toBe(SECRET); expect(db.merchantUser.mfa_enabled).toBe(true);
+    const setup = await request(app).post('/api/v1/merchant/auth/2fa/setup').set(bearer(tok)).send({ token: speakeasy.totp({ secret: SECRET, encoding: 'base32' }) });
+    expect(setup.status).toBe(200); expect(setup.body.replacing).toBe(true);
+    expect(db.merchantUser.mfa_secret).toBe(SECRET); expect(db.merchantUser.mfa_pending_secret).toBe(setup.body.secret);
+    const ok = await request(app).post('/api/v1/merchant/auth/2fa/verify').set(bearer(tok)).send({ token: speakeasy.totp({ secret: setup.body.secret, encoding: 'base32' }) });
+    expect(ok.status).toBe(200); expect(ok.body.replaced).toBe(true);
+    expect(db.merchantUser.mfa_secret).toBe(setup.body.secret); expect(db.merchantUser.mfa_pending_secret).toBeNull(); expect(db.merchantUser.mfa_enabled).toBe(true);
   });
 });
 

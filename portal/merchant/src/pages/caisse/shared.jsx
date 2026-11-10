@@ -28,7 +28,10 @@ export const usePhoneDetection = (phone, enabled = true, country = undefined) =>
   const [detecting, setDetecting] = useState(false);
   useEffect(() => {
     if (!enabled) return undefined;
-    if (phoneDigits(phone).length < 8) { setDetect(null); setDetecting(false); return undefined; }
+    // Audit 2026-11-10 § 3 : la détection précédente est invalidée dès que la saisie change (plus d'envoi du numéro
+    // détecté pour une saisie antérieure pendant les 400 ms de debounce ni pendant l'appel).
+    setDetect(null);
+    if (phoneDigits(phone).length < 8) { setDetecting(false); return undefined; }
     const ctrl = new AbortController();
     const h = setTimeout(() => {
       setDetecting(true);
