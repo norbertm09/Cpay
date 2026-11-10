@@ -910,6 +910,7 @@ object CashLabels {
 
     fun transferStatus(status: String?): String = when (status) {
         "pending"        -> "En attente"
+        "sending"        -> "Envoi en cours"      // audit 2026-11-10 : etat d'envoi durable, fonds reserves
         "processing"     -> "En cours"
         "pending_manual" -> "Traitement J+1"
         "awaiting_funds" -> "Virement attendu"

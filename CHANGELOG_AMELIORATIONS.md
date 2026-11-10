@@ -1,5 +1,19 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-android-p2 (2026-11-10) — lot Android P2 (audit du 2 novembre, P2-1, P2-3, P2-4) et chaine de build
+* Dependances : Kotlin 2.2.21 + KSP 2.2.21-2.0.4 (derniere paire supportee par AGP 8.11.1), AndroidX aux dernieres
+  versions compatibles compileSdk 36 (core 1.17, appcompat 1.7.1, lifecycle 2.9.4, activity 1.11, fragment 1.8.9,
+  navigation 2.9.5, swiperefresh 1.2, constraintlayout 2.2.1), Room 2.8.5, Retrofit 3.0, coroutines 1.10.2, tests
+  AndroidX 1.3 / Espresso 3.7. Les montees exigeant compileSdk 37 / AGP 9 / Gradle 9 (core 1.18+, navigation 2.10+,
+  okhttp 5 android, KSP 2.3+, wrapper 9) sont exclues de Dependabot avec motif, pour un lot « AGP 9 / API 37 ».
+* R8 (P2-3) : regles « garde-tout » retirees, modeles @SerializedName conserves avec obfuscation ; recette sur l'APK
+  staging documentee avant chaque release.
+* Biometrie (P2-1) : BIOMETRIC_STRONG ou identifiant de l'appareil, verrou a l'ouverture actif par defaut ;
+  SecurityManager debarrasse de isTokenExpired / isDeviceRooted / logSecurityEvent (jamais appeles).
+* Qualite (P2-4) : chaines de ChangePasswordActivity et RegisterActivity dans strings.xml ; appairage decide sur le
+  code d'erreur (`DEVICE_ALREADY_PAIRED` ajoute au 409 de POST /terminals/pair) et non sur une sous-chaine ; libelle
+  `sending` ; tests unitaires JVM (SecurityManager, ApiErrors, CashLabels) executes en CI (`:app:testDebugUnitTest`).
+
 ## 2.7.2-audit1110-comptes (2026-11-10) — audit du 10 novembre, § 3 comptes et parcours
 * Portails (marchand, admin, porteur) : une requete mise en attente pendant le rafraichissement de session n'est
   rejouee que si la nouvelle session appartient au meme compte (utilisateur + marchand / role / porteur) ; sinon

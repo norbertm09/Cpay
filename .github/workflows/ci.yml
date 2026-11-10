@@ -244,6 +244,22 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - name: SDK du runner (android/local.properties pointe sur /opt/android-sdk du poste de dev)
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+      - name: gradlew :app:testDebugUnitTest (lot Android P2 — tests unitaires JVM)
+        working-directory: android
+        run: |
+          set -o pipefail
+          ./gradlew :app:testDebugUnitTest --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle-test.log" || {
+            grep -A25 "What went wrong" "$RUNNER_TEMP/gradle-test.log" | grep -v "^\s*$" | head -40 | sed 's/^/::error::/'
+            grep -E "^e: |FAILED|Could not (resolve|find|determine)|Unsupported|incompatible" "$RUNNER_TEMP/gradle-test.log" | head -40 | sed 's/^/::error::/'
+            exit 1
+          }
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: android-unit-test-report
+          path: android/app/build/reports/tests/testDebugUnitTest
+          retention-days: 7
+          if-no-files-found: ignore
       - name: gradlew :app:assembleDebug
         working-directory: android
         run: |

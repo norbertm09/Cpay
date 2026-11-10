@@ -39,10 +39,10 @@ class RegisterActivity : AppCompatActivity() {
         val confirm   = binding.etConfirm.text.toString()
 
         if (firstName.isEmpty() || email.isEmpty() || phone.isEmpty() || password.isEmpty()) {
-            showError("Tous les champs obligatoires (*) doivent être remplis"); return
+            showError(getString(R.string.register_error_required)); return
         }
-        if (password.length < 8) { showError("Mot de passe : 8 caractères minimum"); return }
-        if (password != confirm) { showError("Les mots de passe ne correspondent pas"); return }
+        if (password.length < 8) { showError(getString(R.string.register_error_password_min)); return }
+        if (password != confirm) { showError(getString(R.string.password_error_mismatch)); return }
 
         setLoading(true)
         lifecycleScope.launch {

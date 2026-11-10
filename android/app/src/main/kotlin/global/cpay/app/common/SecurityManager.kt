@@ -1,26 +1,8 @@
 package global.cpay.app.common
 
-import android.content.Context
-import android.util.Log
-
+// Lot Android P2 (audit 2026-11-02 P2-1) : isTokenExpired, isDeviceRooted et logSecurityEvent, jamais appeles,
+// sont retires (fausse impression de controle). Fonctions pures, couvertes par SecurityManagerTest.
 object SecurityManager {
-
-    // Vérifier si le token est expiré (JWT)
-    fun isTokenExpired(token: String?): Boolean {
-        if (token.isNullOrBlank()) return true
-        return try {
-            val parts = token.split(".")
-            if (parts.size != 3) return true
-            val payload = android.util.Base64.decode(
-                parts[1].padEnd((parts[1].length + 3) / 4 * 4, '='),
-                android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING
-            )
-            val json = String(payload)
-            val expMatch = Regex("\"exp\":(\\d+)").find(json)
-            val exp = expMatch?.groupValues?.get(1)?.toLongOrNull() ?: return true
-            System.currentTimeMillis() / 1000 > exp - 300 // 5 min avant expiry
-        } catch(e: Exception) { true }
-    }
 
     // Valider montant
     fun validateAmount(amount: Double, min: Double = 100.0, max: Double = 5_000_000.0): String? {
@@ -66,15 +48,4 @@ object SecurityManager {
         return "$prefix-$ts-$rand"
     }
 
-    // Vérifier si root détecté (sécurité basique)
-    fun isDeviceRooted(): Boolean {
-        val paths = listOf("/system/app/Superuser.apk", "/sbin/su", "/system/bin/su",
-            "/system/xbin/su", "/data/local/xbin/su", "/data/local/bin/su")
-        return paths.any { java.io.File(it).exists() }
-    }
-
-    // Log sécurité (en prod, envoyer à un serveur de monitoring)
-    fun logSecurityEvent(context: Context, event: String, details: String = "") {
-        Log.w("CPay-Security", "[$event] $details")
-    }
 }

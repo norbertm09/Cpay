@@ -1,11 +1,13 @@
-# Retrofit + OkHttp
+# Lot Android P2 (audit 2026-11-02 P2-3) : plus de regles « garde-tout » sur retrofit2.**, okhttp3.**, gson.** et
+# global.cpay.app.common.** — OkHttp 4.12, Retrofit 3 et Gson 2.13 livrent leurs regles consommateur ; seuls les
+# modeles (classes portant des champs @SerializedName) sont conserves, avec obfuscation autorisee (Gson lit les
+# annotations, pas les noms). Le build staging (R8 identique a la release) sert de recette avant chaque release.
 -keepattributes Signature
 -keepattributes *Annotation*
--keep class retrofit2.** { *; }
--keep interface retrofit2.** { *; }
--keep class okhttp3.** { *; }
--keep class com.google.gson.** { *; }
--keep class global.cpay.app.common.** { *; }
+-keep,allowobfuscation class global.cpay.app.** { @com.google.gson.annotations.SerializedName <fields>; }
+-keepclassmembers class global.cpay.app.** { @com.google.gson.annotations.SerializedName <fields>; <init>(...); }
+# Reponses lues en Map<String, Any> / List<Map<..>> (ApiService) : types generiques des methodes de service
+-keepclassmembers,allowobfuscation interface global.cpay.app.common.ApiService { <methods>; }
 
 # Coroutines
 -keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
