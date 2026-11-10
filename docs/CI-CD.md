@@ -32,7 +32,7 @@ exécuté en parallèle d'un autre (`concurrency: deploy-production`).
 | `sdk-js` | `node --check` sur `sdk/javascript` | Le SDK JS a sa propre version (`1.1.0`). |
 | `expo` | `npm install` dans `mobile/cpay-mobile`, transformation de `App.js` par `@babel/core` + `babel-preset-expo` | Pas de lockfile Expo ; pas de build natif (EAS). |
 | `android` | JDK 17 (Temurin), `android-actions/setup-android` (platform 34, build-tools 34.0.0), `gradle/actions/setup-gradle`, `./gradlew :app:assembleDebug`, artefact `android-debug-apk` (7 jours) | `android/local.properties` (suivi dans git, `sdk.dir=/opt/android-sdk`) est réécrit avec `$ANDROID_HOME` sur le runner. Wrapper Gradle 8.5 (AGP 8.2.0) dans `android/gradle/wrapper`. |
-| `docker` | `docker/Dockerfile.api`, `docker/Dockerfile.portal` (`APP_DIR=portal/merchant`) avec cache GHA, sans push ; `nginx -t` sur `nginx-landing.conf`, `nginx-spa.conf` et `nginx.conf` (certificats factices, upstreams résolus vers `127.0.0.1`) | |
+| `docker` | `docker/Dockerfile.api` démarrée contre PostgreSQL 16 (`/health`), `docker/Dockerfile.portal` pour merchant, admin, cardholder et `portal/partners/Dockerfile`, chaque image portail démarrée sans root ni capacité (CSP vérifiée) ; `docker compose config` (dont environnement de `settlement-cron` limité à `INTERNAL_TOKEN`) ; `nginx -t` sur `nginx-landing.conf`, `nginx-spa.conf` et `nginx.conf` ; **sur un push vers `main`** : publication des cinq images sur `ghcr.io/<owner>/cpay/cplus-<svc>:<VERSION>-<sha12>` (`packages: write`, `GITHUB_TOKEN`) | `scripts/deploy.sh` récupère ces images (docs/EXPLOITATION.md § 4). |
 | `version-check` | `scripts/check-version.sh` puis `sh -n`/`bash -n` sur tous les scripts | Voir `docs/VERSIONING.md` pour la liste des emplacements. |
 
 Durée typique : les jobs sont parallèles ; le plus long est `android` (≈ 6-8 min à froid, moins avec le cache Gradle).
@@ -103,6 +103,7 @@ POSIX `sh`, idempotent, utilisable à la main depuis `/opt/cplus` :
 ./scripts/deploy.sh                    # déploiement complet du commit courant
 ./scripts/deploy.sh --skip-backup      # sans sauvegarde (déconseillé)
 ./scripts/deploy.sh --skip-build       # réutilise les images déjà construites
+./scripts/deploy.sh --no-pull          # ne tente pas GHCR : construction locale (CPAY_PULL=false équivalent)
 ./scripts/deploy.sh --skip-migrations
 ./scripts/deploy.sh --rollback         # revient au commit précédent (voir § 6)
 ```
@@ -111,7 +112,10 @@ POSIX `sh`, idempotent, utilisable à la main depuis `/opt/cplus` :
 
 1. **État** : lit `/opt/cplus/.deployed` (commit courant/précédent), journal dans `/var/log/cplus/deploy_<date>.log`
    (ou à la racine du dépôt si non inscriptible). `.deployed` et `.deploy-history` sont ignorés par git.
-2. **Build** : `docker compose build` avec `CPLUS_TAG=<VERSION>` → images `cplus-api:<version>`, `cplus-admin:<version>`, …
+2. **Images** (`CPLUS_TAG=<VERSION>-<sha12>`) : déjà présentes → rien ; sinon `docker pull` depuis GHCR
+   (`ghcr.io/norbertm09/cpay/cplus-<svc>:<tag>`, publiées par la CI sur `main`) et retiquetage local ; sinon
+   `docker compose build` service par service. Avant cela, `docker/.cron.env` (`INTERNAL_TOKEN` seul) est généré pour
+   `settlement-cron`.
 3. **Environnement** : `backend/scripts/check-production-env.js` exécuté dans l'image API fraîchement construite
    (`docker compose run … -v backend/scripts:/app/scripts:ro`) — pas besoin de Node ni de `node_modules` sur l'hôte.
 4. **Sauvegarde** : `scripts/backup-db.sh --label pre-<version>` (échec = arrêt, sauf `--skip-backup`).
@@ -191,6 +195,9 @@ python3 -c "import yaml,sys;[yaml.safe_load(open(f)) for f in sys.argv[1:]]" .gi
   `postgres:16-alpine` en CI, `certbot/certbot:v4.1.1`), pas par digest : Dependabot `docker` propose les montées.
 - `deploy.sh` n'est jamais exécuté en CI (il tourne sur le serveur) ; la CI démarre l'image API contre PostgreSQL 16
   et valide `docker compose config`, mais pas le scénario complet build → sauvegarde → migrations → `compose up`.
+- La récupération depuis GHCR suppose que le serveur peut lire les paquets (`docker login ghcr.io` avec un jeton
+  `read:packages`, ou paquets publics) ; à défaut `deploy.sh` reconstruit localement, comme avant.
+- Pas encore de bascule sans coupure de l'API (`compose up -d` remplace le conteneur ; quelques secondes).
 
 ## Deux environnements (depuis le 2026-10-24)
 
