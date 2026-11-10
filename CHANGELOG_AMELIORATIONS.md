@@ -1,5 +1,18 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-portails-bascule (2026-11-10) — portails sans coupure (suite de la bascule bleu/vert de l'API)
+* Quatre portails (marchand, porteur, admin, partenaires) en deux couleurs `<portail>-blue` / `<portail>-green`
+  (definition commune `x-portal`, alias reseau `<portail>-portal` pour le nginx du profil standalone), une seule
+  couleur active pour la tranche web. Les ports 127.0.0.1:3002-3005 attendus par le nginx de l'hote sont tenus par
+  `web-router` (nginx non privilegie, `docker/web-router/`, port -> portail par `map`, couleur dans
+  `active/active.conf`, resolution a chaque requete).
+* `deploy.sh` : la couleur inactive des quatre portails demarre avec les nouvelles images, chaque conteneur doit
+  servir `index.html`, puis rechargement gracieux du routeur et arret de l'ancienne couleur ; un portail en echec
+  laisse l'API et les portails actifs intacts. Premiere bascule : les conteneurs historiques `cplus-*-portal`
+  sont arretes une derniere fois (quelques secondes) puis retires. La vitrine reste geree par `compose up -d`.
+* CI : `nginx -t` du routeur web ; `docker compose config` verifie alias, absence de port hote, une couleur par
+  defaut et les quatre ports du routeur. Docs EXPLOITATION § 4, CI-CD § 5, runbook § 1.
+
 ## 2.7.2-api-bascule (2026-11-10) — bascule sans coupure de l'API (audit du 2 novembre, infra P1-6 seconde moitie)
 * Deux couleurs `api-blue` / `api-green` (definition commune, alias reseau `api` pour settlement-cron, Prometheus et le
   nginx du profil standalone), une seule active en regime etabli. Le port 127.0.0.1:3001 attendu par le nginx de

@@ -13,6 +13,7 @@ reset-creds.js
 !.env.example
 docker/.cron.env
 docker/api-router/active/active.conf
+docker/web-router/active/active.conf
 docker/certbot/
 *.pem
 *.key

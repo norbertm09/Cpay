@@ -35,6 +35,19 @@ x-api: &api
   mem_limit: 1536m
   cpus: 2
 
+# Portails sans coupure (2026-11) : chaque portail existe en deux couleurs <portail>-blue / <portail>-green
+# (definition commune, alias reseau <portail>-portal pour le nginx du profil standalone), une seule couleur active
+# pour toute la tranche web (CPAY_WEB_BLUE / CPAY_WEB_GREEN poses par scripts/deploy.sh). Les ports
+# 127.0.0.1:3002-3005 attendus par le nginx de l'hote sont tenus par web-router (docker/web-router/).
+x-portal: &portal
+  restart: unless-stopped
+  expose:
+    - "8080"
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  mem_limit: 128m
+  cpus: 0.5
+
 services:
 
   api-blue:
@@ -69,47 +82,7 @@ services:
     networks:
       - cplus-internal
 
-  admin-portal:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.portal
-      args:
-        APP_DIR: portal/admin
-        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-admin:${CPLUS_TAG:-2.7.1}
-    container_name: cplus-admin-portal
-    restart: unless-stopped
-    expose:
-      - "8080"
-    ports:
-      - "127.0.0.1:3004:8080"
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    mem_limit: 128m
-    cpus: 0.5
-    networks:
-      - cplus-internal
 
-  merchant-portal:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.portal
-      args:
-        APP_DIR: portal/merchant
-        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-merchant:${CPLUS_TAG:-2.7.1}
-    container_name: cplus-merchant-portal
-    restart: unless-stopped
-    expose:
-      - "8080"
-    ports:
-      - "127.0.0.1:3002:8080"
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    mem_limit: 128m
-    cpus: 0.5
-    networks:
-      - cplus-internal
 
   nginx:
     image: nginx:1.28-alpine
@@ -149,25 +122,40 @@ services:
     networks:
       - cplus-internal
 
-  partners-portal:
-    image: cplus-partners:${CPLUS_TAG:-2.7.1}
-    build:
-      context: ../portal/partners
-      dockerfile: Dockerfile
-      args:
-        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    container_name: cplus-partners-portal
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3005:8080"
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    mem_limit: 128m
-    cpus: 0.5
-    networks:
-      - cplus-internal
 
-  cardholder-portal:
+
+  merchant-blue:
+    <<: *portal
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.portal
+      args:
+        APP_DIR: portal/merchant
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
+    image: cplus-merchant:${CPLUS_TAG:-2.7.1}
+    container_name: cplus-merchant-blue
+    scale: ${CPAY_WEB_BLUE:-1}
+    networks:
+      cplus-internal:
+        aliases: [merchant-portal]
+
+  merchant-green:
+    <<: *portal
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.portal
+      args:
+        APP_DIR: portal/merchant
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
+    image: cplus-merchant:${CPLUS_TAG:-2.7.1}
+    container_name: cplus-merchant-green
+    scale: ${CPAY_WEB_GREEN:-0}
+    networks:
+      cplus-internal:
+        aliases: [merchant-portal]
+
+  cardholder-blue:
+    <<: *portal
     build:
       context: ..
       dockerfile: docker/Dockerfile.portal
@@ -175,16 +163,102 @@ services:
         APP_DIR: portal/cardholder
         REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
     image: cplus-cardholder:${CPLUS_TAG:-2.7.1}
-    container_name: cplus-cardholder-portal
+    container_name: cplus-cardholder-blue
+    scale: ${CPAY_WEB_BLUE:-1}
+    networks:
+      cplus-internal:
+        aliases: [cardholder-portal]
+
+  cardholder-green:
+    <<: *portal
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.portal
+      args:
+        APP_DIR: portal/cardholder
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
+    image: cplus-cardholder:${CPLUS_TAG:-2.7.1}
+    container_name: cplus-cardholder-green
+    scale: ${CPAY_WEB_GREEN:-0}
+    networks:
+      cplus-internal:
+        aliases: [cardholder-portal]
+
+  admin-blue:
+    <<: *portal
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.portal
+      args:
+        APP_DIR: portal/admin
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
+    image: cplus-admin:${CPLUS_TAG:-2.7.1}
+    container_name: cplus-admin-blue
+    scale: ${CPAY_WEB_BLUE:-1}
+    networks:
+      cplus-internal:
+        aliases: [admin-portal]
+
+  admin-green:
+    <<: *portal
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.portal
+      args:
+        APP_DIR: portal/admin
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
+    image: cplus-admin:${CPLUS_TAG:-2.7.1}
+    container_name: cplus-admin-green
+    scale: ${CPAY_WEB_GREEN:-0}
+    networks:
+      cplus-internal:
+        aliases: [admin-portal]
+
+  partners-blue:
+    <<: *portal
+    build:
+      context: ../portal/partners
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
+    image: cplus-partners:${CPLUS_TAG:-2.7.1}
+    container_name: cplus-partners-blue
+    scale: ${CPAY_WEB_BLUE:-1}
+    networks:
+      cplus-internal:
+        aliases: [partners-portal]
+
+  partners-green:
+    <<: *portal
+    build:
+      context: ../portal/partners
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
+    image: cplus-partners:${CPLUS_TAG:-2.7.1}
+    container_name: cplus-partners-green
+    scale: ${CPAY_WEB_GREEN:-0}
+    networks:
+      cplus-internal:
+        aliases: [partners-portal]
+
+  # Routeur bleu/vert de la tranche web : 127.0.0.1:3002 marchand, :3003 porteur, :3004 admin, :3005 partenaires
+  web-router:
+    image: nginxinc/nginx-unprivileged:1.28-alpine
+    container_name: cplus-web-router
     restart: unless-stopped
-    expose:
-      - "8080"
     ports:
-      - "127.0.0.1:3003:8080"
+      - "127.0.0.1:3002:3002"
+      - "127.0.0.1:3003:3003"
+      - "127.0.0.1:3004:3004"
+      - "127.0.0.1:3005:3005"
+    volumes:
+      - ./web-router/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web-router/active:/etc/nginx/cpay:ro   # active.conf ecrit par deploy.sh (ignore par git)
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    mem_limit: 128m
-    cpus: 0.5
+    mem_limit: 64m
+    cpus: 0.25
     networks:
       - cplus-internal
 

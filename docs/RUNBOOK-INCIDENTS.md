@@ -16,10 +16,18 @@ boucle de redémarrage (`Restarting (1)`) après un déploiement.
 cd /opt/cplus
 ./scripts/healthcheck-prod.sh                       # API, vitrine, 4 portails (admin : 200 ou 403 acceptés)
 cd docker && docker compose ps                      # colonne STATUS : « Up » attendu, « Restarting » = incident
-docker logs --tail 30 cplus-merchant-portal         # idem cplus-admin-portal, cplus-cardholder-portal, cplus-partners-portal
+cat web-router/active/active.conf                   # couleur active des portails (blue | green)
+docker logs --tail 30 cplus-merchant-blue           # ou -green ; idem cplus-admin-*, cplus-cardholder-*, cplus-partners-*
+docker logs --tail 30 cplus-web-router              # routeur qui tient 127.0.0.1:3002-3005
 ```
 
+Depuis la bascule bleu/vert (novembre 2026), un déploiement ne remplace plus un portail en service : la nouvelle
+couleur doit servir `index.html` avant la bascule, sinon le déploiement s'arrête en laissant l'ancienne couleur en
+ligne. Un 502 après déploiement vient donc plutôt du routeur (`cplus-web-router` arrêté) ou du vhost hôte.
+
 - `Restarting (1)` + message nginx `permission denied` / `nginx -t` en erreur : image cassée → § 1.2.
+- `cplus-web-router` absent ou `Restarting` : `cd /opt/cplus/docker && docker compose up -d web-router`, puis
+  `docker logs cplus-web-router` (configuration `web-router/default.conf`, fichier `active/active.conf` présent ?).
 - `Up` mais 502 : le reverse proxy hôte ne joint plus le port (`3002`-`3005`) → `sudo nginx -t`,
   `sudo systemctl reload nginx`, puis `curl -sI http://127.0.0.1:3002/` ; si le port répond, l'incident est côté
   vhost hôte (`/etc/nginx/sites-available/cpay`).

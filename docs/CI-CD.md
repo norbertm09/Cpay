@@ -124,8 +124,10 @@ POSIX `sh`, idempotent, utilisable à la main depuis `/opt/cplus` :
    `api-green`) démarre avec la nouvelle image, `/health` est attendu dans le conteneur, le routeur `api-router`
    (127.0.0.1:3001, `docker/api-router/`) est rechargé gracieusement vers la nouvelle couleur, puis l'ancienne est
    arrêtée après `CPAY_DRAIN_SECONDS` (10 s) par SIGTERM (les requêtes en cours se terminent, 45 s de grâce).
-   Portails, vitrine et `settlement-cron` sont mis à jour par `docker compose up -d --remove-orphans` (sans les
-   services `api-*`). Puis écriture de `.deployed`.
+   Même bascule pour les quatre portails : couleur inactive `<portail>-blue|green` démarrée, `index.html` vérifié
+   dans chaque conteneur, routeur `web-router` (127.0.0.1:3002-3005, `docker/web-router/`) rechargé, ancienne
+   couleur arrêtée. Vitrine, routeurs et `settlement-cron` par `docker compose up -d --remove-orphans` (sans les
+   services de couleur). Puis écriture de `.deployed`.
 7. **Health checks** : `127.0.0.1:3001/health` (API, bloquant, 90 s), `127.0.0.1:3006/` (vitrine, bloquant),
    portails `3002`-`3005` (avertissement seulement). En cas d'échec le script indique la commande de rollback.
 
