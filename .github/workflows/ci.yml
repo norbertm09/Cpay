@@ -299,6 +299,14 @@ jobs:
   docker:
     name: Images Docker + nginx -t
     runs-on: ubuntu-latest
+    # Reliquat 2026-11 : sur un push vers main, les cinq images cplus-* (api, admin, merchant, cardholder, partners)
+    # sont publiees sur GHCR sous <version>-<sha12> ; scripts/deploy.sh les recupere au lieu de reconstruire sur le VPS.
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GHCR_PREFIX: ghcr.io/${{ github.repository_owner }}/cpay
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     # Lot 7 (audit P2-11) : l'image API est demarree (tini, entrypoint, migrations, utilisateur cplus) contre un
     # PostgreSQL 16 et doit repondre 200 sur /health — jusqu'ici elle n'etait validee qu'en production.
     services:
@@ -384,10 +392,35 @@ jobs:
           tags: cplus-partners:ci
           cache-from: type=gha,scope=partners
           cache-to: type=gha,scope=partners,mode=max
+      - name: Images portails admin et porteur (docker/Dockerfile.portal) — publiees sur GHCR avec les autres
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.portal
+          build-args: |
+            APP_DIR=portal/admin
+            REACT_APP_API_BASE_URL=https://api.c-pay.global
+          push: false
+          load: true
+          tags: cplus-admin:ci
+          cache-from: type=gha,scope=admin
+          cache-to: type=gha,scope=admin,mode=max
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.portal
+          build-args: |
+            APP_DIR=portal/cardholder
+            REACT_APP_API_BASE_URL=https://api.c-pay.global
+          push: false
+          load: true
+          tags: cplus-cardholder:ci
+          cache-from: type=gha,scope=cardholder
+          cache-to: type=gha,scope=cardholder,mode=max
       - name: "Demarrage des images portails (hotfix 2026-11-10 : un nginx -t en root au build mettait les conteneurs en boucle)"
         run: |
           # Memes contraintes qu'en production (docker-compose.yml) : sans root, sans capacite, memoire bornee.
-          for img in cplus-merchant:ci cplus-partners:ci; do
+          for img in cplus-merchant:ci cplus-partners:ci cplus-admin:ci cplus-cardholder:ci; do
             name="${img%%:*}-run"
             docker run -d --name "$name" -p 18080:8080 --security-opt no-new-privileges:true --cap-drop ALL --memory 128m "$img"
             ok=0
@@ -401,6 +434,23 @@ jobs:
             echo "ok $img (uid $(docker exec "$name" id -u), CSP presente)"
             docker rm -f "$name" >/dev/null
           done
+      - name: Connexion a GHCR (push vers main uniquement)
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publication des images sur GHCR (<version>-<sha12>, memes images que celles demarrees ci-dessus)
+        if: env.PUBLISH == 'true'
+        run: |
+          TAG="$(tr -d '[:space:]' < VERSION)-${GITHUB_SHA:0:12}"
+          for img in cplus-api cplus-admin cplus-merchant cplus-cardholder cplus-partners; do
+            docker tag "$img:ci" "$GHCR_PREFIX/$img:$TAG"
+            docker push -q "$GHCR_PREFIX/$img:$TAG"
+            echo "publie : $GHCR_PREFIX/$img:$TAG"
+          done
+          echo "::notice::images $TAG publiees sur $GHCR_PREFIX — scripts/deploy.sh les recupere (docker login ghcr.io requis si les paquets sont prives)"
       - name: nginx -t — vitrine (nginx-landing.conf) et portails (nginx-spa.conf)
         run: |
           docker run --rm \
@@ -416,8 +466,12 @@ jobs:
       - name: docker compose config (lot 7, audit P2-11 — un compose invalide ne doit plus attendre le deploiement)
         run: |
           printf 'DB_HOST=x\nDB_NAME=x\nDB_USER=x\nDB_PASSWORD=x\nJWT_SECRET=x\nINTERNAL_TOKEN=x\n' > backend/.env
+          printf 'INTERNAL_TOKEN=x\n' > docker/.cron.env   # genere par scripts/deploy.sh en production
           docker compose -f docker/docker-compose.yml config -q
-          rm -f backend/.env
+          # settlement-cron ne doit voir que INTERNAL_TOKEN (reliquat 2026-11)
+          docker compose -f docker/docker-compose.yml config --format json \
+            | python3 -c "import json,sys; e=json.load(sys.stdin)['services']['settlement-cron'].get('environment',{}); assert set(e)=={'INTERNAL_TOKEN'}, e; print('settlement-cron: environnement limite a INTERNAL_TOKEN')"
+          rm -f backend/.env docker/.cron.env
       - name: nginx -t — reverse proxy hote (nginx.conf, certificats factices)
         run: |
           mkdir -p "$RUNNER_TEMP/le/live/c-pay.global"
