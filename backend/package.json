@@ -37,7 +37,7 @@
     "@electric-sql/pglite": "^0.5.15",
     "jest": "^30.5.2",
     "nodemon": "^3.0.2",
-    "supertest": "^7.3.1"
+    "supertest": "^7.3.2"
   },
   "jest": {
     "testEnvironment": "node",
