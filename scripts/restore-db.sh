@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restauration PostgreSQL — C-Pay (base managée OVH ou locale)
 #   ./scripts/restore-db.sh <fichier.sql.gz | .sql.gz.age | .sql.gz.enc> [--yes] [--db <base>] [--identity <clé age>]
-# ATTENTION : écrase les objets existants. Arrêter l'API avant (docker compose stop api).
+# ATTENTION : écrase les objets existants. Arrêter l'API avant (docker compose stop api-blue api-green).
 # Lot 3 (audit 2026-11-02 infra P1-3/P1-7) : --yes (scriptable, test de restauration mensuel), déchiffrement age /
 # openssl, cible --db (ex. base de test), lecture de backend/.env sans l'exécuter (scripts/lib/env.sh).
 set -euo pipefail

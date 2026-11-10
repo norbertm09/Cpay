@@ -9,7 +9,7 @@
 #
 # Architecture de production C-Pay (depuis la 2.7.0) :
 #   nginx HOTE (TLS Let's Encrypt, vhosts c-pay.global / api / app / merchant / admin / pay / card)
-#     -> docker compose dans /opt/cplus/docker : api 127.0.0.1:3001, merchant :3002, cardholder :3003,
+#     -> docker compose dans /opt/cplus/docker : api (routeur bleu/vert) 127.0.0.1:3001, merchant :3002, cardholder :3003,
 #        admin :3004, partners :3005, vitrine :3006 ; base PostgreSQL managee OVH (hors serveur).
 #
 # Etapes (chacune est idempotente) :
