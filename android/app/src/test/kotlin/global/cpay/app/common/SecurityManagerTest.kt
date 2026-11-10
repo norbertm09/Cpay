@@ -22,8 +22,8 @@ class SecurityManagerTest {
     }
 
     @Test fun `normalisation locale vers international`() {
-        assertEquals("+242066123456", SecurityManager.normalizePhone("066123456"))
-        assertEquals("+242066123456", SecurityManager.normalizePhone("066 123 456"))
+        assertEquals("+24266123456", SecurityManager.normalizePhone("066123456"))   // le 0 local tombe
+        assertEquals("+24266123456", SecurityManager.normalizePhone("066 123 456"))
         assertEquals("+237670000001", SecurityManager.normalizePhone("670000001", "+237"))
         assertEquals("+243812345678", SecurityManager.normalizePhone("+243812345678", "+242"))
     }
