@@ -1,10 +1,11 @@
 plugins {
-    id 'com.android.application' version '8.11.1' apply false
-    id 'com.android.library' version '8.11.1' apply false
-    // Lot Android P2 (2026-11-10) : Kotlin 2.2.21 + KSP 2.2.21-2.0.4 = derniere paire supportee par AGP 8.11.1.
-    // KSP 2.3+ exige AGP >= 8.12 ; androidx.core 1.18+, navigation 2.10, okhttp-android 5.5 exigent compileSdk 37
-    // (AGP 9 / Gradle 9) : passage prevu dans un lot « AGP 9 / API 37 » dedie, cf. docs/MOBILE-STORES.md § 1.7.
-    id 'org.jetbrains.kotlin.android' version '2.2.21' apply false
-    // KSP remplace kapt (kapt echoue sous Kotlin 2.x avec Room ; KSP est le processeur recommande par Room)
-    id 'com.google.devtools.ksp' version '2.2.21-2.0.5' apply false
+    // Palier « AGP 9 / API 37 » (2026-11-11) : AGP 9.5.1 (Gradle >= 9.6, JDK 17, API max 37). Kotlin est integre a AGP
+    // (built-in Kotlin, KGP fourni par AGP) : le plugin org.jetbrains.kotlin.android n'est plus applique et le DSL
+    // kotlinOptions{} disparait (jvmTarget = compileOptions.targetCompatibility). Nouveau DSL (android.newDsl) :
+    // les anciens types ApplicationExtensionImpl / variant API ne sont plus exposes.
+    id 'com.android.application' version '9.5.1' apply false
+    id 'com.android.library' version '9.5.1' apply false
+    // KSP 2.3.x (decorrele de la version de Kotlin, AGP >= 8.12) ; 2.3.13 porte une regression (executions concurrentes,
+    // google/ksp#3286) : on reste en 2.3.12. Room 2.8.5 est le processeur.
+    id 'com.google.devtools.ksp' version '2.3.12' apply false
 }

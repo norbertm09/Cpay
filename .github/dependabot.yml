@@ -84,31 +84,10 @@ updates:
       androidx: { patterns: ["androidx.*"] }
       kotlin: { patterns: ["org.jetbrains.kotlin*", "com.google.devtools.ksp*"] }
     ignore:
-      # Lot Android P2 (2026-11-10) : la chaine est AGP 8.11.1 / Gradle 8.13 / compileSdk 36 / Kotlin 2.2.21.
-      # Les versions suivantes exigent compileSdk 37 (androidx.core 1.18+, navigation 2.10+, okhttp-android 5.5+),
-      # AGP >= 8.12 (KSP 2.3+) ou Gradle 9 (gradle-wrapper 9.x) : elles seront prises ensemble dans le lot
-      # « AGP 9 / API 37 » (docs/MOBILE-STORES.md § 1.7). D'ici la, Dependabot ne propose que ce qui compile.
-      - dependency-name: "androidx.core:*"
-        versions: [">= 1.18"]
-      - dependency-name: "androidx.navigation:*"
-        versions: [">= 2.10"]
-      - dependency-name: "androidx.fragment:*"
-        versions: [">= 1.9"]
-      - dependency-name: "androidx.activity:*"
-        versions: [">= 1.12"]
-      - dependency-name: "androidx.lifecycle:*"
-        versions: [">= 2.10"]
-      - dependency-name: "androidx.appcompat:*"
-        versions: [">= 1.8"]
-      - dependency-name: "androidx.room:*"
-        versions: [">= 2.9"]
-      - dependency-name: "androidx.test*"
-      - dependency-name: "org.jetbrains.kotlin*"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
-      - dependency-name: "com.google.devtools.ksp*"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
-      - dependency-name: "com.squareup.okhttp3:*"
-        update-types: ["version-update:semver-major"]
+      # Palier AGP 9.5 / API 37 (2026-11-11) : les suspensions compileSdk 37 sont levees. Restent exclues : les majeures
+      # d'AGP et du wrapper Gradle (AGP 10 = lot dedie), KSP 2.3.13 (regression executions concurrentes, google/ksp#3286)
+      - dependency-name: "com.google.devtools.ksp"
+        versions: ["2.3.13"]
       - dependency-name: "gradle-wrapper"
         update-types: ["version-update:semver-major"]
       - dependency-name: "com.android.application"
