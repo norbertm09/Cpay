@@ -116,7 +116,9 @@ chmod 0600 "$COMPOSE_ENV"
 
 # ─── validation puis demarrage ──────────────────────────────────
 mon config -q || die "docker compose config en echec"
-mon run --rm --no-deps -T prometheus promtool check config /etc/prometheus/prometheus.yml >/dev/null || die "promtool : configuration Prometheus invalide"
+# Les images prom/* ont le binaire du service en entrypoint : promtool / amtool passent par --entrypoint
+mon run --rm --no-deps -T --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml >/dev/null || die "promtool : configuration Prometheus invalide"
+mon run --rm --no-deps -T --entrypoint amtool alertmanager check-config /etc/alertmanager/alertmanager.yml >/dev/null || die "amtool : configuration Alertmanager invalide ($AM_CONFIG)"
 mon up -d
 sleep 5
 log "Etat :"; mon ps --format 'table {{.Name}}\t{{.Status}}'
