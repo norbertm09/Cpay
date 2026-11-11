@@ -108,6 +108,13 @@ write_cron_env() {
 }
 write_cron_env
 
+# Cles SSH d'administration (ops/admin-keys/*.pub) : ajoutees a ~/.ssh/authorized_keys de l'utilisateur de
+# deploiement si elles manquent — seul chemin fiable vers le serveur quand l'acces interactif est perdu
+# (ops/admin-keys/README.md). Non bloquant.
+if [ -x "$ROOT/scripts/install-admin-keys.sh" ]; then
+  "$ROOT/scripts/install-admin-keys.sh" 2>&1 | tee -a "$LOG_FILE" || warn "install-admin-keys.sh en echec (acces SSH d'administration non mis a jour)"
+fi
+
 # ─── Bascule bleu/vert de l'API (P1-6, 2026-11) ─────────────────
 ROUTER_ACTIVE="$DOCKER_DIR/api-router/active/active.conf"
 WEB_ACTIVE="$DOCKER_DIR/web-router/active/active.conf"
