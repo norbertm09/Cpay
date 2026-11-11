@@ -885,7 +885,45 @@ async function finishPayoutReviewNotification(transferId, token, sent) {
  *   - interroge l'opérateur (refreshPayoutStatus) ; completed / failed uniquement sur statut explicite ;
  *   - après CASH_UNKNOWN_ALERT_HOURS (défaut 2) : revue et alerte pour unknown ET processing.
  */
+// Lot « alertes retraits incertains » (2026-11) : etat du dernier balayage, expose par /metrics (cash_payouts_sweep_*)
+const sweepState = { lastSuccessAt: 0, lastFinishedAt: 0, lastErrors: 0, lastFlagged: 0, lastScanned: 0 };
+const getSweepState = () => ({ ...sweepState });
+
+/**
+ * Statistiques des ordres sortants incertains pour /metrics : une requete, aucun appel operateur.
+ * Comptes par statut (`pending` et `sending` seulement au-dela de la grace : reservations interrompues), age du plus
+ * ancien (depuis unknown_since, a defaut created_at), ordres marques a revoir (decision Finance attendue).
+ */
+async function getUncertainPayoutStats({ graceMinutes = null } = {}) {
+  const grace = graceMinutes === null || graceMinutes === undefined ? unknownGraceMinutes() : Number(graceMinutes);
+  const r = await query(
+    `SELECT mt.status, COUNT(*)::int AS n,
+            MAX(EXTRACT(EPOCH FROM (NOW() - COALESCE(mt.unknown_since, mt.created_at))))::bigint AS oldest_seconds,
+            SUM(CASE WHEN mt.needs_review THEN 1 ELSE 0 END)::int AS needs_review
+     FROM merchant_transfers mt
+     WHERE mt.direction='payout' AND mt.dest_type='wallet'
+       AND (mt.status = ANY($1::text[])
+            OR (mt.status = ANY($2::text[]) AND mt.created_at < NOW() - ($3 || ' minutes')::interval))
+     GROUP BY mt.status`,
+    [UNCERTAIN.filter((st) => !STALE_RESERVED.includes(st)), STALE_RESERVED, String(Math.max(0, grace))]);
+  const byStatus = {}; let total = 0; let oldest = 0; let needsReview = 0;
+  for (const st of [...STALE_RESERVED, ...UNCERTAIN.filter((s) => !STALE_RESERVED.includes(s))]) byStatus[st] = 0;
+  for (const row of r.rows) {
+    byStatus[row.status] = Number(row.n); total += Number(row.n);
+    oldest = Math.max(oldest, Number(row.oldest_seconds) || 0); needsReview += Number(row.needs_review) || 0;
+  }
+  return { byStatus, total, oldestAgeSeconds: oldest, needsReview, graceMinutes: grace };
+}
+
 async function sweepUncertainPayouts({ graceMinutes = null, alertHours = null, limit = 200 } = {}) {
+  try {
+    const out = await sweepUncertainPayoutsInner({ graceMinutes, alertHours, limit });
+    sweepState.lastSuccessAt = Date.now(); sweepState.lastErrors = out.summary.errors; sweepState.lastFlagged = out.summary.flagged; sweepState.lastScanned = out.summary.scanned;
+    return out;
+  } finally { sweepState.lastFinishedAt = Date.now(); }
+}
+
+async function sweepUncertainPayoutsInner({ graceMinutes = null, alertHours = null, limit = 200 } = {}) {
   const alertH = alertHours === null || alertHours === undefined ? unknownAlertHours() : Number(alertHours);
   const grace = graceMinutes === null || graceMinutes === undefined ? unknownGraceMinutes() : Number(graceMinutes);
   // Audit 2026-11-10 § 2 : les réservations `sending` / `pending` (wallet) plus vieilles que la grâce sont des envois
@@ -1188,6 +1226,7 @@ module.exports = {
   payoutRail, collectRail, cardGatewayFor,
   // WAVE-6 : classification des résultats rail, retraits incertains, ops
   classifyRailResult, classifyRailError, unknownGraceMinutes, unknownAlertHours, sweepUncertainPayouts, notifyOps, notifyOpsUnknownPayout,
+  getUncertainPayoutStats, getSweepState,
   resolveUncertainPayout,
   // WAVE-6 : bénéficiaires
   recordBeneficiaryEvent, beneficiaryHistory, serializeBeneficiaryEvent, notifyBeneficiaryChange, maskBankAccount, maskWallet,

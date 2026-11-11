@@ -167,3 +167,16 @@ deviennent effectives ; le groupe `cplus-ops` ajoute `ExporterDown`, `Certificat
 `cert-expiry-metric.sh`, `restore-test.sh`) publient leurs métriques via `scripts/lib/alert.sh` et poussent en plus une
 alerte immédiate à Alertmanager en cas d'échec. Scénarios testés : `monitoring/prometheus/ops.test.yml` (promtool, CI).
 Détail des procédures : `docs/EXPLOITATION.md`.
+
+## Alertes caisse : retraits incertains (2026-11-11)
+
+`/metrics` expose désormais, par un collecteur asynchrone borné à 2 s (une requête SQL, aucun appel opérateur),
+l'état des ordres sortants Mobile Money sans réponse opérateur : `cash_payouts_uncertain{status="pending|sending|processing|unknown"}`
+(`pending` et `sending` comptés au-delà de la grâce `CASH_UNKNOWN_GRACE_MINUTES`), `cash_payouts_uncertain_total`,
+`cash_payouts_uncertain_oldest_age_seconds` (depuis `unknown_since`, à défaut `created_at`), `cash_payouts_needs_review`,
+`cash_payouts_sweep_last_success_timestamp_seconds` / `_last_finished_` / `_last_errors` / `_last_flagged` (dernier
+`sweepUncertainPayouts`) et `cash_metrics_up` (0 si la base ne répond pas : le reste de `/metrics` est servi).
+Groupe `cplus-cash` (`alerts.yml`) : `CashPayoutUncertainStale` (> 2 h, 15 min, warning), `CashPayoutUncertainCritical`
+(> 12 h, critical), `CashPayoutsNeedReview` (> 0 pendant 30 min), `CashSweepStalled` (ordres ouverts, rapprochement
+activé, pas de succès de balayage depuis 1 h), `CashMetricsMissing` (10 min). Scénarios : `monitoring/prometheus/cash.test.yml`
+(promtool, CI). Procédure de décision : `docs/RUNBOOK-INCIDENTS.md` § 2.

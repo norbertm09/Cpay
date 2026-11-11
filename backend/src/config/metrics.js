@@ -68,8 +68,38 @@ const httpMetrics = (req, res, next) => {
   next();
 };
 
+// ─── Collecteurs asynchrones (une requete SQL, bornee dans le temps) ──────────
+// Lot « alertes retraits incertains » (2026-11) : etat des ordres sortants incertains (merchant_transfers), pour les
+// regles cplus-cash de monitoring/prometheus/alerts.yml. cash_metrics_up=0 quand la base ne repond pas : l'absence
+// de la metrique ou sa valeur 0 declenche CashMetricsMissing, sans faire tomber tout /metrics.
+const CASH_STATUSES = ['pending', 'sending', 'processing', 'unknown'];
+const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms).unref())]);
+const collectCash = async () => {
+  const cash = require('../services/cash/cash.service');
+  const lines = [];
+  const sweep = cash.getSweepState();
+  try {
+    const s = await withTimeout(cash.getUncertainPayoutStats(), 2000);
+    lines.push('# TYPE cash_metrics_up gauge', 'cash_metrics_up 1');
+    lines.push('# TYPE cash_payouts_uncertain gauge');
+    for (const st of CASH_STATUSES) lines.push(`cash_payouts_uncertain{status="${st}"} ${s.byStatus[st] || 0}`);
+    lines.push('# TYPE cash_payouts_uncertain_total gauge', `cash_payouts_uncertain_total ${s.total}`);
+    lines.push('# TYPE cash_payouts_uncertain_oldest_age_seconds gauge', `cash_payouts_uncertain_oldest_age_seconds ${s.oldestAgeSeconds}`);
+    lines.push('# TYPE cash_payouts_needs_review gauge', `cash_payouts_needs_review ${s.needsReview}`);
+  } catch (err) {
+    require('./logger').warn('metrics: cash stats unavailable', { err: err.message });
+    lines.push('# TYPE cash_metrics_up gauge', 'cash_metrics_up 0');
+  }
+  lines.push('# TYPE cash_payouts_sweep_last_success_timestamp_seconds gauge', `cash_payouts_sweep_last_success_timestamp_seconds ${sweep.lastSuccessAt ? Math.floor(sweep.lastSuccessAt / 1000) : 0}`);
+  lines.push('# TYPE cash_payouts_sweep_last_finished_timestamp_seconds gauge', `cash_payouts_sweep_last_finished_timestamp_seconds ${sweep.lastFinishedAt ? Math.floor(sweep.lastFinishedAt / 1000) : 0}`);
+  lines.push('# TYPE cash_payouts_sweep_last_errors gauge', `cash_payouts_sweep_last_errors ${sweep.lastErrors}`);
+  lines.push('# TYPE cash_payouts_sweep_last_flagged gauge', `cash_payouts_sweep_last_flagged ${sweep.lastFlagged}`);
+  return lines;
+};
+const collectors = [collectCash];
+
 // ─── Générer le format Prometheus text ───────────────────────────
-const renderMetrics = () => {
+const renderMetrics = async () => {
   const lines = ['# CPlus 2.6 metrics'];
 
   // Counters
@@ -86,8 +116,12 @@ const renderMetrics = () => {
     lines.push(`${name} ${fn()}`);
   }
 
+  // Collecteurs asynchrones : un collecteur en echec ne retire que ses propres lignes
+  for (const c of collectors) {
+    try { lines.push(...await c()); } catch (err) { require('./logger').warn('metrics: collector failed', { err: err.message }); }
+  }
+
   // Timestamp
-  const ts = Date.now();
   lines.push(`# Generated at ${new Date().toISOString()}`);
   lines.push('');
   return lines.join('\n');
@@ -103,11 +137,14 @@ const metricsHandler = (req, res) => {
   const ok = auth.length === expected.length && require('crypto').timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
   if (!ok) return res.status(403).json({ error: 'Metrics access denied' });
   res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-  res.send(renderMetrics());
+  renderMetrics().then((body) => res.send(body)).catch((err) => {
+    require('./logger').error('metrics: render failed', { err: err.message });
+    res.status(500).send('# metrics unavailable\n');
+  });
 };
 
 module.exports = {
-  httpMetrics, metricsHandler,
+  httpMetrics, metricsHandler, renderMetrics,
   recordReconciliationOutcome: (outcome) => {
     if (['success', 'partial_failure', 'error', 'locked_elsewhere'].includes(outcome)) inc('reconciliation_runs_total', { outcome });
   },

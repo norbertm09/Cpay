@@ -1,0 +1,100 @@
+# promtool test rules cash.test.yml — scenarios des alertes caisse (retraits incertains, 2026-11)
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+tests:
+  - name: un retrait incertain qui vieillit declenche l'avertissement a 2 h puis le critique a 12 h ; resolu, tout retombe
+    interval: 1m
+    input_series:
+      - series: 'up{job="cplus-api",instance="api:3000"}'
+        values: '1x800'
+      - series: 'cash_metrics_up{job="cplus-api",instance="api:3000"}'
+        values: '1x800'
+      # age du plus ancien : 1 h 50 au depart, +1 min par point ; a t=10 min il depasse 2 h ; a t=740 il retombe a 0 (decision Finance)
+      - series: 'cash_payouts_uncertain_oldest_age_seconds{job="cplus-api",instance="api:3000"}'
+        values: '6600+60x739 0x60'
+      - series: 'cash_payouts_needs_review{job="cplus-api",instance="api:3000"}'
+        values: '0x800'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CashPayoutUncertainStale
+        exp_alerts: []                      # 2 h depasses depuis 10 min seulement : for 15m pas encore atteint
+      - eval_time: 26m
+        alertname: CashPayoutUncertainStale
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: warning }
+            exp_annotations:
+              summary: "Retrait Mobile Money incertain depuis plus de 2 heures"
+              description: "Un ordre sortant est sans reponse operateur depuis 2h 16m 0s : voir docs/RUNBOOK-INCIDENTS.md § 2 (decision Finance)."
+      - eval_time: 600m
+        alertname: CashPayoutUncertainCritical
+        exp_alerts: []                      # 11 h 50 : pas encore 12 h
+      - eval_time: 630m
+        alertname: CashPayoutUncertainCritical
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: critical }
+            exp_annotations:
+              summary: "Retrait Mobile Money incertain depuis plus de 12 heures"
+              description: "Solde marchand reserve sans issue depuis 12h 20m 0s : decision Finance requise (runbook § 2.2)."
+      - eval_time: 745m
+        alertname: CashPayoutUncertainStale
+        exp_alerts: []
+      - eval_time: 745m
+        alertname: CashPayoutUncertainCritical
+        exp_alerts: []
+
+  - name: ordres marques a revoir pendant plus de 30 min ; metriques caisse absentes ou base injoignable
+    interval: 1m
+    input_series:
+      - series: 'up{job="cplus-api",instance="api:3000"}'
+        values: '1x60'
+      - series: 'cash_metrics_up{job="cplus-api",instance="api:3000"}'
+        values: '1x40 0x20'
+      - series: 'cash_payouts_needs_review{job="cplus-api",instance="api:3000"}'
+        values: '0x5 2x35 0x20'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CashPayoutsNeedReview
+        exp_alerts: []
+      - eval_time: 36m
+        alertname: CashPayoutsNeedReview
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: warning }
+            exp_annotations:
+              summary: "Decision Finance en attente sur 2 retrait(s)"
+              description: "Admin > Operations > Caisse : ordres marques a revoir (bouton « Decision Finance »)."
+      - eval_time: 45m
+        alertname: CashMetricsMissing
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: CashMetricsMissing
+        exp_alerts:
+          - exp_labels: { job: cplus-api, instance: "api:3000", severity: warning }
+            exp_annotations: { summary: "Metriques caisse absentes ou base injoignable depuis /metrics" }
+
+  - name: balayage en panne alors que des ordres sont ouverts ; silencieux sans ordre ouvert ou rapprochement desactive
+    interval: 1m
+    input_series:
+      - series: 'cash_payouts_uncertain_total{job="cplus-api",instance="api:3000"}'
+        values: '0x30 3x120'
+      - series: 'reconciliation_enabled{job="cplus-api",instance="api:3000"}'
+        values: '1x150'
+      # dernier succes du balayage a t=10 min (600 s), puis plus rien
+      - series: 'cash_payouts_sweep_last_success_timestamp_seconds{job="cplus-api",instance="api:3000"}'
+        values: '0x10 600x140'
+      - series: 'process_uptime_seconds{job="cplus-api",instance="api:3000"}'
+        values: '0+60x150'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: CashSweepStalled
+        exp_alerts: []                      # 50 min sans succes : seuil 1 h pas atteint
+      - eval_time: 75m
+        alertname: CashSweepStalled
+        exp_alerts: []                      # 1 h 05 depasse depuis 5 min : for 10m pas encore atteint
+      - eval_time: 82m
+        alertname: CashSweepStalled
+        exp_alerts:
+          - exp_labels: { job: cplus-api, severity: critical }
+            exp_annotations:
+              summary: "Balayage des retraits incertains sans succes depuis plus d'une heure alors que des ordres sont ouverts"
+              description: "Le rapprochement est active mais sweepUncertainPayouts n'aboutit plus : journaux de l'API (cash: uncertain payouts sweep), base, operateurs."
