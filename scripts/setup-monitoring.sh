@@ -87,6 +87,8 @@ TEXTFILE_DIR="${OPS_TEXTFILE_DIR:-/var/lib/node_exporter/textfile}"; install -d 
 # L'image api tourne sous l'utilisateur cplus (lot 7) : il ne peut pas lire les fichiers secrets 0440 root:65534 de $PRIV
 # (« Configuration invalide : ALERT_SMTP_PASSWORD_FILE »). Le conteneur ephemere de generation tourne donc en root,
 # comme ce script sur l'hote ; il ne monte que scripts/ et monitoring/ en lecture seule et $PRIV.
+# Le generateur refuse d'ecraser un fichier existant (garde-fou) : la configuration precedente est conservee en .prev
+if [ -f "$AM_CONFIG" ]; then mv -f "$AM_CONFIG" "$AM_CONFIG.prev"; chmod 0400 "$AM_CONFIG.prev" 2>/dev/null || true; log "configuration precedente conservee : $AM_CONFIG.prev"; fi
 log "Generation de $AM_CONFIG (scripts/configure-monitoring.cjs)…"
 ( cd "$ROOT/docker" && docker compose run --rm --no-deps -T --user 0:0 \
     -v "$ROOT/scripts:$ROOT/scripts:ro" -v "$ROOT/monitoring:$ROOT/monitoring:ro" -v "$PRIV:$PRIV" \
