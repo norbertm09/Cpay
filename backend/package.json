@@ -13,6 +13,9 @@
     "create:first-admin": "node scripts/create-first-admin.js",
     "check:financial": "node scripts/check-financial-integrity.js"
   },
+  "overrides": {
+    "swagger-jsdoc": { "glob": "^14.0.4" }
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.7.0",
     "bcryptjs": "^3.0.3",

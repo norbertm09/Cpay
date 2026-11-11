@@ -55,6 +55,8 @@ ALERT_SMTP_PORT="${ALERT_SMTP_PORT:-587}"
 for v in ALERT_SMTP_HOST ALERT_SMTP_USER ALERT_SMTP_FROM ALERT_SMTP_TO; do [ -n "${!v}" ] || die "$v manquant dans $ENV_FILE"; done
 METRICS_TOKEN="$(read_var "$ROOT/backend/.env" METRICS_TOKEN)"
 [ -n "$METRICS_TOKEN" ] || die "METRICS_TOKEN absent de backend/.env"
+GRAFANA_PASSWORD="$(read_var "$ROOT/backend/.env" GRAFANA_PASSWORD)"
+[ -n "$GRAFANA_PASSWORD" ] || die "GRAFANA_PASSWORD absent de backend/.env (mot de passe admin de Grafana, lot hygiene 2026-11)"
 
 # ─── fichiers secrets (lisibles par l'uid 65534 des images Prometheus/Alertmanager) ─────
 install -d -m 0750 -o root -g 65534 "$PRIV"
@@ -65,6 +67,9 @@ if [ -z "$ALERT_SMTP_PASSWORD_FILE" ]; then
 fi
 chown root:65534 "$ALERT_SMTP_PASSWORD_FILE"; chmod 0440 "$ALERT_SMTP_PASSWORD_FILE"
 METRICS_FILE="$PRIV/metrics_token"; printf '%s' "$METRICS_TOKEN" > "$METRICS_FILE"; chown root:65534 "$METRICS_FILE"; chmod 0440 "$METRICS_FILE"
+# Grafana tourne sous l'uid 472 : son secret vit dans un dossier a part (le dossier $PRIV n'est lisible que par 65534)
+PRIV_GRAFANA="$PRIV-grafana"; install -d -m 0750 -o root -g 472 "$PRIV_GRAFANA"
+GRAFANA_FILE="$PRIV_GRAFANA/admin_password"; printf '%s' "$GRAFANA_PASSWORD" > "$GRAFANA_FILE"; chown root:472 "$GRAFANA_FILE"; chmod 0440 "$GRAFANA_FILE"
 TEMPLATE_DIR="$ROOT/monitoring/alertmanager"
 AM_CONFIG="$PRIV/alertmanager.yml"
 
@@ -94,6 +99,7 @@ chown root:65534 "$AM_CONFIG"; chmod 0440 "$AM_CONFIG"
 NET="$(docker network ls --format '{{.Name}}' | grep -m1 'cplus-internal' || echo docker_cplus-internal)"
 cat > "$COMPOSE_ENV" <<ENV
 MONITORING_METRICS_TOKEN_FILE=$METRICS_FILE
+MONITORING_GRAFANA_PASSWORD_FILE=$GRAFANA_FILE
 ALERTMANAGER_CONFIG_FILE=$AM_CONFIG
 ALERT_SMTP_PASSWORD_FILE=$ALERT_SMTP_PASSWORD_FILE
 MONITORING_TEMPLATE_DIR=$TEMPLATE_DIR

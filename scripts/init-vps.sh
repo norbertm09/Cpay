@@ -259,11 +259,19 @@ if [ -n "$VHOST" ]; then
   fi
   ln -sfn "$VHOST" "/etc/nginx/sites-enabled/$(basename "$VHOST")"
 else
-  warn "  aucun vhost C-Pay dans /etc/nginx/sites-available : importer l'archive (--import) ou copier docker/nginx-host/cpay.conf.example"
+  # Lot hygiene (2026-11) : le vhost de reference est versionne ; pose s'il n'y a rien sur le serveur
+  install -m 644 "$APP/docker/nginx-host/cpay.conf.example" /etc/nginx/sites-available/cpay
+  VHOST=/etc/nginx/sites-available/cpay; ln -sfn "$VHOST" /etc/nginx/sites-enabled/cpay
+  log "  vhost absent : docker/nginx-host/cpay.conf.example installe dans $VHOST"
 fi
-# Extrait d'allowlist des callbacks operateurs (vide par defaut = tout autorise) — voir docker/nginx-host/README.md
-install -d /etc/nginx/snippets
-[ -f /etc/nginx/snippets/cpay-webhook-allowlist.conf ] || install -m 644 "$APP/docker/nginx-host/snippets/cpay-webhook-allowlist.conf" /etc/nginx/snippets/cpay-webhook-allowlist.conf
+# Snippets (allowlist des callbacks, TLS, relais, en-tetes de securite) et zones du contexte http : poses s'ils
+# manquent, jamais ecrases (ils peuvent avoir ete ajustes sur le serveur) — voir docker/nginx-host/README.md
+install -d /etc/nginx/snippets /etc/nginx/conf.d
+for f in "$APP"/docker/nginx-host/snippets/cpay-*.conf; do
+  [ -f "/etc/nginx/snippets/$(basename "$f")" ] || install -m 644 "$f" "/etc/nginx/snippets/$(basename "$f")"
+done
+[ -f /etc/nginx/conf.d/cpay-zones.conf ] || install -m 644 "$APP/docker/nginx-host/conf.d/cpay-zones.conf" /etc/nginx/conf.d/cpay-zones.conf
+[ -f /etc/nginx/dhparam.pem ] || openssl dhparam -dsaparam -out /etc/nginx/dhparam.pem 2048 2>/dev/null || warn "dhparam.pem non genere (openssl)"
 # Renouvellement Let's Encrypt : recharge nginx apres chaque renouvellement (timer systemd certbot.timer)
 install -d /etc/letsencrypt/renewal-hooks/deploy
 cat > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh <<'HOOK'
