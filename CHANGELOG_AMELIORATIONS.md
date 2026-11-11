@@ -1,5 +1,18 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-hygiene (2026-11-11) — vhost hote versionne, Grafana, audit npm
+* `docker/nginx-host/cpay.conf.example` : vhost de reference du nginx de l'hote (redirection HTTP, API et pages de
+  paiement vers le routeur 3001 avec zones de limitation, callbacks operateurs hors limitation sous allowlist `geo`,
+  `/metrics` et `/internal/` bloques, vitrine statique avec CSP stricte, quatre portails vers le routeur web 3002-3005
+  avec le snippet de securite SPA), snippets `cpay-tls.conf`, `cpay-proxy.conf`, `cpay-security-landing.conf` et
+  `conf.d/cpay-zones.conf`. `init-vps.sh` les pose s'ils manquent (vhost seulement si le serveur n'en a aucun) ;
+  la CI valide l'ensemble par `nginx -t` avec des certificats factices.
+* Grafana (`grafana/grafana-oss:11.6.0`) ajoute a la pile de supervision : local seulement (127.0.0.1:3007), mot de
+  passe admin par fichier prive (uid 472) genere par `setup-monitoring.sh` depuis `GRAFANA_PASSWORD`, source
+  Prometheus provisionnee (Loki retire : jamais deploye), tableau « C-Pay — Caisse et API » (23 panneaux).
+* Backend : `overrides` npm `swagger-jsdoc > glob ^14` (glob 11 / minimatch 10 vulnerables) — `npm audit --omit=dev`
+  sans vulnerabilite ; 919 tests verts.
+
 ## 2.7.2-alertes-caisse (2026-11-11) — alertes Prometheus sur les retraits incertains
 * `/metrics` : collecteur asynchrone (une requete, borne a 2 s) exposant `cash_payouts_uncertain{status}`,
   `cash_payouts_uncertain_total`, `cash_payouts_uncertain_oldest_age_seconds`, `cash_payouts_needs_review`, l'etat du

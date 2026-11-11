@@ -2,14 +2,11 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
+    uid: cpay-prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+    editable: false
     jsonData:
       timeInterval: "15s"
-  - name: Loki
-    type: loki
-    access: proxy
-    url: http://loki:3100
-    jsonData:
-      maxLines: 1000
+# Loki n'est pas deploye (audit prod 2.6.0) : pas de source declaree tant que la pile de journaux n'existe pas.

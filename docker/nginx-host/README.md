@@ -7,10 +7,11 @@ Let's Encrypt sont gérés par `certbot` sur l'hôte (`certbot.timer`), les cont
 | Hôte | Cible | Notes |
 |---|---|---|
 | `c-pay.global`, `www.` | `root /opt/cplus/portal/landing` (statique) | CSP stricte (`snippets/cpay-security-landing.conf`), `/csp-report` relayé vers l'API |
-| `api.c-pay.global` | `proxy_pass http://127.0.0.1:3001` | `/metrics`, `/internal/` bloqués publiquement ; zone de limitation sur les routes de paiement |
-| `merchant.c-pay.global` | `127.0.0.1:3002` | SPA Vite (`try_files` côté conteneur) |
+| `api.c-pay.global` | `proxy_pass http://127.0.0.1:3001` (routeur bleu/vert `api-router`) | `/metrics`, `/internal/` bloqués publiquement ; zones de limitation (connexions, paiements, général) ; callbacks opérateurs sans limitation, allowlist `geo` |
+| `merchant.c-pay.global` | `127.0.0.1:3002` (routeur `web-router`) | SPA Vite (`try_files` côté conteneur) |
 | `app.c-pay.global`, `card.` | `127.0.0.1:3003` | portail porteur |
 | `admin.c-pay.global` | `127.0.0.1:3004` | back-office |
+| `partners.c-pay.global` | `127.0.0.1:3005` | portail partenaires |
 | `pay.c-pay.global` | `127.0.0.1:3001` (`/pay/…`) | pages de paiement hébergées |
 
 ## Fichiers
@@ -18,10 +19,14 @@ Let's Encrypt sont gérés par `certbot` sur l'hôte (`certbot.timer`), les cont
 - `snippets/cpay-webhook-allowlist.conf` — allowlist `geo` des callbacks opérateurs. Installée par
   `scripts/init-vps.sh` dans `/etc/nginx/snippets/`, **inactive tant que `default 0`**. À activer dès que MTN et
   Airtel ont communiqué leurs plages d'adresses (voir `docs/OPERATEURS-A-CONFIRMER.md` § 2).
-- Le vhost complet (`/etc/nginx/sites-available/cpay`) et les snippets de sécurité vivent sur le serveur ; ils sont
-  transportés d'un serveur à l'autre par `scripts/vps-export.sh` → `scripts/init-vps.sh --import`. Après une
-  migration, copier le vhost ici (`docker/nginx-host/cpay.conf.example`, nom attendu par `init-vps.sh`) pour le versionner : c'est la seule partie de
-  l'infrastructure encore hors dépôt.
+- **`cpay.conf.example`** (lot hygiène, 2026-11) : vhost de référence, validé par `nginx -t` en CI (certificats
+  factices). `init-vps.sh` l'installe dans `/etc/nginx/sites-available/cpay` quand le serveur n'en a aucun ; sinon le
+  vhost existant est conservé (export / import par `scripts/vps-export.sh` → `init-vps.sh --import`). Toute
+  modification faite à la main sur le serveur doit être reportée ici, et inversement : un `diff` entre les deux est la
+  première vérification après un incident de proxy.
+- `conf.d/cpay-zones.conf` (contexte `http` : zones de limitation, `limit_conn`, carte `Upgrade`, inclusion de
+  l'allowlist) et `snippets/cpay-tls.conf`, `cpay-proxy.conf`, `cpay-security-landing.conf`, `cpay-security-spa.conf` :
+  posés par `init-vps.sh` s'ils manquent, jamais écrasés.
 
 ## Pièges connus
 
