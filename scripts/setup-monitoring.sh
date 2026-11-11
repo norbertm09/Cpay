@@ -84,8 +84,11 @@ chown root:65534 "$PRIV/pg_exporter_user" "$PRIV/pg_exporter_pass"; chmod 0440 "
 TEXTFILE_DIR="${OPS_TEXTFILE_DIR:-/var/lib/node_exporter/textfile}"; install -d -m 0755 "$TEXTFILE_DIR"
 
 # ─── generation de la configuration Alertmanager dans l'image api (service api-blue depuis la bascule bleu/vert, memes chemins absolus) ─────
+# L'image api tourne sous l'utilisateur cplus (lot 7) : il ne peut pas lire les fichiers secrets 0440 root:65534 de $PRIV
+# (« Configuration invalide : ALERT_SMTP_PASSWORD_FILE »). Le conteneur ephemere de generation tourne donc en root,
+# comme ce script sur l'hote ; il ne monte que scripts/ et monitoring/ en lecture seule et $PRIV.
 log "Generation de $AM_CONFIG (scripts/configure-monitoring.cjs)…"
-( cd "$ROOT/docker" && docker compose run --rm --no-deps -T \
+( cd "$ROOT/docker" && docker compose run --rm --no-deps -T --user 0:0 \
     -v "$ROOT/scripts:$ROOT/scripts:ro" -v "$ROOT/monitoring:$ROOT/monitoring:ro" -v "$PRIV:$PRIV" \
     ${ALERT_SMTP_CA_FILE:+-v "$ALERT_SMTP_CA_FILE:$ALERT_SMTP_CA_FILE:ro"} \
     -e ALERT_SMTP_HOST="$ALERT_SMTP_HOST" -e ALERT_SMTP_PORT="$ALERT_SMTP_PORT" -e ALERT_SMTP_USER="$ALERT_SMTP_USER" \
