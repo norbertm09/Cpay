@@ -102,7 +102,7 @@ dependencies {
     implementation 'com.squareup.okhttp3:logging-interceptor:5.5.1'
 
     // Coroutines
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
 
     // QR Code (generation du lien carte uniquement — lot 4 : scanner ML Kit/CameraX retires avec le profil porteur)
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
