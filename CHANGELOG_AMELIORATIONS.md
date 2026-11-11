@@ -1,5 +1,17 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-recette-supervision (2026-11-11) — mise en service de la supervision et recette du script en CI
+* Mise en service en production (relais SMTP OVH, port 587) : quatre obstacles corriges dans `setup-monitoring.sh`,
+  tous dus a des evolutions posterieures a sa recette initiale — service `api` renomme `api-blue` (bascule bleu/vert),
+  secrets 0440 illisibles par l'utilisateur non-root de l'image API (generation en root dans le conteneur ephemere),
+  `promtool` / `amtool` via `--entrypoint` (les images prom/* lancent le service par defaut), configuration precedente
+  deplacee en `.prev` avant regeneration (le generateur refuse d'ecraser). Pile demarree : Prometheus, Alertmanager,
+  Grafana, node-exporter, postgres-exporter ; cible API `up` ; alerte de test acceptee.
+* CI (job docker) : `setup-monitoring.sh` rejoue de bout en bout a chaque PR avec l'image `cplus-api:ci`, un relais
+  SMTP factice et le reseau applicatif cree a vide — generation, validations, demarrage, `/-/ready`, presence des
+  groupes `cplus`, `cplus-ops`, `cplus-reconciliation`, `cplus-cash`, source et tableau Grafana provisionnes,
+  relance idempotente, `--test`, `--down`. Docs CI-CD § 2.
+
 ## 2.7.2-android-agp9 (2026-11-11) — palier Android AGP 9.5 / API 37
 * Chaine de build : AGP 8.11.1 -> 9.5.1 (nouveau DSL, Kotlin integre : plugin org.jetbrains.kotlin.android et bloc
   kotlinOptions retires, jvmTarget = compileOptions 17), Gradle 8.13 -> 9.9.1, KSP 2.2.21-2.0.5 -> 2.3.12 (2.3.13
