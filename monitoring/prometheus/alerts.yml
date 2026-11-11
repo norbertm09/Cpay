@@ -159,3 +159,58 @@ groups:
         for: 5m
         labels: { severity: warning }
         annotations: { summary: "Echecs repetes du rapprochement sans succes recent" }
+
+  # Lot « alertes retraits incertains » (2026-11) : ordres sortants Mobile Money sans reponse operateur
+  # (sending / processing / unknown, reservations pending au-dela de la grace). Metriques : backend/src/config/metrics.js.
+  - name: cplus-cash
+    rules:
+      - alert: CashMetricsMissing
+        expr: |
+          (up{job="cplus-api"} == 1)
+          unless on(job, instance)
+          (cash_metrics_up == 1)
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Metriques caisse absentes ou base injoignable depuis /metrics" }
+
+      - alert: CashPayoutUncertainStale
+        expr: max by(job, env, service) (cash_payouts_uncertain_oldest_age_seconds{job="cplus-api"}) > 7200
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Retrait Mobile Money incertain depuis plus de 2 heures"
+          description: "Un ordre sortant est sans reponse operateur depuis {{ $value | humanizeDuration }} : voir docs/RUNBOOK-INCIDENTS.md § 2 (decision Finance)."
+
+      - alert: CashPayoutUncertainCritical
+        expr: max by(job, env, service) (cash_payouts_uncertain_oldest_age_seconds{job="cplus-api"}) > 43200
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "Retrait Mobile Money incertain depuis plus de 12 heures"
+          description: "Solde marchand reserve sans issue depuis {{ $value | humanizeDuration }} : decision Finance requise (runbook § 2.2)."
+
+      - alert: CashPayoutsNeedReview
+        expr: max by(job, env, service) (cash_payouts_needs_review{job="cplus-api"}) > 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Decision Finance en attente sur {{ $value }} retrait(s)"
+          description: "Admin > Operations > Caisse : ordres marques a revoir (bouton « Decision Finance »)."
+
+      - alert: CashSweepStalled
+        expr: |
+          (max by(job, env, service) (cash_payouts_uncertain_total{job="cplus-api"}) > 0)
+          and (max by(job, env, service) (reconciliation_enabled{job="cplus-api"}) == 1)
+          and (
+            ((max by(job, env, service) (cash_payouts_sweep_last_success_timestamp_seconds{job="cplus-api"}) > 0)
+              and (time() - max by(job, env, service) (cash_payouts_sweep_last_success_timestamp_seconds{job="cplus-api"}) > 3600))
+            or
+            ((max by(job, env, service) (cash_payouts_sweep_last_success_timestamp_seconds{job="cplus-api"}) == 0)
+              and (max by(job, env, service) (process_uptime_seconds{job="cplus-api"}) > 3600))
+          )
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Balayage des retraits incertains sans succes depuis plus d'une heure alors que des ordres sont ouverts"
+          description: "Le rapprochement est active mais sweepUncertainPayouts n'aboutit plus : journaux de l'API (cash: uncertain payouts sweep), base, operateurs."
+

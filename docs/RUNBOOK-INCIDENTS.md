@@ -72,8 +72,12 @@ marchand est réservé ; aucun second envoi n'est possible tant que l'ordre n'es
 - Balayage automatique (`sweepUncertainPayouts`) : relance le statut auprès de l'opérateur ; un envoi interrompu avant
   réponse est marqué `interrupted_before_response` / `interrupted_in_grace` et passe en **revue** après le délai de
   grâce. Une réponse tardive de l'opérateur produit l'évènement `late_operator_response` et résout l'ordre.
-- Courriel d'alerte ops (`email.service`) quand un retrait reste `processing` / `unknown` au-delà du délai configuré ;
-  pas d'alerte Prometheus dédiée à ce jour (à ajouter avec les métriques caisse).
+- Courriel d'alerte ops (`email.service`) quand un retrait reste `processing` / `unknown` au-delà du délai configuré.
+- Alertes Prometheus (groupe `cplus-cash`, depuis novembre 2026, métriques `cash_payouts_*` de `/metrics`) :
+  `CashPayoutUncertainStale` (plus ancien ordre incertain > 2 h, avertissement), `CashPayoutUncertainCritical`
+  (> 12 h, critique), `CashPayoutsNeedReview` (ordres marqués à revoir depuis plus de 30 min : décision Finance
+  attendue), `CashSweepStalled` (balayage sans succès depuis plus d'une heure alors que des ordres sont ouverts),
+  `CashMetricsMissing` (métriques caisse absentes ou base injoignable). Les deux premières renvoient à ce § 2.
 
 ### 2.2 Résolution manuelle (rôle `finance_admin`, `ops_admin` ou `super_admin`)
 

@@ -1,5 +1,16 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-alertes-caisse (2026-11-11) — alertes Prometheus sur les retraits incertains
+* `/metrics` : collecteur asynchrone (une requete, borne a 2 s) exposant `cash_payouts_uncertain{status}`,
+  `cash_payouts_uncertain_total`, `cash_payouts_uncertain_oldest_age_seconds`, `cash_payouts_needs_review`, l'etat du
+  dernier balayage (`cash_payouts_sweep_last_success_timestamp_seconds`, `_last_finished_`, `_last_errors`,
+  `_last_flagged`) et `cash_metrics_up` (0 si la base ne repond pas, sans faire tomber les autres metriques).
+  `cash.service` : `getUncertainPayoutStats`, `getSweepState` (le balayage enregistre son dernier succes).
+* Regles `cplus-cash` : `CashPayoutUncertainStale` (> 2 h), `CashPayoutUncertainCritical` (> 12 h),
+  `CashPayoutsNeedReview` (decision Finance en attente > 30 min), `CashSweepStalled` (balayage sans succes > 1 h avec
+  des ordres ouverts), `CashMetricsMissing`. Scenarios promtool `cash.test.yml` (CI).
+* Tests jest `alertes-caisse.test.js` (7 cas, PGlite) ; runbook § 2.1 et LOT-5B-ALERTES mis a jour.
+
 ## 2.7.2-portails-bascule (2026-11-10) — portails sans coupure (suite de la bascule bleu/vert de l'API)
 * Quatre portails (marchand, porteur, admin, partenaires) en deux couleurs `<portail>-blue` / `<portail>-green`
   (definition commune `x-portal`, alias reseau `<portail>-portal` pour le nginx du profil standalone), une seule
