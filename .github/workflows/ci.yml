@@ -236,9 +236,19 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools platforms;android-37 build-tools;36.0.0   # palier AGP 9.5 / API 37 (2026-11-11)
+      # Palier AGP 9.5 / API 37 (2026-11-11) : android-actions/setup-android telecharge des outils de ligne de commande
+      # anciens (12.0) qui ne connaissent pas platforms;android-37 ; le SDK preinstalle du runner (cmdline-tools 20+)
+      # suffit. Les plateformes disponibles sont listees pour le diagnostic.
+      - name: SDK Android (sdkmanager preinstalle) — platforms;android-37, build-tools;36.0.0
+        run: |
+          set -eu
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKM" ] || SDKM="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)"
+          echo "sdkmanager : $SDKM"
+          yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+          "$SDKM" --list 2>/dev/null | grep -E "^\s*platforms;android-3[6-9]" | head -20 || true
+          "$SDKM" --install "platform-tools" "platforms;android-37" "build-tools;36.0.0" >/dev/null
+          ls "$ANDROID_HOME/platforms"
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
