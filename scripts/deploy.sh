@@ -124,7 +124,7 @@ write_active() { mkdir -p "$(dirname "$ROUTER_ACTIVE")"; printf 'set $cpay_api_u
 api_healthy() { # api_healthy <couleur> <tentatives> : /health dans le conteneur (pas de port hote par couleur)
   _i=1
   while [ "$_i" -le "$2" ]; do
-    if docker exec "cplus-api-$1" wget -qO- -T 5 http://localhost:3000/health 2>/dev/null | grep -q '"status":"ok"'; then return 0; fi
+    if docker exec "cplus-api-$1" wget -qO- -T 5 http://127.0.0.1:3000/health 2>/dev/null | grep -q '"status":"ok"'; then return 0; fi
     _i=$((_i + 1)); sleep 2
   done
   return 1
@@ -148,11 +148,13 @@ web_active_color() {
 }
 web_write_active() { mkdir -p "$(dirname "$WEB_ACTIVE")"; printf 'set $cpay_web_color %s;\n' "$1" > "$WEB_ACTIVE"; }
 web_services() { for _p in $WEB_PORTALS; do printf '%s-%s ' "$_p" "$1"; done; }
+# 127.0.0.1 et non localhost : dans l'image nginx, « localhost » se resout d'abord en ::1 et nginx n'ecoute qu'en IPv4
+# (busybox wget n'essaie pas la seconde adresse) — premier deploiement des portails bleu/vert echoue pour cette raison.
 web_healthy() { # web_healthy <couleur> <tentatives> : chaque portail sert index.html sur 8080
   for _p in $WEB_PORTALS; do
     _i=1
     while [ "$_i" -le "$2" ]; do
-      if docker exec "cplus-$_p-$1" wget -qO- -T 5 http://localhost:8080/ 2>/dev/null | grep -q '<html'; then break; fi
+      if docker exec "cplus-$_p-$1" wget -qO- -T 5 http://127.0.0.1:8080/ 2>/dev/null | grep -q '<html'; then break; fi
       _i=$((_i + 1)); sleep 2
     done
     [ "$_i" -le "$2" ] || { WEB_KO="$_p"; return 1; }
@@ -204,7 +206,7 @@ start_stack() { # demarre les nouvelles couleurs (API, portails), bascule, met a
     compose stop -t 10 "api-$NEXT" $(web_services "$WEB_NEXT") >/dev/null 2>&1 || true; compose rm -f "api-$NEXT" $(web_services "$WEB_NEXT") >/dev/null 2>&1 || true
     die "api-$NEXT KO apres 90 s — l'API et les portails actifs (${ACTIVE:-historique}) n'ont pas ete touches ; rien a annuler"
   fi
-  log "  api-$NEXT OK ($(docker exec "cplus-api-$NEXT" wget -qO- -T 5 http://localhost:3000/health 2>/dev/null | head -c 160))"
+  log "  api-$NEXT OK ($(docker exec "cplus-api-$NEXT" wget -qO- -T 5 http://127.0.0.1:3000/health 2>/dev/null | head -c 160))"
   WEB_KO=""
   if ! web_healthy "$WEB_NEXT" 20; then
     docker logs --tail 30 "cplus-$WEB_KO-$WEB_NEXT" 2>&1 | sed "s/^/  [$WEB_KO-$WEB_NEXT] /" | tee -a "$LOG_FILE" >&2 || true

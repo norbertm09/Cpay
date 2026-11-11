@@ -431,7 +431,9 @@ jobs:
             if [ "$ok" != 1 ]; then echo "::error::$img ne sert pas index.html sur :8080"; docker logs "$name" | tail -30; exit 1; fi
             curl -sSI http://127.0.0.1:18080/ | grep -qi '^content-security-policy:' || { echo "::error::$img : en-tete Content-Security-Policy absent"; exit 1; }
             docker exec "$name" id -u | grep -qv '^0$' || { echo "::error::$img tourne en root"; exit 1; }
-            echo "ok $img (uid $(docker exec "$name" id -u), CSP presente)"
+            # meme sonde que scripts/deploy.sh (web_healthy) : depuis l'interieur du conteneur, en IPv4
+            docker exec "$name" wget -qO- -T 5 http://127.0.0.1:8080/ | grep -q '<html' || { echo "::error::$img : sonde interne wget 127.0.0.1:8080 KO (deploy.sh web_healthy)"; exit 1; }
+            echo "ok $img (uid $(docker exec "$name" id -u), CSP presente, sonde interne OK)"
             docker rm -f "$name" >/dev/null
           done
       - name: Connexion a GHCR (push vers main uniquement)

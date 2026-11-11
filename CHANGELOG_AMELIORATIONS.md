@@ -12,6 +12,10 @@
   sont arretes une derniere fois (quelques secondes) puis retires. La vitrine reste geree par `compose up -d`.
 * CI : `nginx -t` du routeur web ; `docker compose config` verifie alias, absence de port hote, une couleur par
   defaut et les quatre ports du routeur. Docs EXPLOITATION § 4, CI-CD § 5, runbook § 1.
+* Correctif (2026-11-11) : la sonde `web_healthy` interrogeait `localhost:8080` dans le conteneur nginx, qui se
+  resout d'abord en ::1 alors que nginx n'ecoute qu'en IPv4 (busybox wget n'essaie pas la seconde adresse) ; le
+  premier deploiement s'est arrete proprement sans toucher a la production. Sondes en 127.0.0.1 ; la CI execute
+  desormais la meme sonde interne sur chaque image portail.
 
 ## 2.7.2-api-bascule (2026-11-10) — bascule sans coupure de l'API (audit du 2 novembre, infra P1-6 seconde moitie)
 * Deux couleurs `api-blue` / `api-green` (definition commune, alias reseau `api` pour settlement-cron, Prometheus et le
