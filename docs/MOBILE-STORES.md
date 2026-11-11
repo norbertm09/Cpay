@@ -70,11 +70,30 @@ de rétractation de 30 jours affiché dans l'écran, annulable depuis l'app ; le
 back-office (`/admin/account-deletion-requests`). URL web équivalente, à déclarer dans la Play Console :
 `https://c-pay.global/legal/suppression-compte.html`.
 
-### 1.7 Chaîne de build, R8 et prochain palier (lot Android P2, 2026-11-10)
+### 1.7 Chaîne de build, R8 et paliers (lot Android P2 du 2026-11-10, palier AGP 9 / API 37 du 2026-11-11)
 
-Chaîne actuelle : AGP 8.11.1, Gradle 8.13, compileSdk/targetSdk 36, Kotlin 2.2.21 + KSP 2.2.21-2.0.4, Java 17 ;
-dépendances aux dernières versions **compatibles compileSdk 36** (core 1.17, appcompat 1.7.1, lifecycle 2.9.4,
-activity 1.11, fragment 1.8.9, navigation 2.9.5, Room 2.8.5, Retrofit 3.0, OkHttp 4.12, coroutines 1.10.2).
+Chaîne actuelle (palier AGP 9 / API 37) : **AGP 9.5.1** (Gradle ≥ 9.6, JDK 17, API max 37), **Gradle 9.9.1**,
+**compileSdk 37 / targetSdk 36**, **Kotlin intégré à AGP** (plus de plugin `org.jetbrains.kotlin.android` ni de bloc
+`kotlinOptions{}` ; `jvmTarget` suit `compileOptions.targetCompatibility` = 17), **KSP 2.3.12** (2.3.13 exclu :
+régression sur les exécutions concurrentes), nouveau DSL AGP 9 (`android.newDsl`), Jetifier retiré ; dépendances
+stables de septembre 2026 : core 1.19.1 (`core-ktx` est vide depuis 1.19, on dépend de `core`), appcompat 1.8.0,
+material 1.14.0, lifecycle 2.11.0, activity 1.13.0, fragment 1.9.1, navigation 2.10.2, Room 2.8.5, Retrofit 3.0,
+OkHttp 5.5.1, coroutines 1.10.2. La CI installe `platforms;android-37` et `build-tools;36.0.0`.
+
+- **targetSdk reste 36** : la montée d'outillage et le changement de comportement d'exécution (API 37) ne sont pas
+  faits en même temps. Passer `targetSdk 37` après une recette complète sur appareil (connexion, caisse, biométrie,
+  appairage) et vérification des changements de comportement de l'API 37 ; Google Play n'exige 37 qu'à partir
+  d'août 2027.
+- **R8 sous AGP 9** : `-keep class A` n'implique plus `<init>()` (`android.r8.strictFullModeForKeepRules`) et le
+  shrinker de ressources considère classes et ressources ensemble ; les règles de `proguard-rules.pro` gardent déjà
+  `<init>(...)` sur les modèles Gson, et la CI construit `assembleRelease` / `bundleRelease` / `assembleStaging`.
+  La recette de l'APK `staging` reste obligatoire avant chaque release.
+- **Prochain palier** : AGP 10 (mi-2026 selon Google ; retrait de l'opt-out du nouveau DSL) — lot dédié ; Dependabot
+  exclut les majeures d'AGP et du wrapper, tout le reste est proposé normalement.
+
+Historique du lot P2 (2026-11-10) : AGP 8.11.1, Gradle 8.13, compileSdk 36, Kotlin 2.2.21 + KSP 2.2.21-2.0.4,
+dépendances **compatibles compileSdk 36** (core 1.17, appcompat 1.7.1, lifecycle 2.9.4, activity 1.11, fragment 1.8.9,
+navigation 2.9.5, OkHttp 4.12).
 
 - **R8 (audit P2-3)** : les règles « garde-tout » (`retrofit2.**`, `okhttp3.**`, `gson.**`, `global.cpay.app.common.**`)
   sont retirées ; seules les classes portant des champs `@SerializedName` sont conservées (obfuscation autorisée),
@@ -87,10 +106,7 @@ activity 1.11, fragment 1.8.9, navigation 2.9.5, Room 2.8.5, Retrofit 3.0, OkHtt
   `CashLabels`, paquet `cardholder/` masqué) sont le reliquat connu.
 - **Biométrie (audit P2-1)** : `BIOMETRIC_STRONG | DEVICE_CREDENTIAL` (plus de visage 2D), verrou à l'ouverture actif
   par défaut (désactivable dans Profil), code mort de `SecurityManager` retiré.
-- **Prochain palier « AGP 9 / API 37 »** (lot dédié) : `androidx.core` 1.18+, `navigation` 2.10+, `okhttp` 5.x
-  (`okhttp-android`), KSP 2.3+ et le wrapper Gradle 9 exigent compileSdk 37, AGP ≥ 8.12/9 et Gradle 9. Les exclusions
-  Dependabot correspondantes (`.github/dependabot.yml`, écosystème `gradle`) sont à retirer avec ce lot ; la CI
-  devra installer `platforms;android-37` et `build-tools;37.0.0`.
+- Le palier « AGP 9 / API 37 » annoncé ici a été livré le 2026-11-11 (voir le haut de cette section).
 
 ## 2. Expo → App Store (iOS)
 

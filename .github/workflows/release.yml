@@ -70,9 +70,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools platforms;android-36 build-tools;36.0.0
+      # Palier AGP 9.5 / API 37 (2026-11-11) : sdkmanager preinstalle du runner (voir ci.yml, job android)
+      - name: SDK Android (sdkmanager preinstalle) — platforms;android-37.0, build-tools;36.0.0
+        run: |
+          set -eu
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKM" ] || SDKM="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)"
+          yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+          "$SDKM" --install "platform-tools" "platforms;android-37.0" "build-tools;36.0.0" >/dev/null
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: true

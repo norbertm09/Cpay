@@ -1,5 +1,18 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-android-agp9 (2026-11-11) — palier Android AGP 9.5 / API 37
+* Chaine de build : AGP 8.11.1 -> 9.5.1 (nouveau DSL, Kotlin integre : plugin org.jetbrains.kotlin.android et bloc
+  kotlinOptions retires, jvmTarget = compileOptions 17), Gradle 8.13 -> 9.9.1, KSP 2.2.21-2.0.5 -> 2.3.12 (2.3.13
+  exclu : regression executions concurrentes), compileSdk 36 -> 37 (targetSdk reste 36 : changement de comportement
+  d'execution reporte apres recette), Jetifier retire, cache de build Gradle active.
+* Dependances (stables de septembre 2026) : core 1.19.1 (a la place de core-ktx, vide depuis 1.19), appcompat 1.8.0,
+  lifecycle 2.11.0, activity 1.13.0, fragment 1.9.1, navigation 2.10.2, OkHttp 5.5.1 (+ logging-interceptor).
+* CI : platforms;android-37 ; Dependabot : suspensions « compileSdk 37 » levees, majeures d'AGP / wrapper toujours
+  exclues, KSP 2.3.13 exclu. Docs MOBILE-STORES § 1.7.
+* Validation : la CI (testDebugUnitTest, assembleDebug, assembleRelease / bundleRelease / assembleStaging) fait foi —
+  le depot Maven de Google n'est pas joignable depuis l'environnement de developpement. Recette sur appareil de l'APK
+  staging requise avant la release 2.7.2.
+
 ## 2.7.2-hygiene (2026-11-11) — vhost hote versionne, Grafana, audit npm
 * `docker/nginx-host/cpay.conf.example` : vhost de reference du nginx de l'hote (redirection HTTP, API et pages de
   paiement vers le routeur 3001 avec zones de limitation, callbacks operateurs hors limitation sous allowlist `geo`,

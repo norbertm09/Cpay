@@ -1,13 +1,16 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
+    // Kotlin integre a AGP 9 : plus de plugin org.jetbrains.kotlin.android (docs/MOBILE-STORES.md § 1.7)
     id 'com.google.devtools.ksp'
 }
 
 android {
     namespace 'global.cpay.app'
-    // API 36 : exigence Google Play (targetSdk >= 35 depuis aout 2025, 36 depuis aout 2026) — audit 2026-11-02 P0
-    compileSdk 36
+    // Palier AGP 9 / API 37 (2026-11-11) : compilation contre l'API 37 (exigee par androidx.core 1.19, navigation 2.10,
+    // lifecycle 2.11, okhttp 5). targetSdk reste 36 (exigence Google Play depuis aout 2026) : le passage du
+    // comportement d'execution a l'API 37 se fera apres recette sur appareil (lot suivant), pas en meme temps que
+    // la montee d'outillage.
+    compileSdk 37
 
     defaultConfig {
         applicationId "global.cpay.app"
@@ -52,12 +55,12 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = '17' }
+    // Kotlin integre : jvmTarget suit compileOptions.targetCompatibility (17) ; plus de bloc kotlinOptions{}
 
     buildFeatures {
-        viewBinding true
-        buildConfig true
-        dataBinding false
+        viewBinding = true
+        buildConfig = true
+        dataBinding = false
     }
 
     // Les APK par ABI sont incompatibles avec la generation de l'AAB sous AGP 8.11 (buildReleasePreBundle :
@@ -76,28 +79,27 @@ android {
 }
 
 dependencies {
-    // Core
-    // Lot Android P2 (2026-11-10) : dernieres versions compatibles compileSdk 36 / AGP 8.11.1. Les versions suivantes
-    // (core 1.18+, navigation 2.10+, okhttp 5.x « android ») exigent compileSdk 37 : lot « AGP 9 / API 37 » dedie.
-    implementation 'androidx.core:core-ktx:1.17.0'
-    implementation 'androidx.appcompat:appcompat:1.7.1'
+    // Core — palier AGP 9 / API 37 (2026-11-11) : versions stables de septembre 2026 (compileSdk 37).
+    // core-ktx est un artefact vide depuis 1.19 (API fusionnees dans core) : on depend de core directement.
+    implementation 'androidx.core:core:1.19.1'
+    implementation 'androidx.appcompat:appcompat:1.8.0'
     implementation 'com.google.android.material:material:1.14.0'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.2.2'
-    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.4'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4'
-    implementation 'androidx.activity:activity-ktx:1.11.0'
-    implementation 'androidx.fragment:fragment-ktx:1.8.9'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.11.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0'
+    implementation 'androidx.activity:activity-ktx:1.13.0'
+    implementation 'androidx.fragment:fragment-ktx:1.9.1'
 
     // Navigation
-    implementation 'androidx.navigation:navigation-fragment-ktx:2.9.5'
-    implementation 'androidx.navigation:navigation-ui-ktx:2.9.5'
+    implementation 'androidx.navigation:navigation-fragment-ktx:2.10.2'
+    implementation 'androidx.navigation:navigation-ui-ktx:2.10.2'
 
-    // Network — Retrofit 3 livre ses regles R8 consommateur (proguard-rules.pro allege, audit P2-3)
+    // Network — Retrofit 3 livre ses regles R8 consommateur (proguard-rules.pro allege, audit P2-3) ; OkHttp 5
     implementation 'com.squareup.retrofit2:retrofit:3.0.0'
     implementation 'com.squareup.retrofit2:converter-gson:3.0.0'
-    implementation 'com.squareup.okhttp3:okhttp:4.12.1'
-    implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
+    implementation 'com.squareup.okhttp3:okhttp:5.5.1'
+    implementation 'com.squareup.okhttp3:logging-interceptor:5.5.1'
 
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
