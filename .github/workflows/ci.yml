@@ -470,6 +470,13 @@ jobs:
             -v "$PWD/docker/api-router/active:/etc/nginx/cpay:ro" \
             nginxinc/nginx-unprivileged:1.28-alpine nginx -t
           rm -f docker/api-router/active/active.conf
+          # routeur bleu/vert des portails (2026-11)
+          printf 'set $cpay_web_color blue;\n' > docker/web-router/active/active.conf
+          docker run --rm \
+            -v "$PWD/docker/web-router/default.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "$PWD/docker/web-router/active:/etc/nginx/cpay:ro" \
+            nginxinc/nginx-unprivileged:1.28-alpine nginx -t
+          rm -f docker/web-router/active/active.conf
       - name: docker compose config (lot 7, audit P2-11 — un compose invalide ne doit plus attendre le deploiement)
         run: |
           printf 'DB_HOST=x\nDB_NAME=x\nDB_USER=x\nDB_PASSWORD=x\nJWT_SECRET=x\nINTERNAL_TOKEN=x\n' > backend/.env
@@ -486,7 +493,15 @@ jobs:
               assert not s[c].get('ports'), c + ' ne doit pas publier de port hote'
           assert s['api-blue'].get('scale', 1) == 1 and s['api-green'].get('scale', 1) == 0, 'une seule couleur par defaut'
           p = s['api-router']['ports'][0]; assert str(p.get('published')) == '3001' and p.get('host_ip') == '127.0.0.1', p
-          print('compose : settlement-cron limite a INTERNAL_TOKEN ; api-blue/api-green alias api, routeur sur 127.0.0.1:3001')
+          for portal in ('merchant', 'cardholder', 'admin', 'partners'):
+              for color, scale in (('blue', 1), ('green', 0)):
+                  c = s[f'{portal}-{color}']
+                  assert f'{portal}-portal' in c['networks']['cplus-internal']['aliases'], c['container_name']
+                  assert not c.get('ports'), c['container_name'] + ' ne doit pas publier de port hote'
+                  assert c.get('scale', 1) == scale, (c['container_name'], c.get('scale'))
+          web = sorted((str(x['published']), x.get('host_ip')) for x in s['web-router']['ports'])
+          assert web == [(str(n), '127.0.0.1') for n in (3002, 3003, 3004, 3005)], web
+          print('compose : settlement-cron limite a INTERNAL_TOKEN ; api-blue/api-green alias api, routeur sur 127.0.0.1:3001 ; portails bleu/vert derriere web-router 3002-3005')
           "
           rm -f backend/.env docker/.cron.env
       - name: nginx -t — reverse proxy hote (nginx.conf, certificats factices)

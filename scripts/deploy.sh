@@ -14,8 +14,9 @@
 #   5. migrations (docker compose run --rm --no-deps -e RUN_MIGRATIONS=false api-blue node src/config/migrate.js)
 #   6. bascule bleu/vert de l'API sans coupure : demarrage de la couleur inactive avec la nouvelle image, attente
 #      de /health, bascule du routeur (docker/api-router, 127.0.0.1:3001) par rechargement gracieux, drainage puis
-#      arret gracieux (SIGTERM) de l'ancienne couleur ; portails / vitrine / cron par docker compose up -d
-#   7. health checks : API 127.0.0.1:3001/health, vitrine 127.0.0.1:3006/, portails 3002-3005 (bloquants depuis le
+#      arret gracieux (SIGTERM) de l'ancienne couleur ; meme bascule pour les quatre portails (tranche web,
+#      docker/web-router sur 3002-3005) ; vitrine / cron par docker compose up -d
+#   7. health checks via les routeurs : API 127.0.0.1:3001/health, vitrine 127.0.0.1:3006/, portails 3002-3005 (bloquants depuis le
 #      hotfix du 2026-11-10 : un conteneur en boucle de redemarrage faisait passer le deploiement pour reussi)
 # Lance par .github/workflows/deploy.yml via SSH, ou a la main depuis /opt/cplus.
 # Les anciens scripts (deploy-ovh.sh, deploy-wave-2.sh, init-ovh.sh, *-tls.sh) sont dans scripts/legacy/ (lecture seule) ;
@@ -109,6 +110,8 @@ write_cron_env
 
 # ─── Bascule bleu/vert de l'API (P1-6, 2026-11) ─────────────────
 ROUTER_ACTIVE="$DOCKER_DIR/api-router/active/active.conf"
+WEB_ACTIVE="$DOCKER_DIR/web-router/active/active.conf"
+WEB_PORTALS="merchant cardholder admin partners"
 color_running() { [ "$(docker inspect -f '{{.State.Running}}' "cplus-api-$1" 2>/dev/null)" = "true" ]; }
 other_color() { if [ "$1" = blue ]; then echo green; else echo blue; fi; }
 active_color() { # couleur servie par le routeur si elle tourne, sinon la couleur qui tourne, sinon rien
@@ -132,7 +135,38 @@ router_switch() { # router_switch <couleur> : bascule gracieuse (nginx -t puis r
   docker exec cplus-api-router nginx -s reload >/dev/null 2>&1 || die "rechargement du routeur API impossible"
   log "routeur API bascule vers api-$1"
 }
-start_stack() { # demarre la nouvelle couleur de l'API, bascule, met a jour le reste, arrete l'ancienne couleur
+# ─── Tranche web (quatre portails) : memes couleurs, un seul routeur ───
+web_color_running() { # web_color_running <couleur> : au moins un portail de cette couleur tourne
+  for _p in $WEB_PORTALS; do [ "$(docker inspect -f '{{.State.Running}}' "cplus-$_p-$1" 2>/dev/null)" = "true" ] && return 0; done
+  return 1
+}
+web_active_color() {
+  _c="$(sed -n 's/^set \$cpay_web_color \([a-z]*\);.*/\1/p' "$WEB_ACTIVE" 2>/dev/null | head -1)"
+  if [ -n "$_c" ] && web_color_running "$_c"; then echo "$_c"; return 0; fi
+  for _c in blue green; do if web_color_running "$_c"; then echo "$_c"; return 0; fi; done
+  return 0
+}
+web_write_active() { mkdir -p "$(dirname "$WEB_ACTIVE")"; printf 'set $cpay_web_color %s;\n' "$1" > "$WEB_ACTIVE"; }
+web_services() { for _p in $WEB_PORTALS; do printf '%s-%s ' "$_p" "$1"; done; }
+web_healthy() { # web_healthy <couleur> <tentatives> : chaque portail sert index.html sur 8080
+  for _p in $WEB_PORTALS; do
+    _i=1
+    while [ "$_i" -le "$2" ]; do
+      if docker exec "cplus-$_p-$1" wget -qO- -T 5 http://localhost:8080/ 2>/dev/null | grep -q '<html'; then break; fi
+      _i=$((_i + 1)); sleep 2
+    done
+    [ "$_i" -le "$2" ] || { WEB_KO="$_p"; return 1; }
+  done
+  return 0
+}
+web_router_switch() {
+  web_write_active "$1"
+  docker exec cplus-web-router nginx -t >/dev/null 2>&1 || die "configuration du routeur web invalide (docker/web-router)"
+  docker exec cplus-web-router nginx -s reload >/dev/null 2>&1 || die "rechargement du routeur web impossible"
+  log "routeur web bascule vers la couleur $1"
+}
+
+start_stack() { # demarre les nouvelles couleurs (API, portails), bascule, met a jour le reste, arrete les anciennes
   ACTIVE="$(active_color)"; LEGACY=false
   if [ -z "$ACTIVE" ] && docker inspect cplus-api >/dev/null 2>&1; then LEGACY=true; fi
   if [ -n "$ACTIVE" ]; then NEXT="$(other_color "$ACTIVE")"; else NEXT=blue; fi
@@ -147,32 +181,72 @@ start_stack() { # demarre la nouvelle couleur de l'API, bascule, met a jour le r
   if [ "$NEXT" = blue ] || [ "$ACTIVE" = blue ]; then CPAY_API_BLUE=1; fi
   if [ "$NEXT" = green ] || [ "$ACTIVE" = green ]; then CPAY_API_GREEN=1; fi
   export CPAY_API_BLUE CPAY_API_GREEN
+  # tranche web
+  WEB_ACTIVE_COLOR="$(web_active_color)"; WEB_LEGACY=false
+  if [ -z "$WEB_ACTIVE_COLOR" ] && docker inspect cplus-merchant-portal >/dev/null 2>&1; then WEB_LEGACY=true; fi
+  if [ -n "$WEB_ACTIVE_COLOR" ]; then WEB_NEXT="$(other_color "$WEB_ACTIVE_COLOR")"; else WEB_NEXT=blue; fi
+  if [ -n "$WEB_ACTIVE_COLOR" ] && web_color_running "$WEB_NEXT"; then
+    warn "portails $WEB_NEXT encore en marche (deploiement precedent interrompu apres la bascule) : arret avant de repartir"
+    # shellcheck disable=SC2046
+    compose stop -t 10 $(web_services "$WEB_NEXT") >/dev/null 2>&1 || true; compose rm -f $(web_services "$WEB_NEXT") >/dev/null 2>&1 || true
+  fi
+  log "Portails : couleur active ${WEB_ACTIVE_COLOR:-aucune}$([ "$WEB_LEGACY" = true ] && echo ' (conteneurs historiques cplus-*-portal)') -> demarrage de la couleur $WEB_NEXT ($CPLUS_TAG)"
+  CPAY_WEB_BLUE=0; CPAY_WEB_GREEN=0
+  if [ "$WEB_NEXT" = blue ] || [ "$WEB_ACTIVE_COLOR" = blue ]; then CPAY_WEB_BLUE=1; fi
+  if [ "$WEB_NEXT" = green ] || [ "$WEB_ACTIVE_COLOR" = green ]; then CPAY_WEB_GREEN=1; fi
+  export CPAY_WEB_BLUE CPAY_WEB_GREEN
   compose up -d --no-deps "api-$NEXT" || die "demarrage de api-$NEXT impossible"
+  # shellcheck disable=SC2046
+  compose up -d --no-deps $(web_services "$WEB_NEXT") || die "demarrage des portails $WEB_NEXT impossible"
   if ! api_healthy "$NEXT" 45; then
     docker logs --tail 40 "cplus-api-$NEXT" 2>&1 | sed "s/^/  [api-$NEXT] /" | tee -a "$LOG_FILE" >&2 || true
-    compose stop -t 10 "api-$NEXT" >/dev/null 2>&1 || true; compose rm -f "api-$NEXT" >/dev/null 2>&1 || true
-    die "api-$NEXT KO apres 90 s — l'API active (${ACTIVE:-historique}) n'a pas ete touchee ; rien a annuler"
+    # shellcheck disable=SC2046
+    compose stop -t 10 "api-$NEXT" $(web_services "$WEB_NEXT") >/dev/null 2>&1 || true; compose rm -f "api-$NEXT" $(web_services "$WEB_NEXT") >/dev/null 2>&1 || true
+    die "api-$NEXT KO apres 90 s — l'API et les portails actifs (${ACTIVE:-historique}) n'ont pas ete touches ; rien a annuler"
   fi
   log "  api-$NEXT OK ($(docker exec "cplus-api-$NEXT" wget -qO- -T 5 http://localhost:3000/health 2>/dev/null | head -c 160))"
+  WEB_KO=""
+  if ! web_healthy "$WEB_NEXT" 20; then
+    docker logs --tail 30 "cplus-$WEB_KO-$WEB_NEXT" 2>&1 | sed "s/^/  [$WEB_KO-$WEB_NEXT] /" | tee -a "$LOG_FILE" >&2 || true
+    # shellcheck disable=SC2046
+    compose stop -t 10 $(web_services "$WEB_NEXT") "api-$NEXT" >/dev/null 2>&1 || true; compose rm -f $(web_services "$WEB_NEXT") "api-$NEXT" >/dev/null 2>&1 || true
+    die "portail $WEB_KO ($WEB_NEXT) KO apres 40 s — API et portails actifs intacts ; rien a annuler"
+  fi
+  log "  portails $WEB_NEXT OK ($WEB_PORTALS)"
   if [ "$LEGACY" = true ]; then
-    log "Premiere bascule : arret du conteneur historique cplus-api (il tient le port 3001 ; derniere coupure de quelques secondes)"
+    log "Premiere bascule API : arret du conteneur historique cplus-api (il tient le port 3001 ; derniere coupure de quelques secondes)"
     docker stop -t 30 cplus-api >/dev/null 2>&1 || true
+  fi
+  if [ "$WEB_LEGACY" = true ]; then
+    log "Premiere bascule des portails : arret des conteneurs historiques cplus-*-portal (ils tiennent 3002-3005 ; derniere coupure de quelques secondes)"
+    for _p in $WEB_PORTALS; do docker stop -t 10 "cplus-$_p-portal" >/dev/null 2>&1 || true; done
   fi
   [ -s "$ROUTER_ACTIVE" ] || write_active "$NEXT"
   [ -n "$ACTIVE" ] || write_active "$NEXT"
-  OTHERS="$(compose config --services | grep -v '^api-blue$' | grep -v '^api-green$' | tr '\n' ' ')"
-  log "docker compose up -d --remove-orphans (routeur, portails, vitrine, cron)…"
+  [ -s "$WEB_ACTIVE" ] || web_write_active "$WEB_NEXT"
+  [ -n "$WEB_ACTIVE_COLOR" ] || web_write_active "$WEB_NEXT"
+  OTHERS="$(compose config --services | grep -v '^api-blue$' | grep -v '^api-green$' | grep -v -- '-blue$' | grep -v -- '-green$' | tr '\n' ' ')"
+  log "docker compose up -d --remove-orphans (routeurs, vitrine, cron)…"
   # shellcheck disable=SC2086
   compose up -d --remove-orphans $OTHERS || die "docker compose up en echec"
   if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$NEXT" ]; then router_switch "$NEXT"; fi
+  if [ -n "$WEB_ACTIVE_COLOR" ] && [ "$WEB_ACTIVE_COLOR" != "$WEB_NEXT" ]; then web_router_switch "$WEB_NEXT"; fi
   wait_http http://127.0.0.1:3001/health 30 '"status":"ok"' || die "API KO derriere le routeur (127.0.0.1:3001/health) — ./scripts/deploy.sh --rollback"
+  wait_http http://127.0.0.1:3002/ 15 '<html' || die "portails KO derriere le routeur web (127.0.0.1:3002) — ./scripts/deploy.sh --rollback"
   if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$NEXT" ]; then
     log "Drainage ${DRAIN_SECONDS}s puis arret gracieux de api-$ACTIVE (SIGTERM, requetes en cours terminees)…"
     sleep "$DRAIN_SECONDS"
     compose stop -t 45 "api-$ACTIVE" >/dev/null 2>&1 || warn "arret de api-$ACTIVE en echec (a verifier : docker ps)"
     compose rm -f "api-$ACTIVE" >/dev/null 2>&1 || true
   fi
-  log "API servie par api-$NEXT"
+  if [ -n "$WEB_ACTIVE_COLOR" ] && [ "$WEB_ACTIVE_COLOR" != "$WEB_NEXT" ]; then
+    [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$NEXT" ] || sleep "$DRAIN_SECONDS"
+    log "Arret des portails $WEB_ACTIVE_COLOR…"
+    # shellcheck disable=SC2046
+    compose stop -t 10 $(web_services "$WEB_ACTIVE_COLOR") >/dev/null 2>&1 || warn "arret des portails $WEB_ACTIVE_COLOR en echec (docker ps)"
+    compose rm -f $(web_services "$WEB_ACTIVE_COLOR") >/dev/null 2>&1 || true
+  fi
+  log "API servie par api-$NEXT ; portails servis par la couleur $WEB_NEXT"
 }
 
 CURRENT_SHA="$(git rev-parse HEAD)"
@@ -300,7 +374,7 @@ for portal in "merchant 3002" "cardholder 3003" "admin 3004" "partners 3005"; do
 done
 if [ -n "$PORTALS_KO" ]; then
   compose ps 2>/dev/null | tee -a "$LOG_FILE" >&2 || true
-  for p in $PORTALS_KO; do docker logs --tail 20 "cplus-$p-portal" 2>&1 | sed "s/^/  [$p] /" | tee -a "$LOG_FILE" >&2 || true; done
+  for p in $PORTALS_KO; do docker logs --tail 20 "cplus-$p-$(web_active_color)" 2>&1 | sed "s/^/  [$p] /" | tee -a "$LOG_FILE" >&2 || true; done
   die "Portail(s) KO :$PORTALS_KO — conteneur(s) en echec (voir journaux ci-dessus). ./scripts/deploy.sh --rollback pour revenir a ${PREVIOUS_SHA:-<aucun>}"
 fi
 
