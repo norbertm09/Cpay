@@ -516,6 +516,52 @@ jobs:
           print('compose : settlement-cron limite a INTERNAL_TOKEN ; api-blue/api-green alias api, routeur sur 127.0.0.1:3001 ; portails bleu/vert derriere web-router 3002-3005')
           "
           rm -f backend/.env docker/.cron.env
+      # Recette du script de supervision (2026-11-11) : setup-monitoring.sh n'avait jamais ete rejoue depuis les lots 7 et
+      # bleu/vert, quatre obstacles ont ete decouverts en production. Ici il s'execute de bout en bout, en root comme sur le
+      # serveur, avec l'image cplus-api:ci deja construite, un relais SMTP factice et le reseau applicatif cree a vide.
+      - name: "Recette setup-monitoring.sh de bout en bout (generation, promtool, amtool, up, ready, regles, Grafana, relance, --test, --down)"
+        env:
+          CPLUS_TAG: ci
+        run: |
+          set -eu
+          GRAFANA_PW="$(openssl rand -hex 12)"; METRICS_TOK="$(openssl rand -hex 16)"; SMTP_PW="$(openssl rand -hex 8)"; DB_PW="$(openssl rand -hex 8)"
+          printf 'DB_HOST=127.0.0.1\nDB_PORT=5432\nDB_NAME=cplus_ci\nDB_USER=cplus_ci\nDB_PASSWORD=%s\nDB_SSL=false\nJWT_SECRET=x\nINTERNAL_TOKEN=x\nMETRICS_TOKEN=%s\nGRAFANA_PASSWORD=%s\n' "$DB_PW" "$METRICS_TOK" "$GRAFANA_PW" > backend/.env
+          printf 'INTERNAL_TOKEN=x\n' > docker/.cron.env
+          sudo install -d -m 0750 /etc/cplus
+          printf 'ALERT_SMTP_HOST=smtp.ci.invalid\nALERT_SMTP_PORT=587\nALERT_SMTP_USER=alerts@ci.invalid\nALERT_SMTP_FROM=alerts@ci.invalid\nALERT_SMTP_TO=ops@ci.invalid\nALERT_SMTP_PASSWORD=%s\n' "$SMTP_PW" | sudo tee /etc/cplus/monitoring.env >/dev/null
+          sudo chmod 0600 /etc/cplus/monitoring.env
+          docker network inspect docker_cplus-internal >/dev/null 2>&1 || docker network create docker_cplus-internal >/dev/null
+          run_setup() { sudo -E env CPLUS_TAG=ci bash scripts/setup-monitoring.sh "$@" 2>&1 | tee "$RUNNER_TEMP/setup-monitoring-$1.log"; }
+          run_setup --up
+          # Prometheus et Alertmanager prets, les cinq conteneurs en marche, les regles caisse chargees
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:9090/-/ready >/dev/null 2>&1 && curl -fsS http://127.0.0.1:9093/-/ready >/dev/null 2>&1 && break; sleep 2; done
+          curl -fsS http://127.0.0.1:9090/-/ready >/dev/null || { echo "::error::Prometheus pas pret"; docker logs cplus-prometheus | tail -30; exit 1; }
+          curl -fsS http://127.0.0.1:9093/-/ready >/dev/null || { echo "::error::Alertmanager pas pret"; docker logs cplus-alertmanager | tail -30; exit 1; }
+          for c in cplus-prometheus cplus-alertmanager cplus-grafana cplus-node-exporter cplus-postgres-exporter; do
+            [ "$(docker inspect -f '{{.State.Running}}' "$c")" = "true" ] || { echo "::error::$c n'est pas en marche"; docker logs "$c" | tail -30; exit 1; }
+          done
+          curl -fsS http://127.0.0.1:9090/api/v1/rules | python3 -c "
+          import json, sys
+          groups = {g['name'] for g in json.load(sys.stdin)['data']['groups']}
+          for g in ('cplus', 'cplus-ops', 'cplus-reconciliation', 'cplus-cash'): assert g in groups, f'groupe {g} absent : {groups}'
+          print('regles chargees :', ', '.join(sorted(groups)))"
+          # Grafana : sante, source Prometheus provisionnee, tableau Caisse et API present
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:3007/api/health >/dev/null 2>&1 && break; sleep 2; done
+          curl -fsS http://127.0.0.1:3007/api/health | grep -q '"database": *"ok"' || { echo "::error::Grafana ne repond pas"; docker logs cplus-grafana | tail -30; exit 1; }
+          curl -fsS -u "admin:$GRAFANA_PW" http://127.0.0.1:3007/api/datasources | grep -q '"uid":"cpay-prometheus"' || { echo "::error::source Prometheus non provisionnee dans Grafana"; exit 1; }
+          for i in $(seq 1 15); do curl -fsS -u "admin:$GRAFANA_PW" 'http://127.0.0.1:3007/api/search?query=Caisse' | grep -q 'cpay-caisse-api' && break; sleep 2; done
+          curl -fsS -u "admin:$GRAFANA_PW" 'http://127.0.0.1:3007/api/search?query=Caisse' | grep -q 'cpay-caisse-api' || { echo "::error::tableau C-Pay Caisse et API absent de Grafana"; exit 1; }
+          echo "Grafana : source et tableau provisionnes"
+          # relance (idempotence : configuration precedente en .prev, pas de refus d'ecrasement) puis alerte de test puis arret
+          run_setup --up
+          grep -q "configuration precedente conservee" "$RUNNER_TEMP/setup-monitoring---up.log" || { echo "::error::la relance n'a pas conserve la configuration precedente en .prev"; exit 1; }
+          sudo test -f /etc/cplus/monitoring/alertmanager.yml.prev || { echo "::error::alertmanager.yml.prev absent"; exit 1; }
+          run_setup --test
+          grep -q "acceptee" "$RUNNER_TEMP/setup-monitoring---test.log" || { echo "::error::alerte de test non acceptee par Alertmanager"; exit 1; }
+          run_setup --down
+          [ -z "$(docker ps -q --filter name=cplus-prometheus)" ] || { echo "::error::pile non arretee par --down"; exit 1; }
+          rm -f backend/.env docker/.cron.env
+          echo "recette setup-monitoring.sh : generation, promtool, amtool, up, ready, 4 groupes de regles, Grafana, relance, --test, --down OK"
       - name: nginx -t — reverse proxy hote (nginx.conf, certificats factices)
         run: |
           mkdir -p "$RUNNER_TEMP/le/live/c-pay.global"
