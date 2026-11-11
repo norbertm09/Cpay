@@ -83,7 +83,7 @@ printf '%s' "$PGX_USER" > "$PRIV/pg_exporter_user"; printf '%s' "$PGX_PASS" > "$
 chown root:65534 "$PRIV/pg_exporter_user" "$PRIV/pg_exporter_pass"; chmod 0440 "$PRIV/pg_exporter_user" "$PRIV/pg_exporter_pass"
 TEXTFILE_DIR="${OPS_TEXTFILE_DIR:-/var/lib/node_exporter/textfile}"; install -d -m 0755 "$TEXTFILE_DIR"
 
-# ─── generation de la configuration Alertmanager dans le conteneur api (memes chemins absolus) ─────
+# ─── generation de la configuration Alertmanager dans l'image api (service api-blue depuis la bascule bleu/vert, memes chemins absolus) ─────
 log "Generation de $AM_CONFIG (scripts/configure-monitoring.cjs)…"
 ( cd "$ROOT/docker" && docker compose run --rm --no-deps -T \
     -v "$ROOT/scripts:$ROOT/scripts:ro" -v "$ROOT/monitoring:$ROOT/monitoring:ro" -v "$PRIV:$PRIV" \
@@ -91,7 +91,7 @@ log "Generation de $AM_CONFIG (scripts/configure-monitoring.cjs)…"
     -e ALERT_SMTP_HOST="$ALERT_SMTP_HOST" -e ALERT_SMTP_PORT="$ALERT_SMTP_PORT" -e ALERT_SMTP_USER="$ALERT_SMTP_USER" \
     -e ALERT_SMTP_FROM="$ALERT_SMTP_FROM" -e ALERT_SMTP_TO="$ALERT_SMTP_TO" -e ALERT_SMTP_PASSWORD_FILE="$ALERT_SMTP_PASSWORD_FILE" \
     -e MONITORING_METRICS_TOKEN_FILE="$METRICS_FILE" -e MONITORING_TEMPLATE_DIR="$TEMPLATE_DIR" ${ALERT_SMTP_CA_FILE:+-e ALERT_SMTP_CA_FILE="$ALERT_SMTP_CA_FILE"} \
-    -e RUN_MIGRATIONS=false --entrypoint node api "$ROOT/scripts/configure-monitoring.cjs" --output "$AM_CONFIG" ) \
+    -e RUN_MIGRATIONS=false --entrypoint node api-blue "$ROOT/scripts/configure-monitoring.cjs" --output "$AM_CONFIG" ) \
   || die "generation de la configuration Alertmanager en echec (verifier $ENV_FILE)"
 chown root:65534 "$AM_CONFIG"; chmod 0440 "$AM_CONFIG"
 
