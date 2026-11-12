@@ -8,7 +8,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
 import global.cpay.app.R
 import global.cpay.app.common.ReceiptActivity
@@ -32,8 +31,10 @@ class CollectResultFragment : Fragment() {
 
         fun newInstance(kind: String, amount: Double, currency: String, reference: String, phone: String,
                         opLabel: String, fee: Double, message: String?) = CollectResultFragment().apply {
-            arguments = bundleOf(A_KIND to kind, A_AMOUNT to amount, A_CUR to currency, A_REF to reference,
-                A_PHONE to phone, A_OP to opLabel, A_FEE to fee, A_MSG to message)
+            arguments = Bundle().apply {
+                putString(A_KIND, kind); putDouble(A_AMOUNT, amount); putString(A_CUR, currency); putString(A_REF, reference)
+                putString(A_PHONE, phone); putString(A_OP, opLabel); putDouble(A_FEE, fee); putString(A_MSG, message)
+            }
         }
     }
 

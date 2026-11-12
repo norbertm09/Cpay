@@ -5,7 +5,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.OnBackPressedCallback
-import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import global.cpay.app.R
@@ -35,8 +34,10 @@ class CollectWaitingFragment : Fragment() {
 
         fun newInstance(txnId: String, amount: Double, currency: String, reference: String, phone: String, opLabel: String, fee: Double) =
             CollectWaitingFragment().apply {
-                arguments = bundleOf(A_TXN to txnId, A_AMOUNT to amount, A_CUR to currency, A_REF to reference,
-                    A_PHONE to phone, A_OP to opLabel, A_FEE to fee)
+                arguments = Bundle().apply {
+                    putString(A_TXN, txnId); putDouble(A_AMOUNT, amount); putString(A_CUR, currency); putString(A_REF, reference)
+                    putString(A_PHONE, phone); putString(A_OP, opLabel); putDouble(A_FEE, fee)
+                }
             }
     }
 

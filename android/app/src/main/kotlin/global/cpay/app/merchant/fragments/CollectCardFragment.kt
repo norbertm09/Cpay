@@ -12,7 +12,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.zxing.BarcodeFormat
@@ -39,7 +38,7 @@ class CollectCardFragment : Fragment() {
     companion object {
         private const val A_AMOUNT = "amount"; private const val A_CUR = "currency"
         fun newInstance(amount: Double, currency: String) = CollectCardFragment().apply {
-            arguments = bundleOf(A_AMOUNT to amount, A_CUR to currency)
+            arguments = Bundle().apply { putDouble(A_AMOUNT, amount); putString(A_CUR, currency) }
         }
     }
 

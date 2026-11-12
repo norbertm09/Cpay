@@ -5,6 +5,7 @@ import android.view.View
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import global.cpay.app.R
@@ -44,10 +45,11 @@ class ChangePasswordActivity : AppCompatActivity() {
         }
         tvLogout.setOnClickListener { logoutToLogin() }
         btnSubmit.setOnClickListener { submit() }
-    }
-
-    override fun onBackPressed() {
-        if (forced) logoutToLogin() else super.onBackPressed()
+        // Retour arriere : en changement force, retour = deconnexion ; sinon comportement normal (OnBackPressedDispatcher,
+        // remplace l'ancien override deprecie de onBackPressed)
+        onBackPressedDispatcher.addCallback(this) {
+            if (forced) logoutToLogin() else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+        }
     }
 
     private fun submit() {

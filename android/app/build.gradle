@@ -110,7 +110,9 @@ dependencies {
     // Biometrics
     implementation 'androidx.biometric:biometric:1.1.0'
 
-    // Security
+    // Security — lot depreciations (2026-11-12) : la session est chiffree par SecureStore (Keystore direct) ;
+    // security-crypto (API depreciees en 1.1.0) ne sert plus qu'a lire l'ancien fichier pour la migration. A retirer
+    // avec le fichier cplus_session une fois les installations migrees (deux releases).
     implementation 'androidx.security:security-crypto:1.1.0'
 
     // Room (base de données locale)
