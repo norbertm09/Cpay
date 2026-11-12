@@ -530,8 +530,13 @@ jobs:
           sudo install -d -m 0750 /etc/cplus
           printf 'ALERT_SMTP_HOST=smtp.ci.invalid\nALERT_SMTP_PORT=587\nALERT_SMTP_USER=alerts@ci.invalid\nALERT_SMTP_FROM=alerts@ci.invalid\nALERT_SMTP_TO=ops@ci.invalid\nALERT_SMTP_PASSWORD=%s\n' "$SMTP_PW" | sudo tee /etc/cplus/monitoring.env >/dev/null
           sudo chmod 0600 /etc/cplus/monitoring.env
-          docker network inspect docker_cplus-internal >/dev/null 2>&1 || docker network create docker_cplus-internal >/dev/null
-          run_setup() { sudo -E env CPLUS_TAG=ci bash scripts/setup-monitoring.sh "$@" 2>&1 | tee "$RUNNER_TEMP/setup-monitoring-$1.log"; }
+          # Le reseau applicatif docker_cplus-internal doit etre cree par Compose (etiquettes com.docker.compose.*) : un
+          # « docker network create » a la main est refuse par le « compose run » du generateur. Creer les conteneurs sans
+          # les demarrer suffit a creer le reseau ; la pile de supervision s'y rattache ensuite en externe.
+          (cd docker && docker compose create --no-build api-router >/dev/null)
+          docker network inspect docker_cplus-internal --format '{{index .Labels "com.docker.compose.network"}}' | grep -q cplus-internal
+          # sudo du runner : -E n'est pas honore, les variables utiles sont passees explicitement
+          run_setup() { sudo env CPLUS_TAG=ci MONITORING_ENV_FILE=/etc/cplus/monitoring.env bash scripts/setup-monitoring.sh "$@" 2>&1 | tee "$RUNNER_TEMP/setup-monitoring-$1.log"; }
           run_setup --up
           # Prometheus et Alertmanager prets, les cinq conteneurs en marche, les regles caisse chargees
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:9090/-/ready >/dev/null 2>&1 && curl -fsS http://127.0.0.1:9093/-/ready >/dev/null 2>&1 && break; sleep 2; done
@@ -560,6 +565,7 @@ jobs:
           grep -q "acceptee" "$RUNNER_TEMP/setup-monitoring---test.log" || { echo "::error::alerte de test non acceptee par Alertmanager"; exit 1; }
           run_setup --down
           [ -z "$(docker ps -q --filter name=cplus-prometheus)" ] || { echo "::error::pile non arretee par --down"; exit 1; }
+          (cd docker && docker compose down --remove-orphans >/dev/null 2>&1 || true)
           rm -f backend/.env docker/.cron.env
           echo "recette setup-monitoring.sh : generation, promtool, amtool, up, ready, 4 groupes de regles, Grafana, relance, --test, --down OK"
       - name: nginx -t — reverse proxy hote (nginx.conf, certificats factices)
