@@ -73,17 +73,27 @@ back-office (`/admin/account-deletion-requests`). URL web équivalente, à décl
 ### 1.7 Chaîne de build, R8 et paliers (lot Android P2 du 2026-11-10, palier AGP 9 / API 37 du 2026-11-11)
 
 Chaîne actuelle (palier AGP 9 / API 37) : **AGP 9.5.1** (Gradle ≥ 9.6, JDK 17, API max 37), **Gradle 9.9.1**,
-**compileSdk 37 / targetSdk 36**, **Kotlin intégré à AGP** (plus de plugin `org.jetbrains.kotlin.android` ni de bloc
+**compileSdk 37 / targetSdk 37**, **Kotlin intégré à AGP** (plus de plugin `org.jetbrains.kotlin.android` ni de bloc
 `kotlinOptions{}` ; `jvmTarget` suit `compileOptions.targetCompatibility` = 17), **KSP 2.3.12** (2.3.13 exclu :
 régression sur les exécutions concurrentes), nouveau DSL AGP 9 (`android.newDsl`), Jetifier retiré ; dépendances
 stables de septembre 2026 : core 1.19.1 (`core-ktx` est vide depuis 1.19, on dépend de `core`), appcompat 1.8.0,
 material 1.14.0, lifecycle 2.11.0, activity 1.13.0, fragment 1.9.1, navigation 2.10.2, Room 2.8.5, Retrofit 3.0,
 OkHttp 5.5.1, coroutines 1.10.2. La CI installe `platforms;android-37` et `build-tools;36.0.0`.
 
-- **targetSdk reste 36** : la montée d'outillage et le changement de comportement d'exécution (API 37) ne sont pas
-  faits en même temps. Passer `targetSdk 37` après une recette complète sur appareil (connexion, caisse, biométrie,
-  appairage) et vérification des changements de comportement de l'API 37 ; Google Play n'exige 37 qu'à partir
-  d'août 2027.
+- **targetSdk 37 (lot du 2026-11-12)** : revue des changements de comportement d'Android 17 réservés aux apps
+  ciblant l'API 37 (page officielle « Behavior changes: Apps targeting Android 17 »). Aucun ne touche C-Pay :
+  limite mémoire des widgets (pas de widget), `MessageQueue` sans verrou et champs `static final` inaltérables (aucune
+  réflexion de ce type ; Gson lit les champs, ne modifie pas de `static final`), ECH (transparent avec OkHttp 5),
+  permission `ACCESS_LOCAL_NETWORK` (l'app ne parle qu'à `api.c-pay.global` ; l'impression des reçus passe par le
+  service d'impression système), masquage des mots de passe au clavier physique, délai des SMS OTP (l'app ne lit
+  pas les SMS : le code 2FA est saisi), durcissement des lancements d'activité en arrière-plan (aucun), **Certificate
+  Transparency activée par défaut** (certificats Let's Encrypt journalisés, `network_security_config` sans épinglage),
+  chargement natif sûr (pas de `System.load`), Contacts (non utilisés), `setContentCaptureEnabled` déprécié
+  (`FLAG_SECURE` déjà posé sur connexion, 2FA, caisse, reçu), audio en arrière-plan (aucun), contraintes
+  d'orientation ignorées sur grands écrans (déjà le cas depuis la cible 36, `resizeableActivity=true`), Bluetooth
+  (non utilisé). Les changements « pour toutes les apps » s'appliquaient déjà indépendamment de la cible.
+  **Recette** : sur un appareil ou un émulateur Android 17, connexion, caisse (encaissement, retrait), 2FA,
+  biométrie, reçu et impression, appairage. Google Play n'exige 37 qu'à partir d'août 2027.
 - **R8 sous AGP 9** : `-keep class A` n'implique plus `<init>()` (`android.r8.strictFullModeForKeepRules`) et le
   shrinker de ressources considère classes et ressources ensemble ; les règles de `proguard-rules.pro` gardent déjà
   `<init>(...)` sur les modèles Gson, et la CI construit `assembleRelease` / `bundleRelease` / `assembleStaging`.

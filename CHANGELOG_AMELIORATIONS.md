@@ -1,5 +1,12 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-targetsdk37 (2026-11-12) — Android : cible API 37
+* `targetSdk` 36 -> 37. Revue des changements de comportement d'Android 17 reserves aux apps ciblant l'API 37
+  (widgets, MessageQueue, static final, ECH, permission reseau local, mots de passe au clavier physique, SMS OTP,
+  lancements d'activite en arriere-plan, Certificate Transparency par defaut, chargement natif, Contacts,
+  Content Capture, audio en arriere-plan, grands ecrans, Bluetooth) : aucun ne concerne C-Pay, detail dans
+  docs/MOBILE-STORES.md § 1.7. Recette sur appareil ou emulateur Android 17 requise avant la release 2.7.2.
+
 ## 2.7.2-android-deprecations (2026-11-12) — Android : fin des API depreciees
 * Session : `SecureStore` remplace EncryptedSharedPreferences / MasterKey (androidx.security.crypto, API depreciees
   depuis 1.1.0) — AES-256-GCM avec cle non exportable du Keystore, IV par ecriture, nom de l'entree comme donnee

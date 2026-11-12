@@ -7,15 +7,15 @@ plugins {
 android {
     namespace 'global.cpay.app'
     // Palier AGP 9 / API 37 (2026-11-11) : compilation contre l'API 37 (exigee par androidx.core 1.19, navigation 2.10,
-    // lifecycle 2.11, okhttp 5). targetSdk reste 36 (exigence Google Play depuis aout 2026) : le passage du
-    // comportement d'execution a l'API 37 se fera apres recette sur appareil (lot suivant), pas en meme temps que
-    // la montee d'outillage.
+    // lifecycle 2.11, okhttp 5). Lot targetSdk 37 (2026-11-12) : comportement d'execution Android 17 — revue des
+    // changements lies a la cible dans docs/MOBILE-STORES.md § 1.7 (aucun ne touche l'app : pas de widget, de LAN,
+    // de SMS, de contacts, de code natif ni d'audio en arriere-plan ; FLAG_SECURE deja pose sur les ecrans sensibles).
     compileSdk 37
 
     defaultConfig {
         applicationId "global.cpay.app"
         minSdk 24
-        targetSdk 36
+        targetSdk 37
         versionCode 3
         versionName "2.7.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
