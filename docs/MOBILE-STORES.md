@@ -90,6 +90,14 @@ OkHttp 5.5.1, coroutines 1.10.2. La CI installe `platforms;android-37` et `build
   La recette de l'APK `staging` reste obligatoire avant chaque release.
 - **Prochain palier** : AGP 10 (mi-2026 selon Google ; retrait de l'opt-out du nouveau DSL) — lot dédié ; Dependabot
   exclut les majeures d'AGP et du wrapper, tout le reste est proposé normalement.
+- **Dépréciations (lot du 2026-11-12)** : la session (`SessionManager`) est stockée par `SecureStore`
+  (AES-256-GCM, clé non exportable du Keystore Android, IV par écriture, nom de l'entrée authentifié) dans
+  `cplus_session_v2` ; l'ancien fichier `EncryptedSharedPreferences` est migré au premier lancement puis supprimé
+  (s'il est illisible, l'utilisateur se reconnecte et ré-appaire). `androidx.security:security-crypto`, dont toutes
+  les API sont dépréciées, ne sert plus qu'à cette migration : à retirer avec le code de migration après deux
+  releases. Retour arrière de `ChangePasswordActivity` via `OnBackPressedDispatcher`, `fallbackToDestructiveMigration(true)`,
+  `Bundle()` à la place de `bundleOf`. Le build Kotlin ne produit plus d'avertissement de dépréciation. Test JVM
+  `SecureStoreTest` (clé AES en mémoire).
 
 Historique du lot P2 (2026-11-10) : AGP 8.11.1, Gradle 8.13, compileSdk 36, Kotlin 2.2.21 + KSP 2.2.21-2.0.4,
 dépendances **compatibles compileSdk 36** (core 1.17, appcompat 1.7.1, lifecycle 2.9.4, activity 1.11, fragment 1.8.9,

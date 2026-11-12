@@ -1,5 +1,15 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-android-deprecations (2026-11-12) — Android : fin des API depreciees
+* Session : `SecureStore` remplace EncryptedSharedPreferences / MasterKey (androidx.security.crypto, API depreciees
+  depuis 1.1.0) — AES-256-GCM avec cle non exportable du Keystore, IV par ecriture, nom de l'entree comme donnee
+  authentifiee, valeur illisible traitee comme absente. Migration automatique de l'ancien fichier au premier
+  lancement puis suppression ; security-crypto conserve pour cette seule lecture (retrait apres deux releases).
+* `ChangePasswordActivity` : retour arriere via OnBackPressedDispatcher (plus d'override de onBackPressed) ;
+  Room : `fallbackToDestructiveMigration(true)` ; fragments d'encaissement : `Bundle()` a la place de `bundleOf`.
+* Tests JVM : `SecureStoreTest` (5 cas : aller-retour, IV distincts et absence de clair, liaison a la cle, cle
+  differente, hex). Le build Kotlin ne produit plus d'avertissement de depreciation.
+
 ## 2.7.2-recette-supervision (2026-11-11) — mise en service de la supervision et recette du script en CI
 * Mise en service en production (relais SMTP OVH, port 587) : quatre obstacles corriges dans `setup-monitoring.sh`,
   tous dus a des evolutions posterieures a sa recette initiale — service `api` renomme `api-blue` (bascule bleu/vert),

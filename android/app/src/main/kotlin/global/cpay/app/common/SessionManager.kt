@@ -1,12 +1,12 @@
 package global.cpay.app.common
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import android.util.Log
 
 object SessionManager {
 
-    private const val PREF_FILE   = "cplus_session"
+    private const val PREF_FILE   = "cplus_session"      // ancien fichier (EncryptedSharedPreferences, migre puis supprime)
+    private const val PREF_FILE_V2 = "cplus_session_v2"  // lot depreciations 2026-11-12 : SecureStore (Keystore direct)
     private const val KEY_TOKEN   = "auth_token"
     private const val KEY_REFRESH = "refresh_token"   // WAVE-3 : refresh opaque (rotation)
     private const val KEY_EXPIRES = "token_expires_at" // WAVE-3 : epoch ms d'expiration de l'access
@@ -23,17 +23,44 @@ object SessionManager {
     /** Marge avant expiration a partir de laquelle on rafraichit proactivement. */
     const val REFRESH_LEEWAY_MS = 60_000L
 
-    private lateinit var prefs: android.content.SharedPreferences
+    private lateinit var prefs: SecureStore
+
+    private val STRING_KEYS = listOf(KEY_TOKEN, KEY_REFRESH, KEY_PROFILE, KEY_TYPE, KEY_USER_ID, KEY_NAME, KEY_EMAIL,
+        KEY_COUNTRY, KEY_TERMINAL_ID, KEY_TERMINAL_NAME, KEY_TERMINAL_SITE)
 
     fun init(context: Context) {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        prefs = EncryptedSharedPreferences.create(
-            context, PREF_FILE, masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+        prefs = SecureStore.forContext(context, PREF_FILE_V2)
+        migrateLegacyIfNeeded(context)
+    }
+
+    /**
+     * Migration unique depuis l'ancien fichier EncryptedSharedPreferences (androidx.security.crypto, deprecie) :
+     * copie des entrees connues dans le nouveau magasin puis suppression de l'ancien fichier. Si l'ancien fichier
+     * est illisible (Keystore reinitialise), il est simplement supprime : l'utilisateur se reconnecte et re-appaire.
+     * La dependance androidx.security:security-crypto ne sert plus qu'a cette lecture et pourra etre retiree
+     * une fois les installations migrees (cf. docs/MOBILE-STORES.md § 1.7).
+     */
+    @Suppress("DEPRECATION")
+    private fun migrateLegacyIfNeeded(context: Context) {
+        val legacyFile = java.io.File(context.applicationInfo.dataDir, "shared_prefs/$PREF_FILE.xml")
+        if (!legacyFile.exists()) return
+        try {
+            val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+                .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM).build()
+            val legacy = androidx.security.crypto.EncryptedSharedPreferences.create(
+                context, PREF_FILE, masterKey,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+            val e = prefs.edit()
+            for (k in STRING_KEYS) legacy.getString(k, null)?.let { e.putString(k, it) }
+            legacy.getLong(KEY_EXPIRES, 0L).takeIf { it > 0L }?.let { e.putLong(KEY_EXPIRES, it) }
+            e.commit()
+            legacy.edit().clear().commit()
+            Log.i("SessionManager", "session migree vers le magasin Keystore v2")
+        } catch (t: Throwable) {
+            Log.w("SessionManager", "ancienne session illisible, ignoree : ${t.javaClass.simpleName}")
+        }
+        context.deleteSharedPreferences(PREF_FILE)
     }
 
     var token: String?

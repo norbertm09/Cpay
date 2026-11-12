@@ -8,7 +8,6 @@ import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.chip.Chip
@@ -43,7 +42,7 @@ class CollectCustomerFragment : Fragment() {
         private const val DETECT_DEBOUNCE_MS = 450L
 
         fun newInstance(amount: Double, currency: String, phone: String? = null) = CollectCustomerFragment().apply {
-            arguments = bundleOf(ARG_AMOUNT to amount, ARG_CURRENCY to currency, ARG_PHONE to phone)
+            arguments = Bundle().apply { putDouble(ARG_AMOUNT, amount); putString(ARG_CURRENCY, currency); putString(ARG_PHONE, phone) }
         }
     }
 
