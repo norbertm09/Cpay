@@ -37,35 +37,9 @@ usage() { sed -n '2,24p' "$0"; exit "${1:-0}"; }
 [ -f "$ENV_FILE" ] || die "$ENV_FILE introuvable"
 [ -r "$ENV_FILE" ] || die "$ENV_FILE illisible (lancer avec l'utilisateur proprietaire ou sudo)"
 
-# set_env_var <NOM> <valeur> : remplace toutes les lignes NOM=… par une seule (ou l'ajoute), ecriture atomique.
-# Valeur ecrite entre guillemets simples des qu'elle contient autre chose que [A-Za-z0-9_./:@+=-] (regle lib/env.sh) ;
-# une valeur contenant un guillemet simple est refusee (non representable dans un .env C-Pay).
-set_env_var() {
-  local name="$1" value="$2" tmp line
-  case "$value" in *\'*) die "la valeur de $name contient un guillemet simple : non representable dans $ENV_FILE" ;; esac
-  case "$value" in
-    *[!A-Za-z0-9_./:@+=-]*|'') line="$name='$value'" ;;
-    *) line="$name=$value" ;;
-  esac
-  tmp="$(mktemp "$(dirname "$ENV_FILE")/.env.rotate.XXXXXX")"
-  chmod --reference="$ENV_FILE" "$tmp" 2>/dev/null || chmod 600 "$tmp"
-  chown --reference="$ENV_FILE" "$tmp" 2>/dev/null || true
-  NEWLINE="$line" NAME="$name" awk '
-    BEGIN { done = 0; nl = ENVIRON["NEWLINE"]; re = "^[[:space:]]*(export[[:space:]]+)?" ENVIRON["NAME"] "=" }
-    $0 ~ re { if (!done) { print nl; done = 1 }; next }
-    { print }
-    END { if (!done) print nl }
-  ' "$ENV_FILE" > "$tmp"
-  mv -f "$tmp" "$ENV_FILE"
-}
-unset_env_var() { # unset_env_var <NOM> : retire toutes les lignes NOM=…
-  local name="$1" tmp
-  tmp="$(mktemp "$(dirname "$ENV_FILE")/.env.rotate.XXXXXX")"
-  chmod --reference="$ENV_FILE" "$tmp" 2>/dev/null || chmod 600 "$tmp"
-  chown --reference="$ENV_FILE" "$tmp" 2>/dev/null || true
-  NAME="$name" awk 'BEGIN { re = "^[[:space:]]*(export[[:space:]]+)?" ENVIRON["NAME"] "=" } $0 ~ re { next } { print }' "$ENV_FILE" > "$tmp"
-  mv -f "$tmp" "$ENV_FILE"
-}
+# set_env_var <NOM> <valeur> / unset_env_var <NOM> : lib/env.sh (ecriture atomique, memes droits, valeur quotee)
+set_env_var()   { write_env_var "$ENV_FILE" "$1" "$2" || die "ecriture de $1 dans $ENV_FILE impossible"; }
+unset_env_var() { remove_env_var "$ENV_FILE" "$1" || die "suppression de $1 dans $ENV_FILE impossible"; }
 backup_env() {
   local bak
   bak="$(mktemp "$ENV_FILE.bak-$(date +%Y%m%d_%H%M%S).XXXX")"
@@ -177,8 +151,8 @@ cmd_db_password() {
   fi
   backup_env
   set_env_var DB_PASSWORD "$pw"
-  if [ -n "$(read_env_var "$ENV_FILE" PG_EXPORTER_PASSWORD)" ]; then
-    warn "PG_EXPORTER_PASSWORD est renseigne : si l'exporter utilise le meme role, le mettre a jour aussi"
+  if [ -z "$(read_env_var "${MONITORING_ENV_FILE:-/etc/cplus/monitoring.env}" PG_EXPORTER_USER 2>/dev/null)" ]; then
+    warn "l'exporter PostgreSQL utilise encore DB_USER : relancer setup-monitoring.sh (ou creer le role dedie : scripts/create-monitoring-role.sh)"
   fi
   log "DB_PASSWORD mis a jour dans $ENV_FILE"
   restart_hint

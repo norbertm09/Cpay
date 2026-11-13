@@ -76,7 +76,7 @@ AM_CONFIG="$PRIV/alertmanager.yml"
 # ─── lot 3 : postgres-exporter (identifiants dans des fichiers 0440 root:65534) et node-exporter (textfile) ─────
 for v in DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSL; do printf -v "$v" '%s' "$(read_var "$ROOT/backend/.env" "$v")"; done
 PGX_USER="${PG_EXPORTER_USER:-$(read_var "$ENV_FILE" PG_EXPORTER_USER)}"; PGX_PASS="${PG_EXPORTER_PASSWORD:-$(read_var "$ENV_FILE" PG_EXPORTER_PASSWORD)}"
-[ -n "$PGX_USER" ] || { PGX_USER="$DB_USER"; PGX_PASS="$DB_PASSWORD"; warn "PG_EXPORTER_USER absent de $ENV_FILE : l'exporter utilise DB_USER (créer un rôle lecture seule est recommandé, docs/EXPLOITATION.md)"; }
+[ -n "$PGX_USER" ] || { PGX_USER="$DB_USER"; PGX_PASS="$DB_PASSWORD"; warn "PG_EXPORTER_USER absent de $ENV_FILE : l'exporter utilise DB_USER (rôle applicatif). Créer le rôle lecture seule dédié : sudo bash scripts/create-monitoring-role.sh (docs/EXPLOITATION.md § 3)"; }
 [ -n "$DB_HOST" ] && [ -n "$DB_NAME" ] || die "DB_HOST / DB_NAME absents de backend/.env"
 PGX_URI="$DB_HOST:${DB_PORT:-5432}/$DB_NAME?sslmode=$([ "${DB_SSL:-false}" = "true" ] && echo require || echo disable)"
 printf '%s' "$PGX_USER" > "$PRIV/pg_exporter_user"; printf '%s' "$PGX_PASS" > "$PRIV/pg_exporter_pass"
