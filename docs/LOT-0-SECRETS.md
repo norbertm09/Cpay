@@ -35,8 +35,10 @@ déploiements) sauf mention contraire. Après chaque commande contenant un secre
 3. Contrôles : `curl -s https://api.c-pay.global/health`, `docker logs cplus-postgres-exporter --since 2m` (pas
    d'erreur d'authentification), tableau Grafana « caisse / API ». Supprimer `backend/.env.bak-*` une fois validé.
 
-Si `PG_EXPORTER_USER` / `PG_EXPORTER_PASSWORD` désignent un rôle dédié (recommandé, `docs/EXPLOITATION.md` § 3),
-ce rôle n'est pas concerné ; sinon l'exporter réutilise `DB_PASSWORD` et l'étape `setup-monitoring.sh` suffit.
+Si `PG_EXPORTER_USER` / `PG_EXPORTER_PASSWORD` désignent le rôle dédié `cplus_monitor` (créé par
+`sudo bash scripts/create-monitoring-role.sh`, `docs/EXPLOITATION.md` § 3), ce rôle n'est pas concerné par la rotation ;
+sinon l'exporter réutilise `DB_PASSWORD` et l'étape `setup-monitoring.sh` suffit. C'est le bon moment pour créer le rôle
+dédié : une étape de plus, et le fichier secret de l'exporter ne donne plus accès aux données.
 
 ## 2. Dépôt GitHub en privé — 10 minutes
 

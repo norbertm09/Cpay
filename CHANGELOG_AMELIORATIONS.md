@@ -1,5 +1,18 @@
 # Changelog - ameliorations integrees
 
+## 2.7.3-exporter-role (2026-11-13) — role PostgreSQL en lecture seule pour l'exporter Prometheus
+* `scripts/create-monitoring-role.sh` : cree ou met a jour le role `cplus_monitor` (`pg_monitor`, CONNECT, 3 connexions,
+  `statement_timeout` 5 s, `default_transaction_read_only`, REVOKE sur les tables et sequences du schema public), verifie
+  qu'il lit `pg_stat_activity` mais pas `merchants`, inscrit `PG_EXPORTER_USER` / `PG_EXPORTER_PASSWORD` dans
+  `/etc/cplus/monitoring.env` (mot de passe genere, jamais affiche). `--sql` pour un DBA, `--skip-write`, guidage si
+  le compte n'a pas les droits (base managee OVH : compte administrateur ou support).
+* `scripts/lib/env.sh` : `write_env_var` / `remove_env_var` (ecriture atomique, droits conserves, valeur quotee,
+  guillemet simple refuse) partagees par `rotate-secrets.sh` et le nouveau script ; tests dans `env-lib.test.sh`.
+* CI (job backend, PostgreSQL 16) : creation du role, lecture des statistiques, `merchants` refusee, lecture seule
+  par defaut, limite de connexions, rejeu idempotent avec mot de passe renouvele, `--sql` sans ecriture.
+* `setup-monitoring.sh` et `rotate-secrets.sh db-password` renvoient vers le script quand l'exporter utilise encore
+  `DB_USER` ; `monitoring.env.example`, EXPLOITATION § 3, LOT-0 § 1.
+
 ## 2.7.3-lot0-secrets (2026-11-13) — lot 0 : rotation des secrets, depot prive, CA PostgreSQL
 * `scripts/rotate-secrets.sh` (`status`, `db-password`, `webhook-secret`, `mtn-token`, `--clear-previous`) : met a jour
   `backend/.env` de facon atomique (copie de secours 600, valeurs piegees, aucune valeur affichee) ; test de connexion

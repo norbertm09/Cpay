@@ -91,6 +91,31 @@ jobs:
           [ "$applied" = "$expected" ] || { echo "::error::schema_migrations ($applied) != fichiers SQL ($expected)"; exit 1; }
           # la fonction de frais (migration 010) et le wrapper de compatibilite calc_fee (migration 013) existent
           psql -h 127.0.0.1 -U cplus_ci -d cplus_ci -tAc "SELECT count(*) FROM pg_proc WHERE proname IN ('cpay_calculate_fee','calc_fee')" | grep -qx 2
+      - name: Role PostgreSQL lecture seule de l'exporter (scripts/create-monitoring-role.sh, rejeu idempotent, aucun acces aux tables)
+        working-directory: .
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '5432'
+          DB_NAME: cplus_ci
+          DB_USER: cplus_ci
+          DB_SSL: 'false'
+        run: |
+          export DB_PASSWORD="$(openssl rand -hex 12)"   # ignore par le service (trust)
+          MON="$RUNNER_TEMP/monitoring.env"; printf 'ALERT_SMTP_HOST=x\n' > "$MON"; chmod 600 "$MON"
+          bash scripts/create-monitoring-role.sh --monitoring-env "$MON"
+          grep -qx 'PG_EXPORTER_USER=cplus_monitor' "$MON"
+          grep -q '^PG_EXPORTER_PASSWORD=[0-9a-f]\{48\}$' "$MON"
+          # le role lit les statistiques mais aucune table applicative ; default_transaction_read_only pose
+          psql -h 127.0.0.1 -U cplus_monitor -d cplus_ci -tAc 'SELECT count(*) FROM pg_stat_database' | grep -qE '^[0-9]+$'
+          psql -h 127.0.0.1 -U cplus_monitor -d cplus_ci -tAc 'SELECT 1 FROM merchants LIMIT 1' 2>&1 | grep -q 'permission denied'
+          psql -h 127.0.0.1 -U cplus_monitor -d cplus_ci -tAc 'SHOW default_transaction_read_only' | grep -qx on
+          psql -h 127.0.0.1 -U cplus_ci -d cplus_ci -tAc "SELECT rolconnlimit FROM pg_roles WHERE rolname='cplus_monitor'" | grep -qx 3
+          # rejeu : idempotent, mot de passe renouvele, --sql n'ecrit rien
+          first="$(sed -n 's/^PG_EXPORTER_PASSWORD=//p' "$MON")"
+          bash scripts/create-monitoring-role.sh --monitoring-env "$MON"
+          [ "$(sed -n 's/^PG_EXPORTER_PASSWORD=//p' "$MON")" != "$first" ]
+          bash scripts/create-monitoring-role.sh --sql | grep -q 'GRANT pg_monitor TO cplus_monitor'
+          grep -qx 'ALERT_SMTP_HOST=x' "$MON"
       - name: npm audit (dependances de production, niveau high) — bloquant
         run: npm audit --omit=dev --audit-level=high
 
