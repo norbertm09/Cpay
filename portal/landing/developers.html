@@ -552,15 +552,15 @@ echo $link['short_url'];</code></pre>
           <p class="note">Les SDK 1.1.0 envoient <code>X-API-Key</code> mais pas encore <code>X-API-Secret</code> : utilisez-les avec une clé d'ancienne génération (sans secret) ou appelez l'API directement comme ci-dessus. Les sources sont remises par <a href="mailto:developers@c-pay.global">developers@c-pay.global</a> si votre gestionnaire de paquets ne trouve pas encore le paquet.</p>
 
           <h3>Archives à télécharger</h3>
-          <p class="note">Version 2.7.1. Vérifiez l'empreinte SHA-256 après téléchargement (<code>sha256sum fichier.zip</code>).</p>
+          <p class="note">Version 2.7.2. Vérifiez l'empreinte SHA-256 après téléchargement (<code>sha256sum fichier.zip</code>).</p>
           <div class="card mb-4">
             <div class="dl-card">
               <div>
-                <h4>Extension WooCommerce 2.7.1</h4>
+                <h4>Extension WooCommerce 2.7.2</h4>
                 <p>Ajoute C-Pay comme moyen de paiement dans WooCommerce 6.0+ (PHP 7.4+). Encaissement Mobile Money et lien de paiement ; configuration avec votre clé API et votre secret ; webhook signé vérifié par l'extension.</p>
-                <p class="note m-0">SHA-256 : <code class="hash">28154028c55290b502e0a15fa0d684c89ce35538104075e803707a665aea721c</code></p>
+                <p class="note m-0">SHA-256 : <code class="hash">0ec2d0332c5f6e3a12479643b77f37b6b1a7afb1b3455c8837610d5f0baf3756</code></p>
               </div>
-              <a class="btn btn--primary" href="/downloads/cpay-payment-gateway-v2.7.1.zip">Télécharger (84 Ko)</a>
+              <a class="btn btn--primary" href="/downloads/cpay-payment-gateway-v2.7.2.zip">Télécharger (84 Ko)</a>
             </div>
             <pre class="mt-4"><code>1. WordPress → Extensions → Ajouter → Téléverser l'archive
 2. Activer, puis WooCommerce → Réglages → Paiements → C-Pay
@@ -570,11 +570,11 @@ echo $link['short_url'];</code></pre>
           <div class="card">
             <div class="dl-card">
               <div>
-                <h4>SDK Android 2.7.1</h4>
+                <h4>SDK Android 2.7.2</h4>
                 <p>Bibliothèque Kotlin/Java (AAR, Android 5.0+ / API 21) pour encaisser depuis une application marchande. Les identifiants doivent venir de votre backend, jamais être embarqués dans l'APK.</p>
-                <p class="note m-0">SHA-256 : <code class="hash">a70b65e75587ee9cf454d5e1e8f37cdf40d2f3daa30739305225a6b9ef8df653</code></p>
+                <p class="note m-0">SHA-256 : <code class="hash">f1a8fa8167f27f266ca4931e4a12ca8f6064baa436f11b866ee05e5f44c5f2d7</code></p>
               </div>
-              <a class="btn btn--primary" href="/downloads/cpay-android-sdk-v2.7.1.zip">Télécharger (13 Ko)</a>
+              <a class="btn btn--primary" href="/downloads/cpay-android-sdk-v2.7.2.zip">Télécharger (13 Ko)</a>
             </div>
             <pre class="mt-4"><code>// Initialisation — identifiants fournis par votre serveur
 CPay.init(context, CPayConfig(apiKey = cleFournieParVotreServeur, env = CPayEnv.PRODUCTION))

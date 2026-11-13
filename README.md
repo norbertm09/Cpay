@@ -1,4 +1,4 @@
-# C-Pay 2.7.1 — production OVH
+# C-Pay 2.7.2 — production OVH
 
 Version production OVH de C-Pay (ex-CPlus) ; la version courante est celle du fichier `VERSION`.
 
