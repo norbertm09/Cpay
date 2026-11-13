@@ -32,6 +32,19 @@ Identifiants de bundle : `global.cpay.mobile` (iOS et Android), scheme `cpay`.
 Les réponses `410 { code: 'FEATURE_DISABLED' }` (et les routes supprimées) sont affichées comme « Fonctionnalité en cours d'intégration », jamais comme une erreur.
 Un encaissement `status: 'pending'` est suivi via `GET /api/v1/merchant/collect/:id/status` toutes les 3 s pendant 90 s, puis l'écran indique « En attente de confirmation ».
 
+## Structure du code (refonte, 2026-11-13)
+
+- `App.js` : écrans et navigation uniquement (React Native).
+- `src/core.js` : constantes (API, délais, confirmation forte), helpers (`money`, `compact`, `newIdempotencyKey`,
+  `fmtDate`, `parseAmount`), erreurs (`ApiError`, `AuthError`, `isFeatureUnavailable`, `userMessage`), opérateurs et
+  libellés de statut (`operatorLabel`, `operatorCodeFor`, `transferStatusLabel`, `isUncertainStatus`). Aucune dépendance
+  React Native.
+- `src/auth-client.js` : `createAuthClient({ apiBase, fetchImpl, storage, now })` — magasin de session, stockage
+  sécurisé (jetons et profil séparés), rafraîchissement proactif à vol unique, rejeu unique sur 401, `apiFetch`,
+  `logout`. `fetch` et le stockage sont injectés : `expo-secure-store` dans l'application, mémoire dans les tests.
+- `test/*.test.js` : `npm test` (`node --test`, aucune dépendance de test) — 9 cas couvrant le flux d'authentification
+  décrit ci-dessus et les helpers. Exécuté en CI avec la transformation Babel (`npm run check`).
+
 ## Configuration
 
 Variable d'environnement (lue au build par Expo) :

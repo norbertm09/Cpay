@@ -10,7 +10,8 @@
     "build:android": "eas build -p android",
     "build:ios": "eas build -p ios",
     "doctor": "npx expo-doctor",
-    "check": "node -e \"require('@babel/core').transformFileSync('App.js',{presets:['babel-preset-expo'],filename:'App.js',babelrc:false,configFile:false});console.log('App.js OK')\""
+    "check": "node -e \"const b=require('@babel/core');for(const f of ['App.js','src/core.js','src/auth-client.js']){b.transformFileSync(f,{presets:['babel-preset-expo'],filename:f,babelrc:false,configFile:false});console.log(f+' OK')}\"",
+    "test": "node --test test/core.test.js test/auth-client.test.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

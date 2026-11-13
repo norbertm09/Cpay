@@ -1,5 +1,15 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2-expo-refonte (2026-11-13) — application Expo : modules purs et tests
+* `App.js` (1 689 -> 1 468 lignes) ne garde que les ecrans ; `src/core.js` (constantes, helpers, erreurs, operateurs,
+  libelles, `isUncertainStatus`) et `src/auth-client.js` (`createAuthClient` : session, stockage securise, refresh
+  proactif a vol unique, rejeu unique sur 401, `apiFetch`, `logout` ; `fetch` et stockage injectes) sont sans
+  dependance React Native.
+* Tests `node --test` (`npm test`, 9 cas, aucune dependance de test) : flux d'authentification du README verifie
+  (persistance jetons / profil, ancienne session admin ignoree, refresh proactif, vol unique, rejeu 401, session
+  videe sur REFRESH_REUSED, conservee sur coupure reseau, Idempotency-Key, logout) et helpers. CI : `npm test` puis
+  Babel sur `App.js` et `src/`. README « Structure du code », MOBILE-STORES § 2.4.
+
 ## 2.7.2-targetsdk37 (2026-11-12) — Android : cible API 37
 * `targetSdk` 36 -> 37. Revue des changements de comportement d'Android 17 reserves aux apps ciblant l'API 37
   (widgets, MessageQueue, static final, ECH, permission reseau local, mots de passe au clavier physique, SMS OTP,
