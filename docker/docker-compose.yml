@@ -10,7 +10,7 @@ x-api: &api
   build:
     context: ..
     dockerfile: docker/Dockerfile.api
-  image: cplus-api:${CPLUS_TAG:-2.7.1}
+  image: cplus-api:${CPLUS_TAG:-2.7.2}
   restart: unless-stopped
   dns:
     - 8.8.8.8
@@ -132,7 +132,7 @@ services:
       args:
         APP_DIR: portal/merchant
         REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-merchant:${CPLUS_TAG:-2.7.1}
+    image: cplus-merchant:${CPLUS_TAG:-2.7.2}
     container_name: cplus-merchant-blue
     scale: ${CPAY_WEB_BLUE:-1}
     networks:
@@ -162,7 +162,7 @@ services:
       args:
         APP_DIR: portal/cardholder
         REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-cardholder:${CPLUS_TAG:-2.7.1}
+    image: cplus-cardholder:${CPLUS_TAG:-2.7.2}
     container_name: cplus-cardholder-blue
     scale: ${CPAY_WEB_BLUE:-1}
     networks:
@@ -192,7 +192,7 @@ services:
       args:
         APP_DIR: portal/admin
         REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-admin:${CPLUS_TAG:-2.7.1}
+    image: cplus-admin:${CPLUS_TAG:-2.7.2}
     container_name: cplus-admin-blue
     scale: ${CPAY_WEB_BLUE:-1}
     networks:
@@ -221,7 +221,7 @@ services:
       dockerfile: Dockerfile
       args:
         REACT_APP_API_BASE_URL: ${CPAY_API_BASE_URL:-https://api.c-pay.global}
-    image: cplus-partners:${CPLUS_TAG:-2.7.1}
+    image: cplus-partners:${CPLUS_TAG:-2.7.2}
     container_name: cplus-partners-blue
     scale: ${CPAY_WEB_BLUE:-1}
     networks:

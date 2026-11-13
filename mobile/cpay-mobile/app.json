@@ -2,13 +2,13 @@
   "expo": {
     "name": "C-Pay",
     "slug": "cpay-mobile",
-    "version": "2.7.1",
+    "version": "2.7.2",
     "orientation": "portrait",
     "scheme": "cpay",
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "global.cpay.mobile",
-      "buildNumber": "271",
+      "buildNumber": "272",
       "supportsTablet": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "global.cpay.mobile",
-      "versionCode": 271,
+      "versionCode": 272,
       "permissions": [
         "INTERNET"
       ],

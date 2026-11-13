@@ -1,6 +1,6 @@
 {
   "name": "cpay-cardholder-portal",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "private": true,
   "dependencies": {
     "react": "^19.3.1", "react-dom": "^19.3.1",

@@ -1,5 +1,19 @@
 # Changelog - ameliorations integrees
 
+## 2.7.2 (2026-11-13) — version de publication (Android Google Play, API et portails sans coupure)
+Version taguee `v2.7.2` : regroupe les lots `2.7.2-*` ci-dessous, livres sur `main` entre le 9 et le 13 novembre.
+* Android marchand (versionCode 4) : AGP 9.5 / Gradle 9.9 / API 37 (compile et cible), AndroidX 2026-09, OkHttp 5,
+  Room 2.8 ; session chiffree par `SecureStore` (Keystore AES-GCM, migration automatique de l'ancienne session),
+  fin des API depreciees ; idempotence, statut « incertain », suppression de compte, FLAG_SECURE (lot 4).
+* Backend : Express 5, SDK Anthropic 1.x, erreurs serveur assainies, mot de passe 10 caracteres, metriques et
+  alertes caisse (retraits incertains), audits du 10 novembre (§ 2 finances, § 3 comptes).
+* Exploitation : bascule bleu/vert sans coupure de l'API et des quatre portails, images GHCR deployees sans rebuild,
+  vhost hote versionne, supervision (Prometheus, Alertmanager, Grafana) mise en service et recettee en CI,
+  cles d'administration versionnees.
+* Portails : React 19 / Router 7 / Vite 7 ; application Expo : modules purs testes, SDK 54, mode marchand seul.
+* Archives integrateurs 2.7.2 (SDK Android, extension WooCommerce) et page developpeurs mises a jour par
+  `build-archives.sh --update-landing` (motifs adaptes a la landing refondue).
+
 ## 2.7.2-expo-refonte (2026-11-13) — application Expo : modules purs et tests
 * `App.js` (1 689 -> 1 468 lignes) ne garde que les ecrans ; `src/core.js` (constantes, helpers, erreurs, operateurs,
   libelles, `isUncertainStatus`) et `src/auth-client.js` (`createAuthClient` : session, stockage securise, refresh

@@ -87,14 +87,16 @@ def one(pattern, repl, text):
     text, n = re.subn(pattern, repl, text, count=1, flags=re.S)
     if n != 1: sys.exit(f"developers.html : motif introuvable {pattern!r}")
     return text
-s = one(r'(Les archives ci-dessous sont celles de la version )[0-9]+(\.[0-9]+)*', r'\g<1>' + env['VERSION'], s)
+# Landing refondue (2.7.2) : « Version X.Y.Z. » dans la note, <h4>Titre X.Y.Z</h4> et <code class="hash"> ; motifs d'avant conserves
+s = one(r'(Les archives ci-dessous sont celles de la version |<p class="note">Version )[0-9]+(\.[0-9]+)*', r'\g<1>' + env['VERSION'], s)
 for zip_name, sha, kb, title in ((env['PLUGIN_ZIP'], env['PLUGIN_SHA'], env['PLUGIN_KB'], 'Extension WooCommerce'),
                                  (env['SDK_ZIP'], env['SDK_SHA'], env['SDK_KB'], 'SDK Android')):
     base = zip_name.rsplit('-v', 1)[0]
     # bloc <div class="dl-card"> contenant le titre : SHA-256, lien et taille
-    start = s.index('<h3>' + title + '</h3>'); end = s.index('</div>\n          <pre', start)
+    start = s.index('<h4>' + title) if ('<h4>' + title) in s else s.index('<h3>' + title + '</h3>'); end = s.index('<pre', start)  # le bloc s'arrete au <pre> qui suit (instructions d'installation)
     block = s[start:end]
-    block = one(r'(SHA-256 : <code>)[0-9a-f]+', r'\g<1>' + sha, block)
+    block = one(r'(SHA-256 : <code(?: class="hash")?>)[0-9a-f]+', r'\g<1>' + sha, block)
+    block = re.sub(r'(<h4>' + re.escape(title) + r' )[0-9]+(\.[0-9]+)*', r'\g<1>' + env['VERSION'], block, count=1)
     block = one(r'href="/downloads/' + re.escape(base) + r'-v[0-9.]+\.zip">Télécharger \([0-9]+ Ko\)', f'href="/downloads/{zip_name}">Télécharger ({kb} Ko)', block)
     s = s[:start] + block + s[end:]
 open(path, 'w', encoding='utf-8').write(s)
