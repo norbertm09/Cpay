@@ -613,7 +613,7 @@ jobs:
         run: bash scripts/check-version.sh
       - name: Bibliotheque env.sh (lecture .env sans execution, valeurs piegees)
         run: bash scripts/tests/env-lib.test.sh
-      - name: rotate-secrets.sh (lot 0 : rotation sur un .env temporaire, _PREVIOUS, --clear-previous, ecriture atomique)
+      - name: rotate-secrets.sh (lot 0, rotation sur un .env temporaire, _PREVIOUS, --clear-previous, ecriture atomique)
         run: bash scripts/tests/rotate-secrets.test.sh
       - name: Syntaxe des scripts shell
         run: |
