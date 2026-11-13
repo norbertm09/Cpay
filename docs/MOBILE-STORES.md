@@ -163,6 +163,16 @@ politique de confidentialité, demande et annulation de suppression de compte), 
 `allowBackup=false` ; `eas.json` : `appVersionSource=local` (versions tenues par `scripts/bump-version.sh`),
 `EXPO_PUBLIC_API_BASE_URL` par profil (`preview` → serveur de dev, `production` → production).
 
+Refonte (2026-11-13) : la logique pure est sortie d'`App.js` (de 1 689 à 1 468 lignes) dans `src/core.js` (constantes,
+helpers, erreurs, opérateurs, libellés) et `src/auth-client.js` (session, rafraîchissement, client HTTP, `fetch` et
+stockage injectés) ; 9 tests `node --test` (`npm test`) couvrent le flux d'authentification (persistance séparée des
+jetons et du profil, rejet d'une ancienne session admin, refresh proactif à vol unique, rejeu unique sur 401, session
+vidée sur `REFRESH_REUSED`, session conservée sur coupure réseau, Idempotency-Key transmise, logout) et les helpers.
+La CI exécute `npm test` puis la transformation Babel d'`App.js` et de `src/`. Alignement vérifié avec l'app native :
+libellé `sending`, mot de passe 10 caractères, statut `unknown` jamais traité en succès, 410 `FEATURE_DISABLED` seul
+masqué. Le build EAS n'est pas exécutable depuis l'environnement de développement (compte Expo requis) : premier
+`eas build -p android --profile preview` à lancer depuis le poste avec `EXPO_TOKEN`.
+
 Reste à faire avant la soumission : renseigner `submit.production.ios.appleTeamId` (Team ID Apple) dans `eas.json`,
 produire les captures iPhone 6,7" et 6,5" depuis un build `preview`, et remplir la fiche « Confidentialité de l'app »
 (mêmes réponses que la fiche Sécurité des données Google Play).

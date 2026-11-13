@@ -218,13 +218,11 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/cpay-mobile/package-lock.json
       - run: npm ci --no-audit --no-fund
-      - name: Babel (babel-preset-expo) sur App.js
-        run: |
-          node -e "
-            const babel = require('@babel/core');
-            const out = babel.transformFileSync('App.js', { presets: ['babel-preset-expo'], filename: 'App.js', babelrc: false, configFile: false });
-            console.log('App.js : ' + out.code.length + ' octets transformes');
-          "
+      # Refonte Expo (2026-11-13) : les modules purs src/core.js et src/auth-client.js sont testes avec node --test
+      - name: Tests des modules purs (node --test)
+        run: npm test
+      - name: Babel (babel-preset-expo) sur App.js et src/
+        run: npm run check
 
   # ────────────────────────────────────────────────────────────────
   android:

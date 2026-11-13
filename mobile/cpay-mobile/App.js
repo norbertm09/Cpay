@@ -21,30 +21,25 @@ import * as Clipboard from 'expo-clipboard';
 import { StatusBar } from 'expo-status-bar';
 import QRCode from 'react-native-qrcode-svg';
 
+// ─── Modules purs (refonte Expo 2026-11-13) : src/core.js (constantes, helpers, libelles) et src/auth-client.js
+// (session, rafraichissement, client HTTP) sont sans dependance React Native et testes par `npm test`.
+import {
+  API_BASE, API, FEATURE_PENDING, PENDING_CONFIRMATION, POLL_INTERVAL_MS, POLL_MAX_MS, STEP_UP_ATTEMPTS,
+  money, compact, newIdempotencyKey, fmtDate, parseAmount, ApiError, AuthError, isFeatureUnavailable, userMessage,
+  CASH_TYPES, OPERATORS, QUICK_AMOUNTS, operatorLabel, operatorCodeFor, transferStatusLabel,
+} from './src/core';
+import { createAuthClient } from './src/auth-client';
+
 // ─── Configuration ───────────────────────────────────────────────
-const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://api.c-pay.global';
-const API = `${API_BASE}/api/v1`;
 const APP_NAME = 'C-Pay';
 const APP_EDITOR = 'Calculus Plus SAS';
 const APP_VERSION = require('./app.json').expo.version;
 const POLICY_URL = 'https://c-pay.global/legal/confidentialite.html';
 const DELETION_URL = 'https://c-pay.global/legal/suppression-compte.html';
 
-// Message affiche pour toute fonction desactivee cote serveur (410 FEATURE_DISABLED)
-// ou pour une route qui n'existe plus (404 sans corps JSON).
-const FEATURE_PENDING = 'Fonctionnalité en cours d’intégration';
-const PENDING_CONFIRMATION = 'En attente de confirmation';
-
-// Rafraichissement proactif : 60 s avant l'expiration de l'access token (15 min).
-const REFRESH_MARGIN_MS = 60 * 1000;
-const DEFAULT_EXPIRES_IN = 900;
-
-// Suivi d'un encaissement en attente : toutes les 3 s pendant 90 s maximum.
-const POLL_INTERVAL_MS = 3000;
-const POLL_MAX_MS = 90 * 1000;
-
-// Confirmation forte (caisse) : nombre de saisies avant abandon.
-const STEP_UP_ATTEMPTS = 3;
+// Client de session : fetch global de React Native + expo-secure-store (Keychain / Keystore)
+const authClient = createAuthClient({ apiBase: API, fetchImpl: (...a) => fetch(...a), storage: SecureStore });
+const { MODE, authStore, loadStoredSession, sessionFromResponse, apiFetch, logout } = authClient;
 
 const C = {
   bg: '#f6f8fb',
@@ -59,198 +54,6 @@ const C = {
   green: '#12805c',
   amber: '#b26a00',
 };
-
-const money = (v, currency = '') => `${Number(v || 0).toLocaleString('fr-FR')} ${currency || ''}`.trim();
-const compact = (s) => String(s || '').replace(/\s+/g, ' ').trim();
-const newIdempotencyKey = () => `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
-
-// ─── Erreurs API ─────────────────────────────────────────────────
-class ApiError extends Error {
-  constructor(message, { status = 0, code = null, data = null } = {}) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.code = code;
-    this.data = data;
-  }
-}
-
-class AuthError extends Error {
-  constructor(message = 'Session expirée, veuillez vous reconnecter') {
-    super(message);
-    this.name = 'AuthError';
-  }
-}
-
-// 410 FEATURE_DISABLED uniquement (lot 5, audit 2026-11-02 mobile P1-7) : un 404 est une vraie erreur
-// (route mal configuree) et ne doit plus etre maquille en « en cours d'intégration ».
-const isFeatureUnavailable = (err) => !!err && (err.code === 'FEATURE_DISABLED' || err.status === 410);
-
-const userMessage = (err) => (isFeatureUnavailable(err) ? FEATURE_PENDING : err?.message || 'Erreur inattendue');
-
-// ─── Session (expo-secure-store) ─────────────────────────────────
-// Forme : { mode: 'merchant', accessToken, refreshToken, expiresAt, user, mustChangePassword }
-// Les jetons sont stockes dans le Keychain / Keystore (expo-secure-store), jamais
-// dans AsyncStorage. Le profil utilisateur (non secret) est stocke a part pour
-// rester sous la limite de 2 Ko par entree de SecureStore. AsyncStorage ne garde
-// que des preferences non sensibles (dernier mode de connexion).
-const SECURE_SESSION_KEY = 'cpay.session';
-const SECURE_USER_KEY = 'cpay.user';
-// Lot 5 : application MARCHANDE uniquement (le mode administrateur a ete retire, audit 2026-11-02 mobile P1-6)
-const MODE = 'merchant';
-
-const secureGet = async (key) => {
-  try { return await SecureStore.getItemAsync(key); } catch { return null; }
-};
-const secureSet = async (key, value) => {
-  try { await SecureStore.setItemAsync(key, value); } catch { /* SecureStore indisponible (web, simulateur) : session en memoire seulement */ }
-};
-const secureDelete = async (key) => {
-  try { await SecureStore.deleteItemAsync(key); } catch { /* idem */ }
-};
-
-async function loadStoredSession() {
-  const [raw, rawUser] = await Promise.all([secureGet(SECURE_SESSION_KEY), secureGet(SECURE_USER_KEY)]);
-  if (!raw) return null;
-  try {
-    const base = JSON.parse(raw);
-    if (!base?.accessToken || !base?.refreshToken || base?.mode !== MODE) return null; // une ancienne session admin est ignoree
-    let user = null;
-    try { user = rawUser ? JSON.parse(rawUser) : null; } catch { user = null; }
-    return { ...base, user };
-  } catch {
-    return null;
-  }
-}
-
-async function persistSession(session) {
-  if (!session) {
-    await Promise.all([secureDelete(SECURE_SESSION_KEY), secureDelete(SECURE_USER_KEY)]);
-    return;
-  }
-  const { user, ...tokens } = session;
-  await Promise.all([
-    secureSet(SECURE_SESSION_KEY, JSON.stringify(tokens)),
-    secureSet(SECURE_USER_KEY, JSON.stringify(user || null)),
-  ]);
-}
-
-// Magasin de session partage entre les ecrans React et le client HTTP : quand un
-// refresh echoue dans apiFetch, la session est videe ici et l'UI revient au login.
-const authStore = {
-  session: null,
-  listeners: new Set(),
-  get() { return this.session; },
-  async set(next) {
-    this.session = next;
-    this.listeners.forEach((fn) => fn(next));
-    await persistSession(next);
-  },
-  subscribe(fn) {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  },
-};
-
-// Construit une session a partir d'une reponse { access_token, refresh_token, expires_in, user|admin, mustChangePassword }
-const sessionFromResponse = (mode, data, previous = null) => ({
-  mode,
-  accessToken: data.access_token,
-  refreshToken: data.refresh_token,
-  expiresAt: Date.now() + (Number(data.expires_in) || DEFAULT_EXPIRES_IN) * 1000,
-  user: data.user || previous?.user || null,
-  mustChangePassword: data.mustChangePassword !== undefined ? !!data.mustChangePassword : !!previous?.mustChangePassword,
-});
-
-// ─── Rafraichissement (vol unique) ───────────────────────────────
-// Un seul appel /auth/refresh a la fois : les requetes concurrentes attendent la
-// meme promesse. Le refresh est opaque et tourne a chaque usage ; reutiliser un
-// jeton consomme renvoie 401 REFRESH_REUSED et revoque toutes les sessions.
-let refreshInFlight = null;
-
-async function doRefresh() {
-  const current = authStore.get();
-  if (!current?.refreshToken) throw new AuthError();
-  let res;
-  let data = {};
-  try {
-    res = await fetch(`${API}/${current.mode}/auth/refresh`, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: current.refreshToken }),
-    });
-    data = await res.json().catch(() => ({}));
-  } catch (networkErr) {
-    // Reseau indisponible : on garde la session, l'appelant recevra une erreur reseau.
-    throw new ApiError('Réseau indisponible', { status: 0, code: 'NETWORK' });
-  }
-  if (!res.ok || !data.access_token || !data.refresh_token) {
-    await authStore.set(null);
-    throw new AuthError(data.code === 'REFRESH_REUSED' ? 'Session révoquée par sécurité, veuillez vous reconnecter' : undefined);
-  }
-  const next = sessionFromResponse(current.mode, data, current);
-  await authStore.set(next);
-  return next;
-}
-
-function refreshSession() {
-  if (!refreshInFlight) {
-    refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
-  }
-  return refreshInFlight;
-}
-
-// ─── Client HTTP ─────────────────────────────────────────────────
-// auth: true  -> Bearer + refresh proactif (< 60 s) + refresh unique sur 401 puis rejeu.
-// auth: false -> appel anonyme (login, 2FA, refresh, logout).
-async function apiFetch(path, { auth = true, method = 'GET', body, idempotencyKey, _retried = false } = {}) {
-  const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
-  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-
-  if (auth) {
-    let session = authStore.get();
-    if (!session?.accessToken) throw new AuthError();
-    if (!session.expiresAt || session.expiresAt - Date.now() < REFRESH_MARGIN_MS) {
-      session = await refreshSession();
-    }
-    headers.Authorization = `Bearer ${session.accessToken}`;
-  }
-
-  let res;
-  try {
-    res = await fetch(`${API}${path}`, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
-  } catch (e) {
-    throw new ApiError('Réseau indisponible', { status: 0, code: 'NETWORK' });
-  }
-  const data = await res.json().catch(() => ({}));
-
-  if (res.status === 401 && auth && !_retried) {
-    await refreshSession(); // jette AuthError (session videe) si le refresh echoue
-    return apiFetch(path, { auth, method, body, idempotencyKey, _retried: true });
-  }
-  if (res.status === 401 && auth) {
-    await authStore.set(null);
-    throw new AuthError();
-  }
-  if (!res.ok) {
-    throw new ApiError(data.error || data.message || `HTTP ${res.status}`, { status: res.status, code: data.code || null, data });
-  }
-  return data;
-}
-
-async function logout() {
-  const current = authStore.get();
-  if (current?.refreshToken) {
-    try {
-      await fetch(`${API}/${current.mode}/auth/logout`, {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${current.accessToken}` },
-        body: JSON.stringify({ refreshToken: current.refreshToken }),
-      });
-    } catch { /* le refresh expire de lui-meme cote serveur */ }
-  }
-  await authStore.set(null);
-}
 
 function useSession() {
   const [ready, setReady] = useState(false);
@@ -344,7 +147,7 @@ function AuthScreen() {
 
   const patch = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const finish = async (data) => { await authStore.set(sessionFromResponse(mode, data)); };
+  const finish = async (data) => { await authStore.set(sessionFromResponse(data)); };
 
   const submit = async () => {
     setLoading(true);
@@ -484,31 +287,6 @@ function MerchantApp({ tab, session, onNavigate }) {
 // ─── Caisse marchande (vague 4, docs/CAISSE-API.md) ──────────────
 // Vocation : encaisser (Mobile Money, carte), retirer vers son wallet, transférer
 // wallet ↔ banque, journal unique. Toute création de mouvement porte Idempotency-Key.
-const CASH_TYPES = [['', 'Tous'], ['collect', 'Encaissements'], ['withdraw', 'Retraits'], ['transfer_out', 'Vers banque'], ['transfer_in', 'Approvisionnements']];
-const OPERATORS = [['mtn_momo', 'MTN MoMo'], ['orange_money', 'Orange Money'], ['airtel_money', 'Airtel Money'], ['moov_money', 'Moov Money'], ['wave', 'Wave'], ['express_union', 'Express Union'], ['mpesa', 'M-Pesa'], ['free_money', 'Free Money']];
-const QUICK_AMOUNTS = [1000, 2000, 5000, 10000, 25000];
-
-const operatorLabel = (code) => {
-  if (!code) return 'Mobile Money';
-  const key = String(code).toLowerCase();
-  const hit = OPERATORS.find(([k]) => k === key) || OPERATORS.find(([k]) => k.startsWith(`${key}_`));
-  return hit ? hit[1] : String(code).replace(/_/g, ' ');
-};
-// Opérateur du wallet déduit d'une détection /detect/phone (codes MTN, ORANGE, WAVE…).
-const operatorCodeFor = (d) => {
-  const op = String(d?.operator || '').toLowerCase();
-  const brand = String(d?.brand || '§').toLowerCase();
-  const hit = OPERATORS.find(([k, l]) => k === op || k.startsWith(`${op}_`) || l.toLowerCase().includes(brand));
-  return hit ? hit[0] : null;
-};
-const transferStatusLabel = (st) => ({
-  pending: 'En attente', sending: 'Envoi en cours', processing: 'En cours', pending_manual: 'Traitement J+1', awaiting_funds: 'Virement attendu',
-  completed: 'Effectué', failed: 'Échoué', cancelled: 'Annulé', rejected: 'Rejeté', authorized: 'Autorisé', expired: 'Expiré',
-  unknown: 'Résultat incertain', // lot 5 (P1-2) : operateur muet, fonds reserves — jamais un succes
-}[st] || st || '—');
-const fmtDate = (iso) => (iso ? String(iso).slice(0, 16).replace('T', ' ') : '');
-const parseAmount = (v) => Number(String(v || '').replace(/\s/g, '').replace(',', '.'));
-
 // Messages dédiés aux codes de la caisse (INSUFFICIENT_BALANCE, DAILY_LIMIT_EXCEEDED, WALLET_MISSING…).
 const cashMessage = (err, currency = 'XAF') => {
   if (!err) return 'Erreur';
