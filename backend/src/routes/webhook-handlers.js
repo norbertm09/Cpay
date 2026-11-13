@@ -293,13 +293,19 @@ const handleMtnWebhook = async (req, res) => {
   //    callbacks : le jeton peut aussi être porté par l'URL (X-Callback-Url ...?token=<MTN_WEBHOOK_TOKEN>).
   //    Lot 1 (P0 #4) : en production, l'absence de jeton configuré refuse le callback (fail-closed) ; la
   //    réconciliation périodique finalise alors les transactions.
+  //    Lot 0 (rotation, 2026-11-13) : MTN_WEBHOOK_TOKEN_PREVIOUS reste accepte le temps de la rotation
+  //    (X-Callback-Url est envoyee a chaque requete : les paiements lances avant la rotation rappellent
+  //    l'ancien jeton) — scripts/rotate-secrets.sh mtn-token [--clear-previous].
   const token = process.env.MTN_WEBHOOK_TOKEN;
   if (token) {
-    const provided = req.headers['x-webhook-token'] || (req.query && req.query.token) || '';
-    if (!timingSafeEqualStr(String(provided || ''), token)) {
+    const provided = String(req.headers['x-webhook-token'] || (req.query && req.query.token) || '');
+    const previous = process.env.MTN_WEBHOOK_TOKEN_PREVIOUS;
+    const accepted = timingSafeEqualStr(provided, token) || (!!previous && timingSafeEqualStr(provided, previous));
+    if (!accepted) {
       await auditLog({ eventType: 'MTN_WEBHOOK_INVALID_TOKEN', actorType: 'system', ipAddress: req.ip, success: false });
       return res.status(401).json({ error: 'Jeton webhook invalide', code: 'INVALID_WEBHOOK_TOKEN' });
     }
+    if (!timingSafeEqualStr(provided, token)) logOnce('mtn_token_previous', 'callback MTN reçu avec l’ANCIEN jeton (MTN_WEBHOOK_TOKEN_PREVIOUS) — à retirer une fois les paiements antérieurs à la rotation terminés');
   } else if (process.env.NODE_ENV === 'production') {
     logOnce('mtn_token', 'MTN_WEBHOOK_TOKEN non configuré — callback MTN refusé en production (fail-closed) ; la réconciliation finalise les transactions');
     await auditLog({ eventType: 'MTN_WEBHOOK_NO_TOKEN', actorType: 'system', ipAddress: req.ip, success: false });

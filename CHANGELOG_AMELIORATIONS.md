@@ -1,5 +1,20 @@
 # Changelog - ameliorations integrees
 
+## 2.7.3-lot0-secrets (2026-11-13) — lot 0 : rotation des secrets, depot prive, CA PostgreSQL
+* `scripts/rotate-secrets.sh` (`status`, `db-password`, `webhook-secret`, `mtn-token`, `--clear-previous`) : met a jour
+  `backend/.env` de facon atomique (copie de secours 600, valeurs piegees, aucune valeur affichee) ; test de connexion
+  avant d'ecrire le mot de passe PostgreSQL ; URLs de callback a declarer affichees.
+* Rotation sans refus des callbacks en vol : `WEBHOOK_PATH_SECRET_PREVIOUS` (chemin secret des webhooks Mobile Money)
+  et `MTN_WEBHOOK_TOKEN_PREVIOUS` (callback MTN) acceptes pendant la rotation, journalises une fois, retires par
+  `--clear-previous`. Tests `lot0-rotation-secrets.test.js` (6 cas) et `scripts/tests/rotate-secrets.test.sh` en CI.
+* `scripts/github-deploy-key.sh` : cle SSH de lecture (deploy key) pour que le serveur continue de `git fetch` une fois
+  le depot prive ; `--switch` bascule `origin` en SSH, `--check` verifie l'acces.
+* Certificat CA PostgreSQL : `/etc/cplus/postgres-ca.pem` monte en lecture seule dans l'API (`x-api.volumes`,
+  `CPAY_PG_CA_FILE` pose par `deploy.sh` quand le fichier existe, avertissement si `DB_SSL_CA_FILE` est renseigne sans
+  fichier) — fin du mode `DB_SSL_REJECT_UNAUTHORIZED=false`.
+* Docs : `docs/LOT-0-SECRETS.md` (procedure ordonnee : mot de passe, depot prive + GHCR, PAT, rotation, CA, purge
+  optionnelle), EXPLOITATION § 7, runbook § 3, `.env.example`.
+
 ## 2.7.2 (2026-11-13) — version de publication (Android Google Play, API et portails sans coupure)
 Version taguee `v2.7.2` : regroupe les lots `2.7.2-*` ci-dessous, livres sur `main` entre le 9 et le 13 novembre.
 * Android marchand (versionCode 4) : AGP 9.5 / Gradle 9.9 / API 37 (compile et cible), AndroidX 2026-09, OkHttp 5,
