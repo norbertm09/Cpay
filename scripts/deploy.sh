@@ -340,6 +340,13 @@ else
 fi
 
 # ─── 3. Verification de l'environnement production ──────────────
+# Lot 0 (2026-11-13) : CA PostgreSQL de l'hote montee dans l'API (docker-compose.yml, x-api.volumes)
+PG_CA_HOST="${CPAY_PG_CA_FILE:-/etc/cplus/postgres-ca.pem}"
+if [ -s "$PG_CA_HOST" ]; then export CPAY_PG_CA_FILE="$PG_CA_HOST"; log "CA PostgreSQL : $PG_CA_HOST montee dans l'API"
+else
+  unset CPAY_PG_CA_FILE
+  [ -n "$(read_env_value "$ROOT/backend/.env" DB_SSL_CA_FILE)" ] && warn "DB_SSL_CA_FILE est renseigne dans backend/.env mais $PG_CA_HOST est absent de l'hote : l'API verifiera le certificat avec le magasin systeme (docs/LOT-0-SECRETS.md § 4)"
+fi
 log "Verification de backend/.env (check-production-env.js)…"
 compose run --rm --no-deps -T -e RUN_MIGRATIONS=false \
   -v "$ROOT/backend/scripts:/app/scripts:ro" api-blue node scripts/check-production-env.js \

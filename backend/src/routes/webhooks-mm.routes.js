@@ -404,14 +404,24 @@ const processWebhook = async (provider, req, res, { viaSecretPath = false, pathT
 
 // ─── Routeur secret : /api/v1/webhooks/<WEBHOOK_PATH_SECRET>/:provider ───
 
+// Lot 0 (rotation des secrets, 2026-11-13) : pendant la rotation, l'ancien segment reste accepte via
+// WEBHOOK_PATH_SECRET_PREVIOUS (scripts/rotate-secrets.sh webhook-secret) le temps que les callbacks des
+// operations en cours arrivent et que les operateurs declarent la nouvelle URL ; `--clear-previous` le retire.
 const secretGuard = (req, res, next) => {
   const expected = process.env.WEBHOOK_PATH_SECRET;
   if (!expected) {
     logOnce('path_secret', 'WEBHOOK_PATH_SECRET non configuré — webhooks secrets refusés');
     return res.status(404).end();
   }
-  if (!timingSafeEqualStr(String(req.params.secret || ''), String(expected))) return res.status(404).end();
-  next();
+  const provided = String(req.params.secret || '');
+  if (timingSafeEqualStr(provided, String(expected))) return next();
+  const previous = process.env.WEBHOOK_PATH_SECRET_PREVIOUS;
+  if (previous && timingSafeEqualStr(provided, String(previous))) {
+    logOnce('path_secret_previous', 'webhook reçu sur l’ANCIEN segment secret (WEBHOOK_PATH_SECRET_PREVIOUS) — mettre à jour l’URL chez l’opérateur, puis rotate-secrets.sh webhook-secret --clear-previous');
+    req.webhookSecretPrevious = true;
+    return next();
+  }
+  return res.status(404).end();
 };
 
 const secretRouter = express.Router();

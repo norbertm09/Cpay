@@ -20,6 +20,11 @@ x-api: &api
   environment:
     NODE_ENV: production
     RUN_MIGRATIONS: "true"
+  # Lot 0 (2026-11-13) : certificat CA PostgreSQL (export du manager OVH) depose sur l'hote en
+  # /etc/cplus/postgres-ca.pem et monte au meme chemin (DB_SSL_CA_FILE=/etc/cplus/postgres-ca.pem dans backend/.env).
+  # CPAY_PG_CA_FILE est pose par scripts/deploy.sh quand le fichier existe ; sinon /dev/null (fichier vide, ignore).
+  volumes:
+    - ${CPAY_PG_CA_FILE:-/dev/null}:/etc/cplus/postgres-ca.pem:ro
   expose:
     - "3000"
   healthcheck:

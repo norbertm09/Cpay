@@ -116,5 +116,8 @@ preuve, administrateur). Les ordres en attente de décision : `GET /api/v1/admin
 - Journal API : `docker logs cplus-api-blue --since 10m` (ou `cplus-api-green` : la couleur active est dans
   `docker/api-router/active/active.conf`) ; les réponses 5xx ne contiennent plus le détail interne
   (reliquat 2026-11) — chercher le `requestId` renvoyé au client dans le journal.
+- Secret compromis (mot de passe base, segment webhook, jeton MTN) : `docs/LOT-0-SECRETS.md` —
+  `scripts/rotate-secrets.sh` puis `./scripts/deploy.sh --skip-backup --skip-migrations` (sans coupure) ; l'ancienne
+  valeur reste acceptée via `*_PREVIOUS` le temps des callbacks en vol, puis `--clear-previous`.
 - Supervision : Grafana / Prometheus (`docs/EXPLOITATION.md` § 3) ; alertes `APIDown`, `PostgreSQLDown`,
   `HostRebootRequired`, `BackupFailed` / `BackupStale`, certificats.
