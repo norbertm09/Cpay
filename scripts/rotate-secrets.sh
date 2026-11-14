@@ -8,6 +8,8 @@
 #   ./scripts/rotate-secrets.sh webhook-secret --clear-previous
 #   ./scripts/rotate-secrets.sh mtn-token                    # nouveau MTN_WEBHOOK_TOKEN (+ MTN_CG_CALLBACK_URL ?token=…)
 #   ./scripts/rotate-secrets.sh mtn-token --clear-previous
+#   ./scripts/rotate-secrets.sh set ANTHROPIC_API_KEY        # toute variable secrete : saisie masquee (ou CPAY_SET_VALUE_FILE), sans echo
+#   ./scripts/rotate-secrets.sh unset <NOM>
 #
 # Regles :
 #   - rien n'est affiche ni journalise en clair : les nouvelles valeurs vont dans backend/.env (600) et c'est tout ;
@@ -32,7 +34,7 @@ ENV_FILE="${CPAY_ENV_FILE:-$ROOT/backend/.env}"
 log()  { printf '[rotate] %s\n' "$*"; }
 warn() { printf '[rotate] WARN %s\n' "$*" >&2; }
 die()  { printf '[rotate] ERREUR %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,24p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,26p' "$0"; exit "${1:-0}"; }
 
 [ -f "$ENV_FILE" ] || die "$ENV_FILE introuvable"
 [ -r "$ENV_FILE" ] || die "$ENV_FILE illisible (lancer avec l'utilisateur proprietaire ou sudo)"
@@ -161,11 +163,34 @@ cmd_db_password() {
   log "Enfin : history -c"
 }
 
+cmd_set() {
+  local name="$1" v v2
+  case "$name" in *[!A-Z0-9_]*|'') die "nom de variable invalide : $name (majuscules, chiffres, _)" ;; esac
+  if [ -n "${CPAY_SET_VALUE_FILE:-}" ]; then v="$(tr -d '\r\n' < "$CPAY_SET_VALUE_FILE")"
+  else
+    [ -t 0 ] || die "pas de terminal : fournir CPAY_SET_VALUE_FILE=<fichier 600 contenant la valeur>"
+    printf 'Valeur de %s (saisie masquee) : ' "$name"; read -r -s v; printf '\n'
+    printf 'Confirmer : '; read -r -s v2; printf '\n'
+    [ "$v" = "$v2" ] || die "les deux saisies different"
+  fi
+  [ -n "$v" ] || die "valeur vide (utiliser 'unset $name' pour retirer la variable)"
+  backup_env; set_env_var "$name" "$v"
+  log "$name inscrit dans $ENV_FILE (valeur non affichee)"; restart_hint; log "Enfin : history -c"
+}
+cmd_unset() {
+  local name="$1"
+  case "$name" in *[!A-Z0-9_]*|'') die "nom de variable invalide : $name" ;; esac
+  has_value "$name" || { log "$name deja absent"; return 0; }
+  backup_env; unset_env_var "$name"; log "$name retire de $ENV_FILE"; restart_hint
+}
+
 case "${1:-}" in
   status)          cmd_status ;;
+  set)             cmd_set "${2:-}" ;;
+  unset)           cmd_unset "${2:-}" ;;
   webhook-secret)  cmd_webhook_secret "${2:-}" ;;
   mtn-token)       cmd_mtn_token "${2:-}" ;;
   db-password)     cmd_db_password ;;
   -h|--help|'')    usage 0 ;;
-  *) die "commande inconnue : $1 (status | db-password | webhook-secret [--clear-previous] | mtn-token [--clear-previous])" ;;
+  *) die "commande inconnue : $1 (status | db-password | webhook-secret [--clear-previous] | mtn-token [--clear-previous] | set <NOM> | unset <NOM>)" ;;
 esac

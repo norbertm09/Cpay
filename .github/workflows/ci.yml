@@ -116,6 +116,15 @@ jobs:
           [ "$(sed -n 's/^PG_EXPORTER_PASSWORD=//p' "$MON")" != "$first" ]
           bash scripts/create-monitoring-role.sh --sql | grep -q 'GRANT pg_monitor TO cplus_monitor'
           grep -qx 'ALERT_SMTP_HOST=x' "$MON"
+      - name: Go / no-go Congo-Brazzaville (scripts/check-go-live-cg.js, environnement synthetique complet puis incomplet)
+        run: |
+          set -e
+          FULL="API_BASE_URL=https://api.c-pay.global MTN_ENV=production MTN_CG_COLL_API_USER=u MTN_CG_COLL_API_KEY=k MTN_CG_COLL_SUB_KEY_PRIMARY=s MTN_CG_DISB_API_USER=u MTN_CG_DISB_API_KEY=k MTN_CG_DISB_SUB_KEY_PRIMARY=s MTN_WEBHOOK_TOKEN=tok MTN_CG_CALLBACK_URL=https://api.c-pay.global/api/v1/webhooks/mtn?token=tok AIRTEL_CG_ENV=production AIRTEL_CG_COLL_CLIENT_ID=i AIRTEL_CG_COLL_CLIENT_SECRET=s AIRTEL_CG_DISB_CLIENT_ID=i AIRTEL_CG_DISB_CLIENT_SECRET=s AIRTEL_WEBHOOK_SECRET=w WEBHOOK_PATH_SECRET=seg DB_SSL=true CAPABILITY_FUNDING_XAF=true ANTHROPIC_API_KEY=sk-ant-ci"
+          env $FULL node scripts/check-go-live-cg.js --no-db | tee /tmp/golive.txt
+          grep -q '^Prêt' /tmp/golive.txt
+          ! grep -q 'sk-ant-ci\|token=tok' /tmp/golive.txt          # aucun secret dans la sortie
+          if env MTN_ENV=sandbox DB_SSL=false node scripts/check-go-live-cg.js --no-db >/dev/null; then echo '::error::environnement incomplet accepte'; exit 1; fi
+          env MTN_ENV=sandbox DB_SSL=false node scripts/check-go-live-cg.js --no-db --json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const r=JSON.parse(d);if(r.ready||r.ko<3)process.exit(1)})"
       - name: npm audit (dependances de production, niveau high) — bloquant
         run: npm audit --omit=dev --audit-level=high
 

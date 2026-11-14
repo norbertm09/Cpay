@@ -1,5 +1,18 @@
 # Changelog - ameliorations integrees
 
+## 2.7.3-go-live-cg (2026-11-14) — finalisation Congo-Brazzaville et activation de l'assistant virtuel
+* `backend/scripts/check-go-live-cg.js` + `scripts/check-go-live-cg.sh` : go / no-go du lancement CG (environnement MTN
+  resolu, identifiants collection / disbursement, jeton et URL de callback MTN coherents, Airtel, segment secret et
+  rotations en cours, registre de capacites CG, CAPABILITY_ENFORCE / PILOT, TLS PostgreSQL, assistant, allowlist nginx
+  et couleur active depuis l'hote) ; aucun secret affiche ; code 1 tant qu'il reste un KO. Tests jest (5 cas) et CI
+  (environnement synthetique complet puis incomplet).
+* `rotate-secrets.sh set <NOM>` / `unset <NOM>` : saisie masquee de tout secret simple (ANTHROPIC_API_KEY, identifiants
+  operateurs), ecriture atomique ; tests.
+* Assistant virtuel : implementation verifiee (SDK 1.x, repli serveur, outils stricts, SSE non tamponne) ;
+  procedure d'activation, verification et desactivation dans ASSISTANT-API § 5.
+* GO-LIVE-CG : chemins du lot 0 (CA PostgreSQL, deploy.sh au lieu de `compose up -d api`), variables Airtel (les
+  `AIRTEL_CG_COLL_*` suffisent au provider), § 6 etat au 14 novembre et reste a faire ordonne.
+
 ## 2.7.3-exporter-role (2026-11-13) — role PostgreSQL en lecture seule pour l'exporter Prometheus
 * `scripts/create-monitoring-role.sh` : cree ou met a jour le role `cplus_monitor` (`pg_monitor`, CONNECT, 3 connexions,
   `statement_timeout` 5 s, `default_transaction_read_only`, REVOKE sur les tables et sequences du schema public), verifie
