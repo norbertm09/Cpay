@@ -57,10 +57,18 @@ CPAY_SKIP_DB_TEST=true CPAY_NEW_DB_PASSWORD_FILE="$D/pw2" run db-password >/dev/
 printf "%s\n" "avec'quote-et-seize-caracteres" > "$D/pw3"
 CPAY_SKIP_DB_TEST=true CPAY_NEW_DB_PASSWORD_FILE="$D/pw3" run db-password >/dev/null 2>&1 && ko "db-password : guillemet simple accepte" || ok "db-password : guillemet simple refuse"
 
+# --- set / unset (ANTHROPIC_API_KEY et autres secrets simples)
+printf 'sk-ant-api03-EXEMPLE_cle (test)\n' > "$D/key"; chmod 600 "$D/key"
+CPAY_SET_VALUE_FILE="$D/key" run set ANTHROPIC_API_KEY >"$D/out4" 2>&1 || ko "set (code retour)"
+[ "$(val ANTHROPIC_API_KEY)" = "sk-ant-api03-EXEMPLE_cle (test)" ] && ok "set : valeur ecrite et relue" || ko "set : [$(val ANTHROPIC_API_KEY)]"
+grep -q "EXEMPLE" "$D/out4" && ko "set : valeur affichee" || ok "set : valeur non affichee"
+CPAY_SET_VALUE_FILE="$D/key" run set "mauvais nom" >/dev/null 2>&1 && ko "set : nom invalide accepte" || ok "set : nom invalide refuse"
+run unset ANTHROPIC_API_KEY >/dev/null 2>&1 && [ -z "$(val ANTHROPIC_API_KEY)" ] && ok "unset" || ko "unset"
+
 # --- invariants
 [ "$(val AUTRE)" = "inchange" ] && ok "autres variables intactes" || ko "autres variables"
 [ "$(stat -c %a "$F")" = "600" ] && ok "droits 600 conserves" || ko "droits : $(stat -c %a "$F")"
-[ "$(ls "$D"/.env.bak-* 2>/dev/null | wc -l)" -ge 5 ] && ok "copies de secours creees" || ko "copies de secours"
+[ "$(ls "$D"/.env.bak-* 2>/dev/null | wc -l)" -ge 7 ] && ok "copies de secours creees" || ko "copies de secours"
 for b in "$D"/.env.bak-*; do [ "$(stat -c %a "$b")" = "600" ] || ko "copie de secours $b en $(stat -c %a "$b")"; done
 
 [ "$fail" -eq 0 ] && echo "rotate-secrets.sh : OK" || { echo "rotate-secrets.sh : ECHEC"; exit 1; }
