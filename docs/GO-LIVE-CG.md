@@ -130,25 +130,30 @@ AIRTEL_WEBHOOK_SECRET=…            # OBLIGATOIRE : sans lui les callbacks Airt
 CAPABILITY_ENFORCE=report
 CAPABILITY_PILOT_CG=true           # ouverture restreinte du pays pendant le pilote
 
-# Hygiène (points ouverts des vagues précédentes)
+# Hygiène (lot 0, docs/LOT-0-SECRETS.md § 4)
 DB_SSL=true
-DB_SSL_CA_FILE=/opt/cplus/backend/ovh-ca.pem          # certificat CA téléchargé depuis le manager OVH
-DB_SSL_REJECT_UNAUTHORIZED=true                        # retirer l'ancien false
-# NODE_TLS_REJECT_UNAUTHORIZED=0  ← à SUPPRIMER
+DB_SSL_CA_FILE=/etc/cplus/postgres-ca.pem             # certificat CA du manager OVH, déposé sur l'hôte à ce chemin (monté dans l'API par deploy.sh)
+# DB_SSL_REJECT_UNAUTHORIZED=false  ← à SUPPRIMER (certificat non vérifié)
+# NODE_TLS_REJECT_UNAUTHORIZED=0    ← à SUPPRIMER
 ```
+
+Les secrets se saisissent sans écho avec `./scripts/rotate-secrets.sh set <NOM>` (copie de secours, écriture atomique) ;
+`MTN_WEBHOOK_TOKEN` et `MTN_CG_CALLBACK_URL` se génèrent ensemble avec `./scripts/rotate-secrets.sh mtn-token`.
 
 Ces variables suffisent : `MTN_CG_COLL_*` alimentent l'encaissement MTN (provider `mtn_cg` du routeur : API user,
 API key, clé d'abonnement Collection) et `MTN_CG_DISB_*` le retrait ; `AIRTEL_CG_COLL_CLIENT_ID` /
-`AIRTEL_CG_COLL_CLIENT_SECRET` ne sont lus que par l'écran admin : pour le provider `airtel_cg`, renseigner aussi
-`AIRTEL_CG_CLIENT_ID`, `AIRTEL_CG_CLIENT_SECRET` et `AIRTEL_CG_BASE_URL` (mêmes valeurs). `GET /api/v1/public/capabilities`
-doit alors afficher `active` pour MTN MoMo et Airtel Money au Congo.
+`AIRTEL_CG_COLL_CLIENT_SECRET` et `AIRTEL_CG_BASE_URL` alimentent aussi le provider `airtel_cg` (repli documenté de
+`mobilemoney.router.buildConfigFromEnv`, novembre 2026 : plus besoin de dupliquer en `AIRTEL_CG_CLIENT_ID`).
+`GET /api/v1/public/capabilities` doit alors afficher `active` (ou `pilot` avec `CAPABILITY_PILOT_CG=true`) pour
+MTN MoMo et Airtel Money au Congo.
 
 Les gateways du routeur Mobile Money (`mtn_cg`, `airtel_cg`) se configurent aussi par l'admin
 (`PUT /api/v1/admin/api-configs/<gateway>` : `baseUrl`, `apiKey`, `apiSecret`, `extra_params`) ; pour MTN,
 `extra_params.targetEnvironment` prime sur `MTN_ENV` si vous voulez un réglage par gateway.
 
-Contrôle : `cd /opt/cplus/docker && docker compose run --rm --no-deps -T -e RUN_MIGRATIONS=false -v "$PWD/../backend/scripts:/app/scripts:ro" api node scripts/check-production-env.js`
-(l'image doit être construite : voir 1.5 ; l'état MTN résolu est visible sur `GET /api/v1/admin/api-configs/env-status`).
+Contrôle : `./scripts/check-go-live-cg.sh` (go / no-go complet, voir § 6) ou, pour les seules variables obligatoires,
+`cd /opt/cplus/docker && docker compose run --rm --no-deps -T -e RUN_MIGRATIONS=false -v "$PWD/../backend/scripts:/app/scripts:ro" api-blue node scripts/check-production-env.js`
+(l'état MTN résolu est aussi visible sur `GET /api/v1/admin/api-configs/env-status`).
 
 ### 1.5 [serveur nouveau] Premier déploiement, à blanc
 
@@ -279,7 +284,9 @@ AIRTEL_CG_BASE_URL=https://openapi.airtel.africa
 ```
 
 ```sh
-cd /opt/cplus/docker && docker compose up -d api && docker compose logs --tail=50 api | grep -i "MTN-ENV\|listening"
+cd /opt/cplus && ./scripts/deploy.sh --skip-backup --skip-migrations      # bascule bleu/vert : l'API relit .env sans coupure
+docker logs cplus-api-$(sed -n 's/.*api-\([a-z]*\);.*/\1/p' docker/api-router/active/active.conf) --since 2m | grep -i "MTN-ENV\|listening"
+./scripts/check-go-live-cg.sh
 ```
 
 Aucune ligne `[MTN-ENV]` ne doit apparaître (elles signalent une incohérence sandbox/production).
@@ -319,6 +326,43 @@ avant l'ouverture commerciale.
 ## 5. Points toujours ouverts (hors périmètre technique)
 
 - contrats marchand / agrégateur signés avec MTN et Airtel, compte de règlement où atterrissent les encaissements ;
+- compte de collecte C-Pay en XAF (`platform_bank_accounts` actif, écran admin) pour l'approvisionnement banque → wallet ;
 - règle de reversement aux marchands (délai, frais) publiée dans le portail marchand (« Tarifs & frais ») ;
-- KYB des marchands pilotes, CGU et politique de remboursement ;
-- rotation du mot de passe Cloud DB, révocation de l'ancien jeton GitHub, dépôt en privé, nouveau `WEBHOOK_PATH_SECRET`.
+- KYB des marchands pilotes, CGU et politique de remboursement (textes chez l'avocat) ;
+- lot 0 (`docs/LOT-0-SECRETS.md`) : mot de passe Cloud DB, dépôt privé, jeton GitHub, rotation des secrets, CA PostgreSQL.
+
+## 6. État au 14 novembre 2026 et finalisation
+
+Fait depuis la rédaction de ce document : migration sur le VPS dédié (§ 1 et 2), version 2.7.2 en production avec bascule
+bleu/vert sans coupure, supervision (Prometheus, Alertmanager, Grafana) en service, application Android 2.7.2 signée
+et publiée sur GitHub, outillage du lot 0, assistant virtuel prêt (`docs/ASSISTANT-API.md` § 5). La partie « serveur »
+du go-live est donc **prête** ; ce qui reste dépend des identifiants de production et des opérateurs.
+
+### 6.1 Contrôle de préparation (go / no-go)
+
+```sh
+cd /opt/cplus && ./scripts/check-go-live-cg.sh          # --json, --no-db, --no-fail
+```
+
+Le script (`backend/scripts/check-go-live-cg.js`, exécuté dans l'image API avec le `backend/.env` de l'hôte) imprime un
+tableau OK / KO / AVERT / INFO avec la section à consulter : environnement MTN résolu (mode, `X-Target-Environment`,
+hôte, incohérences), identifiants collection et disbursement MTN, jeton et URL de callback MTN (chemin, hôte, jeton
+identique), Airtel (environnement, identifiants, secret de webhook), segment secret des webhooks et rotations en cours,
+registre de capacités pour le Congo (encaissement et retrait MTN / Airtel `active` ou `pilot`, approvisionnement XAF),
+`CAPABILITY_ENFORCE` / `CAPABILITY_PILOT_CG`, TLS PostgreSQL, `NODE_TLS_REJECT_UNAUTHORIZED`, assistant virtuel ;
+puis, depuis l'hôte, l'état de l'allowlist nginx des callbacks et la couleur API active. Aucun secret n'est affiché.
+Code de sortie 1 tant qu'il reste un KO. Le même contrôle tourne en CI sur un environnement synthétique complet.
+
+### 6.2 Reste à faire, dans l'ordre
+
+| # | Action | Qui | Référence |
+|---|---|---|---|
+| 1 | Renseigner les identifiants de production MTN (collection + disbursement) et Airtel (collection, disbursement, secret de webhook) dans `backend/.env` avec `rotate-secrets.sh set`, puis `rotate-secrets.sh mtn-token` | admin serveur | § 1.4 |
+| 2 | `./scripts/check-go-live-cg.sh` : plus aucun KO (les AVERT « sandbox » restent attendus à ce stade) | admin serveur | § 6.1 |
+| 3 | Déclarer les URL de callback chez MTN et Airtel, obtenir les plages d'adresses, activer l'allowlist (`default 1`) | partenaire + admin | § 3.1 |
+| 4 | Tests sandbox de bout en bout (encaissement, callback, callback coupé + `reconcile-pending.js`) | admin serveur | § 3.2 |
+| 5 | `MTN_ENV=production`, `AIRTEL_CG_ENV=production`, `CAPABILITY_PILOT_CG=true`, `CAPABILITY_ENFORCE=report`, redéploiement sans coupure, `check-go-live-cg.sh` sans KO ni AVERT « sandbox » | admin serveur | § 3.3 |
+| 6 | Pilote réel sur marchand interne (grille § 3.4), 48 h sans anomalie, puis `CAPABILITY_ENFORCE=enforce` | ops + finance | § 3.4 |
+| 7 | Confirmation écrite d'Airtel sur le préfixe 04, puis `verified:true` dans `detection.engine.js` (PR) | partenaire + dev | OPERATEURS-A-CONFIRMER § 1 |
+| 8 | Compte de collecte XAF, contrats, tarifs publiés, KYB pilotes, textes légaux | direction | § 5 |
+| 9 | Ouverture à 5 marchands réels pendant 2 à 4 semaines, puis ouverture commerciale (retrait de `CAPABILITY_PILOT_CG`) | direction | § 3.4 |
