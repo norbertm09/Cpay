@@ -649,6 +649,8 @@ jobs:
         run: bash scripts/tests/env-lib.test.sh
       - name: rotate-secrets.sh (lot 0, rotation sur un .env temporaire, _PREVIOUS, --clear-previous, ecriture atomique)
         run: bash scripts/tests/rotate-secrets.test.sh
+      - name: check-backlog-hote.sh (etat du backlog serveur sur une arborescence simulee, aucun secret affiche)
+        run: bash scripts/tests/check-backlog-hote.test.sh
       - name: Syntaxe des scripts shell
         run: |
           for f in scripts/*.sh docker/api-entrypoint.sh; do
