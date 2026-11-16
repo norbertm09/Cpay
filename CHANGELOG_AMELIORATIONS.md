@@ -1,5 +1,13 @@
 # Changelog - ameliorations integrees
 
+## 2.7.3-backlog-hote (2026-11-16) — etat du backlog serveur en une commande
+* `scripts/check-backlog-hote.sh` : tableau OK / KO / AVERT / INFO des points encore ouverts sur l'hote (lot 0 : TLS et
+  CA, rotations en cours, acces git SSH, visibilite du depot, GHCR ; supervision : role exporter, Prometheus,
+  Alertmanager, Grafana ; hote : cle root, utilisateur deploy, PermitRootLogin, sauvegarde distante et fraicheur,
+  vhost nginx, allowlist des callbacks ; assistant) avec la commande a lancer pour chacun ; `--db` (2FA des admins),
+  `--go-live` (enchaine check-go-live-cg.sh). Lecture seule, aucun secret affiche. Test sur arborescence simulee en CI.
+* EXPLOITATION § 8.
+
 ## 2.7.3-go-live-cg (2026-11-14) — finalisation Congo-Brazzaville et activation de l'assistant virtuel
 * `backend/scripts/check-go-live-cg.js` + `scripts/check-go-live-cg.sh` : go / no-go du lancement CG (environnement MTN
   resolu, identifiants collection / disbursement, jeton et URL de callback MTN coherents, Airtel, segment secret et
