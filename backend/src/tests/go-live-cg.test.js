@@ -18,8 +18,11 @@ const FULL = {
   AIRTEL_CG_COLL_CLIENT_ID: 'id', AIRTEL_CG_COLL_CLIENT_SECRET: 'sec', AIRTEL_CG_DISB_CLIENT_ID: 'id', AIRTEL_CG_DISB_CLIENT_SECRET: 'sec',
   AIRTEL_WEBHOOK_SECRET: 'ws', WEBHOOK_PATH_SECRET: 'segment',
   CAPABILITY_ENFORCE: 'enforce', CAPABILITY_FUNDING_XAF: 'true',
-  DB_SSL: 'true', ANTHROPIC_API_KEY: 'sk-ant-xxxx',
+  DB_SSL: 'true', DB_SSL_CA_FILE: require('path').join(__dirname, 'fixtures-go-live-ca.pem'), ANTHROPIC_API_KEY: 'sk-ant-xxxx',
 };
+const fs = require('fs');
+beforeAll(() => fs.writeFileSync(FULL.DB_SSL_CA_FILE, '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n'));
+afterAll(() => { try { fs.unlinkSync(FULL.DB_SSL_CA_FILE); } catch { /* deja retire */ } });
 const byKey = (r, k) => r.checks.filter((c) => c.key === k);
 const level = (r, k) => byKey(r, k).map((c) => c.level);
 
@@ -47,6 +50,14 @@ test('environnement de la 2.7.1 (sandbox, TLS non vérifié, pas de jeton) : KO 
   expect(level(r, 'cap_enforce')).toEqual(['ko']);
   expect(level(r, 'assistant')).toEqual(['warn']);
   expect(byKey(r, 'db_tls')[0].ref).toBe('LOT-0 § 4');
+});
+
+test('TLS PostgreSQL : magasin système seul → avertissement (certificat OVH auto-signé) ; CA illisible → KO', () => {
+  const r1 = runChecks({ ...FULL, DB_SSL_CA_FILE: '' }, { facts: null });
+  expect(level(r1, 'db_tls')).toEqual(['warn']);
+  expect(byKey(r1, 'db_tls')[0].detail).toMatch(/auto-signé/);
+  const r2 = runChecks({ ...FULL, DB_SSL_CA_FILE: '/nonexistent/ca.pem' }, { facts: null });
+  expect(level(r2, 'db_tls')).toEqual(['ko']);
 });
 
 test('URL de callback MTN : jeton différent, mauvais chemin, mauvais hôte → KO détaillé', () => {

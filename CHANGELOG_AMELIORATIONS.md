@@ -1,5 +1,14 @@
 # Changelog - ameliorations integrees
 
+## 2.7.3-deploy-db-preflight (2026-11-18) — connexion PostgreSQL testee avant sauvegarde et migrations
+* Incident du 18 novembre : DB_SSL_CA_FILE renseigne sans fichier sur l'hote + retrait de DB_SSL_REJECT_UNAUTHORIZED ->
+  le certificat de l'instance OVH Cloud DB est AUTO-SIGNE (DEPTH_ZERO_SELF_SIGNED_CERT), les migrations ont echoue
+  apres la sauvegarde ; conteneurs en service inchanges. `deploy.sh` : refus net si DB_SSL_CA_FILE est renseigne sans
+  fichier ; etape 3 bis « connexion PostgreSQL avec le .env a deployer » (SELECT 1 dans l'image API) avec diagnostic
+  par code d'erreur (CA, nom du certificat, mot de passe, port, IP autorisee) avant toute sauvegarde ou migration.
+* Documentation corrigee (database.js, WAVE-6-LOT2, LOT-0 § 4) : la CA de l'instance est obligatoire, le magasin
+  systeme ne suffit pas ; `check-go-live-cg.js` passe ce cas en avertissement explicite (test).
+
 ## 2.7.3-compose-run-tag (2026-11-18) — les controles hors deploiement reutilisent l'image en service
 * `check-go-live-cg.sh`, `check-backlog-hote.sh --db` et `rotate-secrets.sh db-password` lancaient `docker compose run`
   sans `CPLUS_TAG` : compose retombait sur le tag `<VERSION>` absent et reconstruisait l'image API sur le VPS (vu le

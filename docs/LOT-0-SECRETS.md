@@ -86,6 +86,11 @@ history -c
 
 ## 4. Certificat CA PostgreSQL (fin du mode `DB_SSL_REJECT_UNAUTHORIZED=false`) — 10 minutes
 
+Le certificat de l'instance OVH est **auto-signé** (vérifié le 18 novembre 2026 : sans CA, `DEPTH_ZERO_SELF_SIGNED_CERT`
+et l'API ne se connecte plus). Déposer la CA **avant** de retirer `DB_SSL_REJECT_UNAUTHORIZED` ; `deploy.sh` refuse
+désormais de continuer si `DB_SSL_CA_FILE` est renseigné sans fichier, et teste la connexion PostgreSQL avec le `.env` à
+déployer avant toute sauvegarde ou migration.
+
 1. Manager OVH → instance PostgreSQL → Informations générales → **Certificat CA** → télécharger (PEM).
 2. Serveur : déposer le fichier en `/etc/cplus/postgres-ca.pem` (`root:root`, `644` : il ne contient que la partie
    publique). `openssl x509 -in /etc/cplus/postgres-ca.pem -noout -subject -enddate` doit répondre.
