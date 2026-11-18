@@ -68,3 +68,16 @@ remove_env_var() {
   tmp="$(_env_tmp "$file")" || return 1
   NAME="$name" awk 'BEGIN { re = "^[[:space:]]*(export[[:space:]]+)?" ENVIRON["NAME"] "=" } $0 ~ re { next } { print }' "$file" > "$tmp" && mv -f "$tmp" "$file"
 }
+# cpay_export_deployed_tag [racine] : exporte CPLUS_TAG = <VERSION>-<sha12 du commit deploye> (.deployed ecrit par
+# deploy.sh) pour qu'un `docker compose run` hors deploiement reutilise l'image en service au lieu d'en reconstruire une
+# (compose retombe sinon sur le tag par defaut <VERSION>, absent, et lance un build). Sans .deployed : CPLUS_TAG inchange.
+cpay_export_deployed_tag() {
+  local root="${1:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}" sha version
+  [ -n "${CPLUS_TAG:-}" ] && return 0
+  [ -f "$root/.deployed" ] && [ -f "$root/VERSION" ] || return 0
+  sha="$(sed -n 's/^current \([0-9a-f]\{7,40\}\).*/\1/p' "$root/.deployed" | head -1)"
+  version="$(tr -d '[:space:]' < "$root/VERSION")"
+  [ -n "$sha" ] && [ -n "$version" ] || return 0
+  sha="$(git -C "$root" rev-parse --short=12 "$sha" 2>/dev/null || printf '%s' "${sha:0:12}")"
+  export CPLUS_TAG="$version-$sha"
+}

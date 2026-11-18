@@ -53,6 +53,12 @@ remove_env_var "$F" DB_PORT || fail=1
 grep -q 'DB_PORT=' "$F" && { echo "FAIL remove_env_var"; fail=1; } || echo "ok   remove_env_var"
 [ "$(stat -c %a "$F")" = "640" ] && echo "ok   droits conserves (640)" || { echo "FAIL droits : $(stat -c %a "$F")"; fail=1; }
 check DB_HOST 'db.example.net'
+# --- cpay_export_deployed_tag : tag de l'image deployee (VERSION + sha12 de .deployed), sans depot git
+R="$(mktemp -d)"; printf '2.7.2\n' > "$R/VERSION"; printf 'current 9201056dff6305420ab2f3517a66adc41c88ec93 v2.7.2-3-g9201056 2026-11-16T13:39:00Z\nprevious 171476b725d8db55838ab6bc92441e9992702af2\n' > "$R/.deployed"
+( unset CPLUS_TAG; cpay_export_deployed_tag "$R"; [ "${CPLUS_TAG:-}" = "2.7.2-9201056dff63" ] ) && echo "ok   cpay_export_deployed_tag" || { echo "FAIL cpay_export_deployed_tag : [$(unset CPLUS_TAG; cpay_export_deployed_tag "$R"; echo "${CPLUS_TAG:-}")]"; fail=1; }
+( CPLUS_TAG=deja; cpay_export_deployed_tag "$R"; [ "$CPLUS_TAG" = deja ] ) && echo "ok   cpay_export_deployed_tag : CPLUS_TAG existant conserve" || { echo "FAIL CPLUS_TAG ecrase"; fail=1; }
+( unset CPLUS_TAG; cpay_export_deployed_tag "$R/absent"; [ -z "${CPLUS_TAG:-}" ] ) && echo "ok   cpay_export_deployed_tag : sans .deployed, inchange" || { echo "FAIL sans .deployed"; fail=1; }
+rm -rf "$R"
 # le fichier n'a jamais été exécuté
 [ -d / ] && echo "ok   aucune commande executee"
 exit $fail

@@ -143,7 +143,8 @@ cmd_db_password() {
         psql -h "$host" -p "${port:-5432}" -U "$user" -d "$name" -tAc 'select 1' >/dev/null 2>&1 \
         || die "connexion refusee avec le nouveau mot de passe : verifier la reinitialisation cote OVH (backend/.env inchange)"
     else
-      (cd "$ROOT/docker" && docker compose run --rm --no-deps -T -e RUN_MIGRATIONS=false -e DB_PASSWORD="$pw" api-blue \
+      cpay_export_deployed_tag "$ROOT"
+      (cd "$ROOT/docker" && docker compose run --rm --no-deps --no-build -T -e RUN_MIGRATIONS=false -e DB_PASSWORD="$pw" api-blue \
         node -e "require('./src/config/database').query('select 1').then(()=>process.exit(0)).catch((e)=>{console.error(e.message);process.exit(1)})") \
         >/dev/null 2>&1 || die "connexion refusee avec le nouveau mot de passe (test via l'image API) : verifier la reinitialisation cote OVH (backend/.env inchange)"
     fi
