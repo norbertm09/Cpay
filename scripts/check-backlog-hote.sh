@@ -122,7 +122,8 @@ fi
 
 if [ "$WITH_DB" = true ]; then
   echo
-  out="$(cd "$ROOT/docker" && docker compose run --rm --no-deps -T -e RUN_MIGRATIONS=false api-blue node -e "
+  cpay_export_deployed_tag "$ROOT"
+  out="$(cd "$ROOT/docker" && docker compose run --rm --no-deps --no-build -T -e RUN_MIGRATIONS=false api-blue node -e "
     const { query, pool } = require('./src/config/database');
     query(\"SELECT email, role, mfa_enabled FROM admin_users WHERE is_active = TRUE ORDER BY role, email\").then(r => {
       for (const a of r.rows) console.log((a.mfa_enabled ? 'OK   ' : 'AVERT') + ' 2FA admin ' + a.email + ' (' + a.role + ') : ' + (a.mfa_enabled ? 'activee' : 'NON activee -> Mon compte > Securite > Activer la double authentification'));

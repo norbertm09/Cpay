@@ -11,11 +11,14 @@
 # ============================================================================
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+# shellcheck source=lib/env.sh
+. "$ROOT/scripts/lib/env.sh"
+cpay_export_deployed_tag "$ROOT"   # image en service (CPLUS_TAG), jamais de reconstruction ici
 cd "$ROOT/docker"
 PG_CA="${CPAY_PG_CA_FILE:-/etc/cplus/postgres-ca.pem}"; [ -s "$PG_CA" ] && export CPAY_PG_CA_FILE="$PG_CA" || unset CPAY_PG_CA_FILE
-docker compose run --rm --no-deps -T -e RUN_MIGRATIONS=false \
-  -v "$ROOT/backend/scripts:/app/scripts:ro" api-blue node scripts/check-go-live-cg.js "$@"
-rc=$?
+rc=0
+docker compose run --rm --no-deps --no-build -T -e RUN_MIGRATIONS=false \
+  -v "$ROOT/backend/scripts:/app/scripts:ro" api-blue node scripts/check-go-live-cg.js "$@" || rc=$?
 AL=/etc/nginx/snippets/cpay-webhook-allowlist.conf
 if [ -r "$AL" ]; then
   if grep -qE '^\s*default\s+1\s*;' "$AL"; then echo "OK    Allowlist nginx des callbacks : active (default 1)"

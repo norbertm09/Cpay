@@ -1,5 +1,11 @@
 # Changelog - ameliorations integrees
 
+## 2.7.3-compose-run-tag (2026-11-18) — les controles hors deploiement reutilisent l'image en service
+* `check-go-live-cg.sh`, `check-backlog-hote.sh --db` et `rotate-secrets.sh db-password` lancaient `docker compose run`
+  sans `CPLUS_TAG` : compose retombait sur le tag `<VERSION>` absent et reconstruisait l'image API sur le VPS (vu le
+  18 novembre). `lib/env.sh` : `cpay_export_deployed_tag` (VERSION + sha12 de `.deployed`) ; `--no-build` partout
+  (echec explicite plutot qu'une reconstruction silencieuse) ; test dans `env-lib.test.sh`.
+
 ## 2.7.3-backlog-hote (2026-11-16) — etat du backlog serveur en une commande
 * `scripts/check-backlog-hote.sh` : tableau OK / KO / AVERT / INFO des points encore ouverts sur l'hote (lot 0 : TLS et
   CA, rotations en cours, acces git SSH, visibilite du depot, GHCR ; supervision : role exporter, Prometheus,
