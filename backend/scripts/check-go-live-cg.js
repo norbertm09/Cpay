@@ -128,7 +128,7 @@ function runChecks(env = process.env, opts = {}) {
       let readable = false; try { readable = /-----BEGIN CERTIFICATE-----/.test(fs.readFileSync(env.DB_SSL_CA_FILE, 'utf8')); } catch { readable = false; }
       if (readable) ok('db_tls', 'TLS PostgreSQL', `vérifié avec la CA ${env.DB_SSL_CA_FILE}`, 'LOT-0 § 4');
       else ko('db_tls', 'TLS PostgreSQL', `DB_SSL_CA_FILE=${env.DB_SSL_CA_FILE} illisible ou sans certificat PEM`, 'LOT-0 § 4');
-    } else ok('db_tls', 'TLS PostgreSQL', 'vérifié avec le magasin système (déposer la CA OVH pour un contrôle strict)', 'LOT-0 § 4');
+    } else warn('db_tls', 'TLS PostgreSQL', 'magasin système seul : le certificat OVH Cloud DB est auto-signé, la connexion échouera — déposer la CA et DB_SSL_CA_FILE', 'LOT-0 § 4');
   } else if (isTrue(env.DB_SSL)) ko('db_tls', 'TLS PostgreSQL', 'DB_SSL_REJECT_UNAUTHORIZED=false : certificat serveur non vérifié', 'LOT-0 § 4');
   else ko('db_tls', 'TLS PostgreSQL', 'DB_SSL absent ou false', 'LOT-0 § 4');
   if (String(env.NODE_TLS_REJECT_UNAUTHORIZED || '') === '0') ko('node_tls', 'NODE_TLS_REJECT_UNAUTHORIZED', '0 : toute vérification TLS désactivée — à supprimer', '§ 1.4');

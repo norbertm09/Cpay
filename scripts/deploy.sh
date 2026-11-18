@@ -345,12 +345,32 @@ PG_CA_HOST="${CPAY_PG_CA_FILE:-/etc/cplus/postgres-ca.pem}"
 if [ -s "$PG_CA_HOST" ]; then export CPAY_PG_CA_FILE="$PG_CA_HOST"; log "CA PostgreSQL : $PG_CA_HOST montee dans l'API"
 else
   unset CPAY_PG_CA_FILE
-  [ -n "$(read_env_value "$ROOT/backend/.env" DB_SSL_CA_FILE)" ] && warn "DB_SSL_CA_FILE est renseigne dans backend/.env mais $PG_CA_HOST est absent de l'hote : l'API verifiera le certificat avec le magasin systeme (docs/LOT-0-SECRETS.md § 4)"
+  # 2026-11-18 : le certificat de l'instance OVH Cloud DB est AUTO-SIGNE — sans la CA, l'API ne se connecte plus
+  # (DEPTH_ZERO_SELF_SIGNED_CERT) ; on s'arrete ici plutot qu'apres la sauvegarde, aux migrations.
+  [ -n "$(read_env_value "$ROOT/backend/.env" DB_SSL_CA_FILE)" ] && die "DB_SSL_CA_FILE est renseigne dans backend/.env mais $PG_CA_HOST est absent de l'hote : deposer le certificat CA de l'instance (manager OVH) a cet emplacement, ou retirer DB_SSL_CA_FILE (docs/LOT-0-SECRETS.md § 4)"
 fi
 log "Verification de backend/.env (check-production-env.js)…"
 compose run --rm --no-deps -T -e RUN_MIGRATIONS=false \
   -v "$ROOT/backend/scripts:/app/scripts:ro" api-blue node scripts/check-production-env.js \
   || die "Variables d'environnement production incompletes"
+# ─── 3 bis. Connexion PostgreSQL avec la configuration qui sera deployee (avant sauvegarde et migrations) ───
+log "Connexion PostgreSQL (TLS, identifiants) avec le .env a deployer…"
+compose run --rm --no-deps -T -e RUN_MIGRATIONS=false api-blue node -e '
+  const { query, pool } = require("./src/config/database");
+  query("SELECT 1").then(() => { console.log("connexion PostgreSQL OK"); return pool.end(); }).then(() => process.exit(0)).catch((e) => {
+    const hints = {
+      DEPTH_ZERO_SELF_SIGNED_CERT: "certificat auto-signe : deposer la CA de l instance en /etc/cplus/postgres-ca.pem et DB_SSL_CA_FILE=/etc/cplus/postgres-ca.pem (LOT-0 § 4)",
+      SELF_SIGNED_CERT_IN_CHAIN: "chaine auto-signee : deposer la CA de l instance (LOT-0 § 4)",
+      UNABLE_TO_VERIFY_LEAF_SIGNATURE: "CA inconnue : verifier DB_SSL_CA_FILE (LOT-0 § 4)",
+      ERR_TLS_CERT_ALTNAME_INVALID: "nom du certificat different de DB_HOST : DB_SSL_SERVERNAME",
+      "28P01": "mot de passe refuse : ./scripts/rotate-secrets.sh db-password (apres reinitialisation OVH)",
+      ECONNREFUSED: "port ferme : DB_HOST/DB_PORT, IP du serveur autorisee sur l instance OVH ?",
+      ETIMEDOUT: "delai depasse : IP du serveur autorisee sur l instance OVH ?",
+    };
+    console.error("connexion PostgreSQL IMPOSSIBLE : " + (e.code || "") + " " + e.message + (hints[e.code] ? " -> " + hints[e.code] : ""));
+    process.exit(1);
+  });
+' || die "La base n'est pas joignable avec ce backend/.env : rien n'a ete modifie (conteneurs en service inchanges). Corriger puis relancer ; copie de secours : backend/.env.bak-*"
 
 # ─── 4. Sauvegarde PostgreSQL ───────────────────────────────────
 if [ "$SKIP_BACKUP" = false ]; then

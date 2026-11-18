@@ -119,7 +119,8 @@ jobs:
       - name: Go / no-go Congo-Brazzaville (scripts/check-go-live-cg.js, environnement synthetique complet puis incomplet)
         run: |
           set -e
-          FULL="API_BASE_URL=https://api.c-pay.global MTN_ENV=production MTN_CG_COLL_API_USER=u MTN_CG_COLL_API_KEY=k MTN_CG_COLL_SUB_KEY_PRIMARY=s MTN_CG_DISB_API_USER=u MTN_CG_DISB_API_KEY=k MTN_CG_DISB_SUB_KEY_PRIMARY=s MTN_WEBHOOK_TOKEN=tok MTN_CG_CALLBACK_URL=https://api.c-pay.global/api/v1/webhooks/mtn?token=tok AIRTEL_CG_ENV=production AIRTEL_CG_COLL_CLIENT_ID=i AIRTEL_CG_COLL_CLIENT_SECRET=s AIRTEL_CG_DISB_CLIENT_ID=i AIRTEL_CG_DISB_CLIENT_SECRET=s AIRTEL_WEBHOOK_SECRET=w WEBHOOK_PATH_SECRET=seg DB_SSL=true CAPABILITY_FUNDING_XAF=true ANTHROPIC_API_KEY=sk-ant-ci"
+          FULL="API_BASE_URL=https://api.c-pay.global MTN_ENV=production MTN_CG_COLL_API_USER=u MTN_CG_COLL_API_KEY=k MTN_CG_COLL_SUB_KEY_PRIMARY=s MTN_CG_DISB_API_USER=u MTN_CG_DISB_API_KEY=k MTN_CG_DISB_SUB_KEY_PRIMARY=s MTN_WEBHOOK_TOKEN=tok MTN_CG_CALLBACK_URL=https://api.c-pay.global/api/v1/webhooks/mtn?token=tok AIRTEL_CG_ENV=production AIRTEL_CG_COLL_CLIENT_ID=i AIRTEL_CG_COLL_CLIENT_SECRET=s AIRTEL_CG_DISB_CLIENT_ID=i AIRTEL_CG_DISB_CLIENT_SECRET=s AIRTEL_WEBHOOK_SECRET=w WEBHOOK_PATH_SECRET=seg DB_SSL=true DB_SSL_CA_FILE=$RUNNER_TEMP/ci-ca.pem CAPABILITY_FUNDING_XAF=true ANTHROPIC_API_KEY=sk-ant-ci"
+          printf -- '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n' > "$RUNNER_TEMP/ci-ca.pem"
           env $FULL node scripts/check-go-live-cg.js --no-db | tee /tmp/golive.txt
           grep -q '^Prêt' /tmp/golive.txt
           ! grep -q 'sk-ant-ci\|token=tok' /tmp/golive.txt          # aucun secret dans la sortie

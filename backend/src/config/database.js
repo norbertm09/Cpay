@@ -9,7 +9,8 @@ const intFromEnv = (name, fallback) => {
 
 /**
  * TLS PostgreSQL — vague 6, lot 2 (audit 2026-10-17, P2 n°6) : le certificat du serveur est VÉRIFIÉ.
- *   DB_SSL=true                      → { rejectUnauthorized: true } (magasin système : OVH Cloud DB = CA publique)
+ *   DB_SSL=true                      → { rejectUnauthorized: true } (magasin système — INSUFFISANT pour OVH Cloud DB :
+ *                                      certificat auto-signé constaté le 2026-11-18, fournir DB_SSL_CA_FILE)
  *   DB_SSL_CA (PEM) / DB_SSL_CA_FILE → idem avec cette CA (export « certificat CA » du manager OVH)
  *   DB_SSL_REJECT_UNAUTHORIZED=false → ancien mode NON SÛR (certificat non vérifié) : avertissement au démarrage
  *   DB_SSL_SERVERNAME                → nom attendu dans le certificat si DB_HOST est une IP / un alias

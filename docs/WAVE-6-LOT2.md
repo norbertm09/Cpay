@@ -147,7 +147,7 @@ Endpoints :
 | Variables | Résultat | Mode journalisé |
 |---|---|---|
 | `DB_SSL` absent / `false` | pas de TLS | `off` |
-| `DB_SSL=true` | `{ rejectUnauthorized:true }` — chaîne vérifiée avec le **magasin système** (les certificats OVH Cloud DB sont émis par une CA publique) | `verify-system` |
+| `DB_SSL=true` | `{ rejectUnauthorized:true }` — chaîne vérifiée avec le **magasin système** — insuffisant pour OVH Cloud DB (certificat auto-signé constaté le 18 novembre 2026 : `DEPTH_ZERO_SELF_SIGNED_CERT`), fournir la CA | `verify-system` |
 | `DB_SSL=true` + `DB_SSL_CA` (PEM, `\n` échappés acceptés) ou `DB_SSL_CA_FILE` (chemin) | `{ ca, rejectUnauthorized:true }` | `verify-ca` |
 | `DB_SSL_SERVERNAME` | nom attendu dans le certificat (si `DB_HOST` est une IP ou un alias) | — |
 | `DB_SSL=true` + `DB_SSL_REJECT_UNAUTHORIZED=false` | **ancien mode non sûr**, `logger.warn` au démarrage + avertissement `validateEnv` (`postgresTls`) | `insecure` |
